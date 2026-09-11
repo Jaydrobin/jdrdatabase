@@ -309,7 +309,7 @@
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
       <button class="btn secondary" id="btnTestSet">🔍 원인 추적용 시험 파일 세트</button>
-      <button class="btn secondary" id="btnMatrixSet">📏 행 글자 수 한계 찾기 세트</button>
+      <button class="btn secondary" id="btnMatrixSet">📏 셀 글자 수 한계 찾기 세트</button>
     </div>
     <p style="font-size: 0.85rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.6;">
       <strong style="color: var(--accent);">통과 설정으로 전체 변환</strong> 버튼은 <strong>셀 안 줄바꿈을 공백으로 바꾸고, 한 행을 2,000자로 제한하고, 넘는 글자를 다음 행으로 이어붙이는</strong> 설정을 전체 데이터에 겁니다.
@@ -340,18 +340,14 @@
         한 행이 커지면 그 행이 통째로 건너뛰어지고, 남는 행이 없으면 제목으로 쓸 열도 없어져 그 메시지가 뜹니다.
       </p>
       <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        <strong>행 글자 수 한계 찾기 세트</strong>는 줄바꿈을 모두 없앤 뒤 한 행을 1,000자, 2,000자, 5,000자, 10,000자로 맞춘 파일과,
-        2,000자 파일에서 <strong>제목만 서로 다르게 바꾼</strong> 파일 하나를 뽑습니다. 열 개수와 행 수는 다섯 파일이 모두 같습니다.
+        <strong>셀 글자 수 한계 찾기 세트</strong>는 줄바꿈을 없앤 뒤 셀 하나를 200자, 500자, 1,000자, 2,000자, 4,000자로 자른 파일과 자르지 않은 파일을 뽑습니다.
+        열 개수와 행 수는 모든 파일이 같고, 바뀌는 것은 셀 하나의 글자 수뿐입니다. <strong>current_</strong> 파일만 위 설정을 그대로 따릅니다.
       </p>
       <ul style="margin: 10px 0 0 20px; line-height: 1.7; color: var(--text-sub); font-size: 0.85rem;">
-        <li><strong>row1000, row2000, row5000, row10000:</strong> 각 파일이 스스로 정한 크기로 잘려 있습니다. 위 <strong>행 하나의 최대 글자 수</strong> 설정은 이 네 파일에 적용되지 않습니다. 설정을 바꿔 가며 비교하려고 만든 파일이기 때문입니다.</li>
-        <li><strong>row2000_uniqueTitle:</strong> row2000과 내용이 같고 제목만 서로 다릅니다. 두 파일이 같게 보이면 제목 중복은 원인이 아닙니다.</li>
-        <li><strong>current_…:</strong> 지금 설정을 그대로 적용한 파일입니다. 이 파일만 위 설정을 따릅니다. 설정을 바꾼 결과를 시험하려면 이 파일을 쓰세요.</li>
+        <li><strong>미리보기로 판단하지 마세요.</strong> 미리보기에 보이는 행 수는 노션이 고른 표본입니다. 가져오기를 끝까지 진행한 뒤, 만들어진 페이지 수와 셀 내용을 보세요.</li>
+        <li><strong>가져오기가 되는 가장 큰 값</strong>을 찾으면, 그 값을 열 수로 곱한 값을 <strong>행 하나의 최대 글자 수</strong>에 넣으세요. 셀 하나가 그 길이를 넘지 않게 됩니다.</li>
+        <li>이 시험 파일들은 잘라서 만든 것이라 내용이 남지 않습니다. 실제 변환에서는 잘라내지 않고 넘치는 글자를 다음 행이 이어받습니다.</li>
       </ul>
-      <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        미리보기에 보이는 행 수는 노션이 보여 주는 표본일 수 있습니다. 10행짜리 파일에서 5행만 보인다고 5행만 들어가는 것은 아닙니다.
-        판단은 <strong>실제로 가져오기를 끝낸 뒤 만들어진 페이지 수</strong>로 하세요. 10개가 만들어졌다면 그 설정은 통과한 것입니다.
-      </p>
     </details>
     <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
     <p style="font-size: 0.82rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.5;">
@@ -1471,29 +1467,23 @@
     ];
   }
 
-  // 줄바꿈을 모두 없앤 뒤 한 행이 담는 글자 수만 바꾼 파일들.
-  // 미리보기에서 사라지는 단위가 행이므로, 재야 할 값도 셀이 아니라 행이다.
-  // 통과하는 가장 큰 값을 찾으면 늘어나는 행을 그만큼 줄일 수 있다.
+  // 줄바꿈을 모두 없앤 뒤 셀 하나에 담기는 글자 수만 바꾼 파일들.
+  // 미리보기가 아니라 실제 가져오기 결과로 판단해야 하므로, 재는 값도 한 번에 하나만 바꾼다.
   function buildMatrixSet() {
     if (preLimitRows.length < 2) return [];
     const headers = preLimitRows[0];
     const head10 = preLimitRows.slice(1, 11);
-    const cut = budget => {
-      const per = Math.max(20, Math.floor(budget / Math.max(1, headers.length)));
-      return head10.map(row => row.map(v => flattenValue(v).slice(0, per)));
-    };
-    // 대조군은 원본 제목 그대로 둔다. 번호가 붙은 제목을 쓰면 비교가 되지 않는다.
-    const withOriginalTitle = rows => rows.map((row, i) =>
-      [originalTitles[i] !== undefined ? originalTitles[i] : row[0]].concat(row.slice(1)));
-    const files = [1000, 2000, 5000, 10000].map(budget => ({
-      name: 'row' + budget,
-      rows: [headers].concat(withOriginalTitle(cut(budget)))
-    }));
-    // row2000과 내용이 같고 제목만 서로 다른 파일. 둘을 견주면 제목 중복이 원인인지 갈린다.
-    files.push({
-      name: 'row2000_uniqueTitle',
-      rows: [headers].concat(withOriginalTitle(cut(2000)).map((row, i) => [row[0] + ' ' + (i + 1)].concat(row.slice(1))))
+    // 셀 하나에 담기는 글자 수만 바꾼다. 열 수와 행 수는 모두 같다.
+    const cut = per => head10.map((row, i) => {
+      const out = row.map(v => (per ? flattenValue(v).slice(0, per) : flattenValue(v)));
+      out[0] = originalTitles[i] !== undefined ? originalTitles[i] : out[0];
+      return out;
     });
+    const files = [200, 500, 1000, 2000, 4000].map(per => ({
+      name: 'cell' + per,
+      rows: [headers].concat(cut(per))
+    }));
+    files.push({ name: 'cellfull', rows: [headers].concat(cut(0)) });
     // 지금 설정을 그대로 적용한 파일. 실제로 내려받을 파일과 같은 모양이라 설정을 바로 시험할 수 있다.
     if (cleanedRows.length > 1) {
       files.push({
