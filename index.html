@@ -238,6 +238,8 @@
           <option value="2000">2,000자 (기본)</option>
           <option value="1000">1,000자</option>
           <option value="500">500자</option>
+          <option value="200">200자</option>
+          <option value="100">100자 (C 방식)</option>
           <option value="4000">4,000자</option>
           <option value="8000">8,000자</option>
           <option value="0">제한 없음</option>
@@ -303,11 +305,17 @@
     <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
       <button class="btn" id="btnDownload">단일 CSV 다운로드</button>
       <button class="btn warning" id="btnSplitDownload" style="display: none;">📦 노션 규격 분할 다운로드</button>
+      <button class="btn" id="btnApplyC">✅ C 방식 적용</button>
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
       <button class="btn secondary" id="btnTestSet">🔍 원인 추적용 시험 파일 세트</button>
-      <button class="btn secondary" id="btnLengthSet">📏 셀 길이 임계값 찾기 세트</button>
+      <button class="btn secondary" id="btnMatrixSet">🧪 줄바꿈·길이 교차 시험 세트</button>
     </div>
+    <p style="font-size: 0.85rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.6;">
+      <strong style="color: var(--accent);">C 방식 적용</strong> 버튼은 시험 파일 C와 똑같은 조건, 곧 <strong>셀 안 줄바꿈을 모두 공백으로 바꾸고 셀을 100자로 자르는</strong> 설정을 전체 데이터에 겁니다.
+      C가 정상적으로 들어갔다면 이 설정으로 만든 파일도 들어갑니다. 100자를 넘는 글은 버려지므로, 어디까지 늘릴 수 있는지는
+      <strong>줄바꿈·길이 교차 시험 세트</strong>로 확인한 뒤 위 설정을 올려 잡으세요.
+    </p>
 
     <details class="diag" id="testSetGuide">
       <summary>원인 추적용 시험 파일 세트 읽는 법</summary>
@@ -327,9 +335,15 @@
         B와 D에 열이 3개만 보이는 것은 정상입니다. 열 개수를 변수에서 빼기 위해 일부러 앞 3열만 담은 파일입니다.
       </p>
       <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        원인이 셀 길이로 좁혀졌다면 <strong>셀 길이 임계값 찾기 세트</strong>를 누르세요. 셀을 각각 500자, 1,000자, 2,000자, 4,000자, 8,000자로만 자른 파일 5개가 내려옵니다.
-        올려 보고 통과하는 가장 큰 값을 위 <strong>셀 하나의 최대 길이</strong>에 넣으면, 그 길이에 맞춰 전체 데이터를 변환합니다.
+        C는 <strong>줄바꿈 제거</strong>와 <strong>100자로 자르기</strong>가 한꺼번에 걸린 파일이라, C만으로는 둘 중 어느 쪽이 원인인지 갈리지 않습니다.
+        <strong>줄바꿈·길이 교차 시험 세트</strong>가 그것을 떼어 놓습니다.
       </p>
+      <ul style="margin: 10px 0 0 20px; line-height: 1.7; color: var(--text-sub); font-size: 0.85rem;">
+        <li><strong>N1 (줄바꿈 제거, 길이 그대로):</strong> 성공하면 원인은 <strong>줄바꿈뿐</strong>입니다. 길이는 건드릴 필요가 없습니다.</li>
+        <li><strong>N2 (줄바꿈 유지, 100자):</strong> 성공하면 원인은 <strong>길이뿐</strong>입니다.</li>
+        <li><strong>N3, N4 (줄바꿈 제거, 2,000자와 8,000자):</strong> N1이 실패했을 때 어디까지 허용되는지 봅니다.</li>
+        <li>통과한 조건을 위 <strong>셀 안 줄바꿈</strong>과 <strong>셀 하나의 최대 길이</strong>에 그대로 넣으면 전체 데이터가 같은 조건으로 변환됩니다.</li>
+      </ul>
     </details>
     <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
     <p style="font-size: 0.82rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.5;">
@@ -799,8 +813,9 @@
           multilines++;
           text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
           if (trimEmptyLines) text = text.replace(/\n{3,}/g, '\n\n');
-          if (flattenCells) text = flattenValue(text);
         }
+        // 공백 치환은 모든 셀에 건다. 줄바꿈이 있는 셀만 고르면 셀마다 공백 처리가 달라진다.
+        if (flattenCells) text = flattenValue(text);
         row.push(text);
       }
       body.push(row);
@@ -1263,6 +1278,14 @@
   document.getElementById('optSynthTitle').addEventListener('change', () => { synthTitleTouched = true; runClean(); });
   document.getElementById('btnReapply').addEventListener('click', runClean);
 
+  // 시험 파일 C와 똑같은 조건을 전체 데이터에 건다. 줄바꿈을 공백으로 바꾸고 셀을 100자로 자른다.
+  document.getElementById('btnApplyC').addEventListener('click', () => {
+    newlineSelect.value = 'space';
+    document.getElementById('cellLimitSelect').value = '100';
+    document.getElementById('cellOverflowSelect').value = 'truncate';
+    runClean();
+  });
+
   // 변환 결과가 원인인지 매핑 화면이 원인인지 가르는 시험용 파일.
   // 줄바꿈도 따옴표도 BOM도 없는 2열 3행짜리라, 이 파일이 실패하면 원인은 파일이 아니다.
   document.getElementById('btnTestFile').addEventListener('click', () => {
@@ -1311,15 +1334,26 @@
     ];
   }
 
-  // 셀 길이만 바꾼 파일들. 통과하는 가장 큰 값이 노션이 받아들이는 셀 길이다.
-  function buildLengthSet() {
+  // 줄바꿈 유무와 셀 길이를 교차시킨 파일들.
+  // 시험 파일 C는 줄바꿈을 없애고 100자로 자른 것이라 두 가지가 한꺼번에 바뀌어 있었다.
+  // 하나씩 떼어 봐야 어느 쪽이 노션을 막는지 갈린다.
+  function buildMatrixSet() {
     if (preLimitRows.length < 2) return [];
     const headers = preLimitRows[0];
     const head10 = preLimitRows.slice(1, 11);
-    return [500, 1000, 2000, 4000, 8000].map(limit => ({
-      name: 'len' + limit,
-      rows: [headers].concat(head10.map(row => row.map(v => v.slice(0, limit))))
-    }));
+    const make = (name, keepNewline, limit) => ({
+      name: name,
+      rows: [headers].concat(head10.map(row => row.map(v => {
+        const t = keepNewline ? v : flattenValue(v);
+        return limit ? t.slice(0, limit) : t;
+      })))
+    });
+    return [
+      make('N1_noNewline_full', false, 0),
+      make('N2_newline_100', true, 100),
+      make('N3_noNewline_2000', false, 2000),
+      make('N4_noNewline_8000', false, 8000)
+    ];
   }
 
   function downloadTestFiles(files) {
@@ -1340,8 +1374,8 @@
     });
   }
 
-  document.getElementById('btnLengthSet').addEventListener('click', () => {
-    const files = buildLengthSet();
+  document.getElementById('btnMatrixSet').addEventListener('click', () => {
+    const files = buildMatrixSet();
     if (!files.length) return;
     document.getElementById('testSetGuide').open = true;
     downloadTestFiles(files);
