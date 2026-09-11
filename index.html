@@ -340,7 +340,7 @@
         한 행이 커지면 그 행이 통째로 건너뛰어지고, 남는 행이 없으면 제목으로 쓸 열도 없어져 그 메시지가 뜹니다.
       </p>
       <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        <strong>셀 글자 수 한계 찾기 세트</strong>는 줄바꿈을 없앤 뒤 셀 하나를 200자, 500자, 1,000자, 2,000자, 4,000자로 자른 파일과 자르지 않은 파일을 뽑습니다.
+        <strong>셀 글자 수 한계 찾기 세트</strong>는 줄바꿈을 없앤 뒤 셀 하나를 500자, 2,000자, 4,000자, 8,000자, 16,000자로 자른 파일과 자르지 않은 파일을 뽑습니다.
         열 개수와 행 수는 모든 파일이 같고, 바뀌는 것은 셀 하나의 글자 수뿐입니다. <strong>current_</strong> 파일만 위 설정을 그대로 따릅니다.
       </p>
       <ul style="margin: 10px 0 0 20px; line-height: 1.7; color: var(--text-sub); font-size: 0.85rem;">
@@ -1479,7 +1479,7 @@
       out[0] = originalTitles[i] !== undefined ? originalTitles[i] : out[0];
       return out;
     });
-    const files = [200, 500, 1000, 2000, 4000].map(per => ({
+    const files = [500, 2000, 4000, 8000, 16000].map(per => ({
       name: 'cell' + per,
       rows: [headers].concat(cut(per))
     }));
