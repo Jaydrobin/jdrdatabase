@@ -60,36 +60,20 @@
     .container { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 
     header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .header-content { text-align: left; }
     .header-content h1 { font-size: 1.8rem; }
     .header-content p { color: var(--text-sub); margin-top: 6px; font-size: 0.95rem; }
 
     .theme-toggle-btn {
-      background: var(--btn-sec-bg);
-      color: var(--btn-sec-text);
-      border: 1px solid var(--border);
-      padding: 8px 14px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 0.88rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
+      background: var(--btn-sec-bg); color: var(--btn-sec-text); border: 1px solid var(--border);
+      padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.88rem;
+      display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s;
     }
     .theme-toggle-btn:hover { background: var(--btn-sec-hover); }
 
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     .drop-zone {
-      display: block;
-      border: 2px dashed var(--border);
-      border-radius: 10px;
-      padding: 36px 20px;
-      text-align: center;
-      cursor: pointer;
-      background: var(--dropzone-bg);
-      transition: 0.2s;
+      display: block; border: 2px dashed var(--border); border-radius: 10px; padding: 36px 20px;
+      text-align: center; cursor: pointer; background: var(--dropzone-bg); transition: 0.2s;
     }
     .drop-zone.dragover { border-color: var(--accent); background: rgba(56, 189, 248, 0.12); }
     .drop-zone svg { width: 44px; height: 44px; stroke: var(--accent); fill: none; margin-bottom: 8px; }
@@ -106,41 +90,20 @@
     .metric-num { font-size: 1.35rem; font-weight: 700; margin-top: 4px; }
 
     .limit-alert {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid var(--warn);
-      padding: 12px 16px;
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 0.9rem;
-      margin-bottom: 16px;
+      display: flex; align-items: center; gap: 10px; background: rgba(245, 158, 11, 0.15);
+      border: 1px solid var(--warn); padding: 12px 16px; border-radius: 8px; color: var(--text);
+      font-size: 0.9rem; margin-bottom: 16px;
     }
 
-    .title-picker {
-      background: var(--code);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 12px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
+    .controls { background: var(--code); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+    .control { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .control label { font-weight: 700; font-size: 0.85rem; }
+    .control select {
+      background: var(--card); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; font-size: 0.88rem; max-width: 100%;
     }
-    .title-picker label { font-weight: 700; font-size: 0.9rem; }
-    .title-picker select {
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 7px 10px;
-      font-size: 0.88rem;
-      min-width: 200px;
-      max-width: 100%;
-    }
-    .title-picker .hint { color: var(--text-sub); font-size: 0.82rem; flex-basis: 100%; }
+    .control select:disabled { opacity: 0.5; }
+    .control .hint { color: var(--text-sub); font-size: 0.78rem; line-height: 1.45; }
 
     .checks { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
     .check-item { display: flex; gap: 8px; align-items: flex-start; font-size: 0.87rem; line-height: 1.5; background: var(--code); border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; }
@@ -154,6 +117,10 @@
     .opt-item { display: flex; gap: 8px; align-items: flex-start; font-size: 0.88rem; cursor: pointer; }
     .opt-item input { margin-top: 3px; cursor: pointer; }
 
+    .diag { background: var(--code); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 0.88rem; }
+    .diag summary { cursor: pointer; font-weight: 700; }
+    .diag pre { margin-top: 10px; padding: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; font-family: monospace; font-size: 0.78rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow-y: auto; }
+
     .table-box { overflow-x: auto; max-height: 480px; border: 1px solid var(--border); border-radius: 8px; }
     table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
     th { position: sticky; top: 0; background: var(--table-header-bg); padding: 10px; border-bottom: 2px solid var(--border); text-align: left; white-space: nowrap; }
@@ -166,18 +133,12 @@
     .log-box { background: var(--code); border: 1px solid var(--border); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 0.8rem; max-height: 100px; overflow-y: auto; color: var(--accent); }
 
     .help-panel {
-      margin-top: 14px;
-      padding: 18px;
-      background: var(--code);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.88rem;
-      line-height: 1.65;
-      color: var(--text-sub);
-      display: none;
+      margin-top: 14px; padding: 18px; background: var(--code); border: 1px solid var(--border);
+      border-radius: 8px; font-size: 0.88rem; line-height: 1.65; color: var(--text-sub); display: none;
     }
     .help-panel h3 { color: var(--text); font-size: 0.95rem; margin-bottom: 8px; }
     .help-panel h3:not(:first-child) { margin-top: 16px; }
+    .help-panel p { margin-bottom: 8px; }
     .help-panel ul { margin-left: 20px; }
     .help-panel li { margin-bottom: 6px; }
     .key-badge { background: var(--key-badge-bg); color: var(--key-badge-color); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; }
@@ -189,7 +150,7 @@
   <header>
     <div class="header-content">
       <h1>노션(Notion) DB 업로드 전용 CSV 보정기</h1>
-      <p>줄바꿈·빈줄 보정, 제목(Title) 열 지정, 5MB / 20,000행 초과 파일 자동 분할 다운로드</p>
+      <p>구분자·헤더 행·제목 열을 직접 잡아 주고, 5MB / 20,000행 초과 파일을 나눠 내려받습니다.</p>
     </div>
     <button class="theme-toggle-btn" id="btnThemeToggle">☀️ 라이트 모드</button>
   </header>
@@ -200,32 +161,31 @@
       <div style="font-weight: 600; font-size: 1.05rem;">클릭하여 CSV 파일을 선택하거나 여기로 끌어다 놓으세요</div>
       <div style="color: var(--text-sub); font-size: 0.85rem; margin-top: 4px;">파일은 외부로 전송되지 않고 브라우저 안에서만 안전하게 변환됩니다.</div>
     </label>
-    <input type="file" id="fileInput" accept=".csv,text/csv,text/plain" style="display: none;">
+    <input type="file" id="fileInput" accept=".csv,.tsv,.txt,text/csv,text/plain" style="display: none;">
 
     <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
       <button class="btn secondary" id="btnToggleHelp" style="font-size: 0.82rem; padding: 6px 12px;">💡 오류 원인 및 도움말 보기</button>
     </div>
 
     <div class="help-panel" id="helpPanel">
-      <h3>1. 왜 구글 스프레드시트의 줄바꿈 텍스트가 노션에서 깨질까요?</h3>
+      <h3>1. "하나 이상의 열을 제목 속성으로 설정해야 합니다"가 뜨는 경우</h3>
+      <p>노션의 <span class="key-badge">CSV 헤더 매핑</span> 화면은 열 하나가 제목(Title) 속성으로 잡혀야 미리보기를 그립니다. 파일 쪽 원인과 화면 쪽 원인이 따로 있습니다.</p>
       <ul>
-        <li><strong>행 분리 오작동:</strong> 노션 CSV 파서는 큰따옴표 안이라도 Windows 개행 문자(<span class="key-badge">\r\n</span>)가 있으면 새로운 데이터 행으로 오인하여 셀을 쪼개버립니다.</li>
-        <li><strong>본 도구의 해결책:</strong> 셀 내부의 모든 개행을 순수 <span class="key-badge">\n</span>으로만 격리하고, 파일 행 구분은 표준 <span class="key-badge">\r\n</span>으로 일원화하여 일반 CSV와 완전히 동일하게 동작하도록 만듭니다.</li>
+        <li><strong>파일 쪽:</strong> 헤더 이름 안의 줄바꿈, 눈에 보이지 않는 문자만 들어 있는 헤더, 이름 없는 첫 열, 값이 전부 빈 열, 숫자나 날짜만 있는 첫 열, 쉼표가 아닌 구분자로 저장된 파일, 첫 행이 제목 배너인 시트. 본 도구가 모두 보정합니다.</li>
+        <li><strong>화면 쪽:</strong> 파일이 멀쩡해도 매핑 목록에서 제목이 지정되지 않은 상태면 같은 메시지가 남습니다. 첫 번째 열의 속성 드롭다운을 직접 <span class="key-badge">제목</span>으로 바꾸면 미리보기가 즉시 살아납니다.</li>
+      </ul>
+      <p><strong>노션이 읽게 될 파일 진단</strong>을 열면 노션이 실제로 보게 될 첫 줄이 그대로 보입니다. 첫 줄이 한 줄로, 쉼표로 나뉘어 있고, 첫 칸에 이름이 있으면 파일 쪽 문제는 없는 것입니다.</p>
+
+      <h3>2. 왜 구글 스프레드시트의 줄바꿈 텍스트가 노션에서 깨질까요?</h3>
+      <ul>
+        <li><strong>행 분리 오작동:</strong> 셀 안에 <span class="key-badge">\r\n</span>이 섞여 있으면 일부 파서가 새 행으로 오인해 셀을 쪼갭니다.</li>
+        <li><strong>본 도구의 해결책:</strong> 셀 내부 개행은 <span class="key-badge">\n</span>으로만 두고 행 구분은 <span class="key-badge">\r\n</span>으로 통일합니다. 그래도 깨진다면 <strong>셀 안 줄바꿈</strong>을 <strong>공백으로 치환</strong>으로 바꿔 한 줄짜리 CSV를 만들어 보세요. 그 파일이 들어가면 원인은 줄바꿈이고, 그래도 같은 메시지가 나오면 원인은 파일이 아니라 매핑 화면입니다.</li>
       </ul>
 
-      <h3>2. "하나 이상의 열을 제목 속성으로 설정해야 합니다"가 뜨는 이유</h3>
+      <h3>3. 노션 용량 및 행 수 제한</h3>
       <ul>
-        <li><strong>노션의 요구 조건:</strong> <span class="key-badge">CSV 헤더 매핑</span> 화면은 열 하나가 제목(Title) 속성으로 잡혀야만 미리보기를 그립니다. 자동 지정에 실패하면 미리보기 자리에 이 메시지만 남습니다.</li>
-        <li><strong>헤더 안의 줄바꿈:</strong> 구글시트에서 Alt+Enter로 줄바꿈한 헤더 이름은 CSV 첫 줄을 두 줄로 쪼개 헤더 인식을 통째로 망가뜨립니다. 본 도구는 헤더의 줄바꿈과 탭을 항상 공백으로 치환합니다.</li>
-        <li><strong>이름 없는 첫 열, 값이 전부 빈 열:</strong> 노션은 이름이 없거나 값이 비어 있는 열을 제목 후보로 잡지 않습니다. 본 도구는 빈 열을 제거하고 이름 없는 헤더를 자동으로 채웁니다.</li>
-        <li><strong>숫자·날짜만 있는 첫 열:</strong> 노션은 그 열을 숫자나 날짜 속성으로 자동 매핑하므로 제목이 빈 채로 남습니다. 아래 <strong>제목 열 지정</strong>에서 텍스트 열을 골라 첫 열로 보내세요.</li>
-        <li><strong>그래도 메시지가 남는다면:</strong> 매핑 화면에서 원하는 열의 속성 드롭다운을 직접 <span class="key-badge">제목</span>으로 바꾸면 미리보기가 즉시 살아납니다.</li>
-      </ul>
-
-      <h3>3. 노션(Notion) 용량 및 행 수 제한 가이드</h3>
-      <ul>
-        <li><strong>업로드 한계:</strong> 노션은 단일 CSV 업로드 시 <strong>용량 5MB 미만</strong> 및 <strong>20,000행 미만</strong>을 지원합니다.</li>
-        <li><strong>노션 병합 방법:</strong> 첫 번째 파일(_part1.csv)로 새 데이터베이스를 생성한 뒤, 나머지 파일들은 우측 상단 <span class="key-badge">...</span> ➔ <span class="key-badge">CSV 병합</span>으로 추가하시면 됩니다.</li>
+        <li><strong>업로드 한계:</strong> 단일 CSV 기준 <strong>5MB 미만</strong>, <strong>20,000행 미만</strong>입니다.</li>
+        <li><strong>병합 방법:</strong> 첫 파일(_part1.csv)로 데이터베이스를 만든 뒤 나머지는 우측 상단 <span class="key-badge">...</span> ➔ <span class="key-badge">CSV 병합</span>으로 추가합니다.</li>
       </ul>
     </div>
   </div>
@@ -241,13 +201,53 @@
       <div id="limitAlertText"></div>
     </div>
 
-    <div class="title-picker">
-      <label for="titleSelect">제목(Title) 열 지정</label>
-      <select id="titleSelect"></select>
-      <span class="hint">선택한 열은 파일의 첫 번째 열로 옮겨집니다. 노션은 첫 열을 제목 속성으로 잡으므로, 값이 비어 있지 않은 텍스트 열을 고르세요.</span>
+    <div class="controls">
+      <div class="control">
+        <label for="delimSelect">원본 구분자</label>
+        <select id="delimSelect">
+          <option value="auto">자동 감지</option>
+          <option value=",">쉼표 (,)</option>
+          <option value=";">세미콜론 (;)</option>
+          <option value="tab">탭</option>
+          <option value="|">파이프 (|)</option>
+        </select>
+        <span class="hint">노션은 쉼표 구분만 읽습니다. 어떤 구분자로 읽든 저장은 항상 쉼표로 합니다.</span>
+      </div>
+      <div class="control">
+        <label for="headerRowSelect">헤더 행</label>
+        <select id="headerRowSelect"></select>
+        <span class="hint">열 이름이 들어 있는 행입니다. 위에 제목 배너 행이 있으면 여기서 실제 헤더 행을 고르세요.</span>
+      </div>
+      <div class="control">
+        <label for="titleSelect">제목(Title) 열</label>
+        <select id="titleSelect"></select>
+        <span class="hint">선택한 열이 파일의 첫 열이 됩니다. 값이 비지 않은 텍스트 열을 고르세요.</span>
+      </div>
+      <div class="control">
+        <label for="newlineSelect">셀 안 줄바꿈</label>
+        <select id="newlineSelect">
+          <option value="keep">유지 (기본)</option>
+          <option value="space">공백으로 치환 (최대 호환)</option>
+        </select>
+        <span class="hint">유지로 넣었을 때 계속 실패하면 공백 치환으로 한 번 시험해 보세요. 원인이 줄바꿈인지 아닌지 갈립니다.</span>
+      </div>
+      <div class="control">
+        <label for="rowSepSelect">행 구분</label>
+        <select id="rowSepSelect">
+          <option value="crlf">CRLF (기본)</option>
+          <option value="lf">LF</option>
+        </select>
+        <span class="hint">기본값으로 두세요. 업로드가 계속 실패할 때만 바꿔 보는 값입니다.</span>
+      </div>
     </div>
 
     <ul class="checks" id="checkList"></ul>
+
+    <details class="diag" id="diagBox">
+      <summary>노션이 읽게 될 파일 진단</summary>
+      <pre id="diagView"></pre>
+      <button class="btn secondary" id="btnCopyDiag" style="margin-top: 10px; font-size: 0.82rem; padding: 6px 12px;">진단 내용 복사</button>
+    </details>
 
     <div class="metrics">
       <div class="metric-box"><div>총 데이터 행</div><div class="metric-num" id="statRows">0</div></div>
@@ -264,6 +264,7 @@
       <label class="opt-item"><input type="checkbox" id="optFixHeaders" checked> <strong>헤더 자동 보정 (빈칸 및 중복 열 이름 정리)</strong></label>
       <label class="opt-item"><input type="checkbox" id="optDropEmptyCols" checked> 이름과 값이 모두 빈 열 제거</label>
       <label class="opt-item"><input type="checkbox" id="optFillTitle" checked> 제목 열의 빈 값 자동 채움 (무제 N)</label>
+      <label class="opt-item"><input type="checkbox" id="optSynthTitle"> <strong>제목 열을 새로 만들어 맨 앞에 추가</strong></label>
       <label class="opt-item"><input type="checkbox" id="optEmptyLines" checked> 과도한 연속 빈 줄 정리</label>
       <label class="opt-item"><input type="checkbox" id="optBom"> UTF-8 BOM 헤더 포함 (노션 업로드 시 해제 권장)</label>
     </div>
@@ -310,10 +311,10 @@
   }
 
   themeToggleBtn.addEventListener('click', () => {
-    const currentTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-    const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
-    try { localStorage.setItem('theme', nextTheme); } catch (e) {}
-    applyTheme(nextTheme);
+    const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    const next = current === 'light' ? 'dark' : 'light';
+    try { localStorage.setItem('theme', next); } catch (e) {}
+    applyTheme(next);
   });
 
   applyTheme(getPreferredTheme());
@@ -322,24 +323,36 @@
   const NOTION_SPLIT_BYTES = 4.0 * 1024 * 1024;
   const NOTION_LIMIT_ROWS = 20000;
   const NOTION_LIMIT_BYTES = 5 * 1024 * 1024;
+  const TAB = String.fromCharCode(9);
 
+  // 눈에 보이지 않지만 헤더 이름을 망가뜨리는 문자들. 웹에서 복사한 텍스트에 흔히 섞인다.
+  const INVISIBLE_SOURCE = '[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F\\u00AD\\u200B-\\u200F\\u2028\\u2029\\u2060\\uFEFF]';
+
+  let rawText = '';
   let originalBaseName = 'notion_ready';
   let parsedRows = [];
   let parseQuoteFixes = 0;
+  let activeDelimiter = ',';
+  let headerRowIndex = null;
+  let titleColumnName = null;
   let cleanedRows = [];
   let splitParts = [];
-  let titleColumnName = null;
   let checks = [];
+  let diagText = '';
 
   const fileInput = document.getElementById('fileInput');
   const dropZone = document.getElementById('dropZone');
   const resultCard = document.getElementById('resultCard');
-  const btnToggleHelp = document.getElementById('btnToggleHelp');
   const helpPanel = document.getElementById('helpPanel');
+  const btnToggleHelp = document.getElementById('btnToggleHelp');
   const limitAlertBox = document.getElementById('limitAlertBox');
   const limitAlertText = document.getElementById('limitAlertText');
   const btnSplitDownload = document.getElementById('btnSplitDownload');
   const titleSelect = document.getElementById('titleSelect');
+  const delimSelect = document.getElementById('delimSelect');
+  const headerRowSelect = document.getElementById('headerRowSelect');
+  const newlineSelect = document.getElementById('newlineSelect');
+  const rowSepSelect = document.getElementById('rowSepSelect');
 
   btnToggleHelp.addEventListener('click', () => {
     const isOpen = helpPanel.style.display === 'block';
@@ -355,36 +368,60 @@
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
     dropZone.classList.remove('dragover');
-    if (e.dataTransfer && e.dataTransfer.files.length > 0) {
-      loadFile(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer && e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]);
   });
 
   fileInput.addEventListener('change', e => {
-    if (e.target.files && e.target.files.length > 0) {
-      loadFile(e.target.files[0]);
-    }
+    if (e.target.files && e.target.files.length > 0) loadFile(e.target.files[0]);
   });
 
   document.getElementById('btnPickAnother').addEventListener('click', () => fileInput.click());
 
   function loadFile(file) {
     originalBaseName = file.name.replace(/\.[^/.]+$/, '');
-    document.getElementById('fileNameView').innerText = `${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+    document.getElementById('fileNameView').innerText = file.name + ' (' + (file.size / (1024 * 1024)).toFixed(2) + ' MB)';
     const reader = new FileReader();
     reader.onload = e => {
-      const parseResult = parseRobustCSV(e.target.result);
-      parsedRows = parseResult.rows;
-      parseQuoteFixes = parseResult.quoteFixes;
+      rawText = e.target.result;
+      delimSelect.value = 'auto';
+      headerRowIndex = null;
       titleColumnName = null;
       resultCard.style.display = 'block';
-      runClean();
+      reparse();
     };
     reader.readAsText(file, 'UTF-8');
   }
 
-  // 현재 따옴표가 셀 안의 문자인지(뒤에 정상적인 종료 따옴표가 더 있는지) 판단한다.
-  function hasLaterClosingQuote(text, from) {
+  function reparse() {
+    const chosen = delimSelect.value;
+    activeDelimiter = chosen === 'auto' ? detectDelimiter(rawText) : (chosen === 'tab' ? TAB : chosen);
+    const result = parseRobustCSV(rawText, activeDelimiter);
+    parsedRows = result.rows;
+    parseQuoteFixes = result.quoteFixes;
+    runClean();
+  }
+
+  // 노션은 쉼표 구분만 읽는다. 원본이 세미콜론이나 탭으로 저장돼 있으면 모든 행이 한 열로 뭉쳐
+  // 열이 하나뿐인 파일이 되고, 노션은 그 파일로 데이터베이스를 만들지 못한다.
+  function detectDelimiter(text) {
+    const sample = text.slice(0, 200000);
+    const candidates = [',', ';', TAB, '|'];
+    let best = ',';
+    let bestScore = 0;
+    for (const d of candidates) {
+      const rows = parseRobustCSV(sample, d).rows.slice(0, 20);
+      if (rows.length === 0) continue;
+      const width = rows[0].length;
+      if (width < 2) continue;
+      const consistent = rows.filter(r => r.length === width).length / rows.length;
+      const score = width * consistent;
+      if (score > bestScore) { bestScore = score; best = d; }
+    }
+    return best;
+  }
+
+  // 현재 따옴표 뒤에 정상적인 종료 따옴표가 더 있는지 본다.
+  function hasLaterClosingQuote(text, from, delimiter) {
     let lastQuote = -1;
     for (let j = from + 1; j < text.length; j++) {
       const ch = text[j];
@@ -393,15 +430,14 @@
     }
     if (lastQuote === -1) return false;
     const after = text[lastQuote + 1];
-    return after === undefined || after === ',' || after === '\r' || after === '\n';
+    return after === undefined || after === delimiter || after === '\r' || after === '\n';
   }
 
   // 구글 시트의 특수 개행과 짝이 맞지 않는 따옴표까지 감당하는 파서.
   // 여는 따옴표는 셀의 첫 글자일 때만 인정하고, 셀 중간의 따옴표는 문자로 보존한다.
-  function parseRobustCSV(text) {
-    if (text.charCodeAt(0) === 0xFEFF) {
-      text = text.slice(1);
-    }
+  function parseRobustCSV(text, delimiter) {
+    const delim = delimiter || ',';
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     const rows = [];
     let row = [];
     let cell = '';
@@ -418,13 +454,12 @@
           if (next === '"') {
             cell += '"';
             i++;
-          } else if (next === undefined || next === ',' || next === '\r' || next === '\n') {
+          } else if (next === undefined || next === delim || next === '\r' || next === '\n') {
             inQuotes = false;
-          } else if (hasLaterClosingQuote(text, i)) {
-            // 뒤에 정상적인 종료 따옴표가 있으므로 셀 내용에 포함된 문자로 본다.
+          } else if (hasLaterClosingQuote(text, i, delim)) {
             cell += '"';
           } else {
-            // 닫는 따옴표가 없는 깨진 셀. 따옴표는 보존하고 인용 상태만 해제해 행 구조를 지킨다.
+            // 닫는 따옴표가 없는 깨진 셀. 따옴표는 보존하고 인용 상태만 풀어 행 구조를 지킨다.
             cell += '"';
             inQuotes = false;
             quoteFixes++;
@@ -439,7 +474,7 @@
         if (c === '"' && fieldStart) {
           inQuotes = true;
           fieldStart = false;
-        } else if (c === ',') {
+        } else if (c === delim) {
           row.push(cell);
           cell = '';
           fieldStart = true;
@@ -463,10 +498,34 @@
     return { rows: rows, quoteFixes: quoteFixes };
   }
 
-  // 헤더 이름은 항상 한 줄로 만든다. 헤더 안의 줄바꿈은 노션의 헤더 인식을 통째로 깨뜨린다.
+  function stripInvisible(value) {
+    const text = value === undefined || value === null ? '' : String(value);
+    return text.replace(new RegExp(INVISIBLE_SOURCE, 'g'), '');
+  }
+
+  function hasInvisible(value) {
+    return new RegExp(INVISIBLE_SOURCE).test(String(value));
+  }
+
+  // 헤더 이름은 언제나 한 줄이어야 하고, 따옴표로 감싸지 않아도 되는 글자만 남아야 한다.
+  // 노션이 헤더 행을 통째로 읽지 못하면 어떤 열도 제목 속성이 되지 못한다.
   function sanitizeHeaderName(value) {
-    return String(value === undefined || value === null ? '' : value)
-      .replace(/[\r\n\t]+/g, ' ')
+    return stripInvisible(value)
+      .replace(/[\r\n]+/g, ' ')
+      .replace(new RegExp(TAB, 'g'), ' ')
+      .replace(/ /g, ' ')
+      .replace(/["',]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120);
+  }
+
+  // 제목 값도 한 줄로 만든다. 노션의 제목 속성은 여러 줄을 담지 못한다.
+  function flattenValue(value) {
+    return stripInvisible(value)
+      .replace(/[\r\n]+/g, ' ')
+      .replace(new RegExp(TAB, 'g'), ' ')
+      .replace(/ /g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -480,13 +539,9 @@
     return s;
   }
 
-  function formatRow(row) {
-    return row.map(formatCell).join(',');
-  }
-
-  function byteLength(str) {
-    return new TextEncoder().encode(str).length;
-  }
+  const formatRow = row => row.map(formatCell).join(',');
+  const rowSeparator = () => (rowSepSelect.value === 'lf' ? '\n' : '\r\n');
+  const byteLength = str => new TextEncoder().encode(str).length;
 
   function analyzeColumn(body, idx) {
     let nonEmpty = 0, numeric = 0, dateLike = 0, boolLike = 0, multiline = 0, maxLen = 0;
@@ -520,10 +575,8 @@
   }
 
   const KIND_LABEL = { text: '텍스트', number: '숫자', date: '날짜', checkbox: '체크박스', empty: '값 없음' };
+  const TITLE_NAME_HINT = /^(제목|이름|title|name|subject|항목)$/i;
 
-  const TITLE_NAME_HINT = /^(제목|이름|title|name|subject|\ud56d\ubaa9)$/i;
-
-  // 노션이 제목 속성으로 받아들이기 좋은 열을 고른다.
   function titleScore(meta, headerName) {
     if (meta.kind === 'empty') return -1000;
     let score = meta.kind === 'text' ? 100 : 10;
@@ -536,78 +589,97 @@
     return score - meta.idx * 0.5;
   }
 
+  function countFilled(row) {
+    return row.filter(c => stripInvisible(c).trim() !== '').length;
+  }
+
+  // 첫 행이 제목 배너처럼 칸이 거의 비어 있으면 그 아래 행을 헤더로 본다.
+  function detectHeaderRow(rows) {
+    const limit = Math.min(rows.length, 5);
+    let bestIdx = 0;
+    let bestFilled = countFilled(rows[0]);
+    for (let i = 1; i < limit; i++) {
+      const filled = countFilled(rows[i]);
+      if (filled > bestFilled * 2) { bestFilled = filled; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
   function runClean() {
     checks = [];
-    if (!parsedRows.length) {
-      failClean('파일에서 읽을 수 있는 행이 없습니다. 원본 CSV를 다시 내보내 주세요.');
-      return;
-    }
+    if (!parsedRows.length) return failClean('파일에서 읽을 수 있는 행이 없습니다.');
 
-    const nonBlankRows = parsedRows.filter(r => r.some(c => String(c).trim() !== ''));
-    if (!nonBlankRows.length) {
-      failClean('모든 행이 비어 있습니다. 원본 CSV를 확인해 주세요.');
-      return;
-    }
+    const nonBlankRows = parsedRows.filter(r => r.some(c => stripInvisible(c).trim() !== ''));
+    if (!nonBlankRows.length) return failClean('모든 행이 비어 있습니다. 원본 CSV를 확인해 주세요.');
 
     const fixHeaders = document.getElementById('optFixHeaders').checked;
     const dropEmptyCols = document.getElementById('optDropEmptyCols').checked;
     const fillTitle = document.getElementById('optFillTitle').checked;
+    const synthTitle = document.getElementById('optSynthTitle').checked;
     const trimEmptyLines = document.getElementById('optEmptyLines').checked;
+    const flattenCells = newlineSelect.value === 'space';
 
-    // 1. 전체 행을 훑어 실제로 쓰이는 최대 열 수를 잡는다.
+    // 1. 헤더 행 결정. 앞머리에 제목 배너 행이 있으면 첫 행은 헤더가 아니다.
+    renderHeaderRowOptions(nonBlankRows);
+    if (headerRowIndex === null || headerRowIndex >= nonBlankRows.length) headerRowIndex = detectHeaderRow(nonBlankRows);
+    headerRowSelect.value = String(headerRowIndex);
+    const headerRow = nonBlankRows[headerRowIndex];
+    const dataRows = nonBlankRows.slice(headerRowIndex + 1);
+    if (!dataRows.length) return failClean('헤더 행 아래에 데이터가 없습니다. 헤더 행을 다시 골라 주세요.');
+
+    // 2. 실제로 쓰이는 최대 열 수.
     let maxCols = 0;
-    nonBlankRows.forEach(r => {
+    for (const r of [headerRow].concat(dataRows)) {
       for (let i = r.length - 1; i >= 0; i--) {
-        if (String(r[i]).trim() !== '') {
+        if (stripInvisible(r[i]).trim() !== '') {
           if (i + 1 > maxCols) maxCols = i + 1;
           break;
         }
       }
-    });
-    if (maxCols === 0) maxCols = nonBlankRows[0].length || 1;
+    }
+    if (maxCols === 0) maxCols = headerRow.length || 1;
+    const addedCols = Math.max(0, maxCols - headerRow.length);
 
-    // 2. 헤더 정제. 줄바꿈과 탭 제거는 옵션과 무관하게 항상 적용한다.
+    // 3. 헤더 정제. 줄바꿈, 탭, 보이지 않는 문자 제거는 옵션과 무관하게 항상 적용한다.
     let headerFixCount = 0;
     let headerNewlineFixes = 0;
+    let invisibleFixes = 0;
     let headers = [];
     for (let i = 0; i < maxCols; i++) {
-      const raw = nonBlankRows[0][i] === undefined ? '' : String(nonBlankRows[0][i]);
+      const raw = headerRow[i] === undefined ? '' : String(headerRow[i]);
       const clean = sanitizeHeaderName(raw);
-      if (/[\r\n\t]/.test(raw)) headerNewlineFixes++;
+      if (/[\r\n]/.test(raw) || raw.indexOf(TAB) >= 0) headerNewlineFixes++;
+      if (hasInvisible(raw)) invisibleFixes++;
       if (clean !== raw) headerFixCount++;
       headers.push(clean);
     }
-    // 데이터 행이 헤더보다 넓으면 헤더를 늘려 데이터가 잘려나가지 않게 한다.
-    const addedCols = Math.max(0, maxCols - nonBlankRows[0].length);
 
-    // 3. 본문 정규화. 모든 행을 같은 칸 수로 맞추고 셀 내부 개행을 정제한다.
+    // 4. 본문 정규화. 모든 행을 같은 칸 수로 맞추고 셀 내부 개행을 정제한다.
     let multilines = 0;
     let mismatches = 0;
     let body = [];
-    for (let r = 1; r < nonBlankRows.length; r++) {
-      const src = nonBlankRows[r];
+    for (const src of dataRows) {
       if (src.length !== maxCols) mismatches++;
       const row = [];
       for (let i = 0; i < maxCols; i++) {
-        let text = src[i] === undefined || src[i] === null ? '' : String(src[i]);
+        let text = stripInvisible(src[i]);
         if (/[\r\n]/.test(text)) {
           multilines++;
           text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
           if (trimEmptyLines) text = text.replace(/\n{3,}/g, '\n\n');
+          if (flattenCells) text = flattenValue(text);
         }
         row.push(text);
       }
       body.push(row);
     }
 
-    // 4. 이름과 값이 모두 빈 열 제거. 제목 열이 빈 열에 밀리는 일을 막는다.
+    // 5. 이름과 값이 모두 빈 열 제거.
     let droppedCols = 0;
     if (dropEmptyCols) {
       const keep = [];
       for (let i = 0; i < headers.length; i++) {
-        const hasName = headers[i] !== '';
-        const hasValue = body.some(row => row[i].trim() !== '');
-        if (hasName || hasValue) keep.push(i);
+        if (headers[i] !== '' || body.some(row => row[i].trim() !== '')) keep.push(i);
       }
       if (keep.length > 0 && keep.length < headers.length) {
         droppedCols = headers.length - keep.length;
@@ -616,24 +688,24 @@
       }
     }
 
-    // 5. 빈 헤더와 중복 헤더 정리.
+    // 6. 빈 헤더와 중복 헤더 정리.
     let emptyHeaderCount = headers.filter(h => h === '').length;
     let duplicateHeaderCount = 0;
     if (fixHeaders) {
       headers = headers.map((h, idx) => {
         if (h) return h;
         headerFixCount++;
-        return idx === 0 ? '이름' : `열_${idx + 1}`;
+        return idx === 0 ? '이름' : '열_' + (idx + 1);
       });
       const counts = {};
       headers.forEach(h => { counts[h] = (counts[h] || 0) + 1; });
-      const seenIdx = {};
+      const seen = {};
       headers = headers.map(h => {
         if (counts[h] > 1) {
-          seenIdx[h] = (seenIdx[h] || 0) + 1;
+          seen[h] = (seen[h] || 0) + 1;
           headerFixCount++;
           duplicateHeaderCount++;
-          return `${h} ${seenIdx[h]}`;
+          return h + ' ' + seen[h];
         }
         return h;
       });
@@ -644,13 +716,14 @@
       duplicateHeaderCount = Object.keys(counts).filter(k => counts[k] > 1).length;
     }
 
-    // 6. 제목 열 결정. 사용자가 고른 열이 있으면 그것을, 없으면 자동으로 가장 적합한 열을 쓴다.
+    // 7. 제목 열 결정.
     const metas = headers.map((_, i) => analyzeColumn(body, i));
     let titleIdx = titleColumnName === null ? -1 : headers.indexOf(titleColumnName);
     let autoPicked = false;
     if (titleIdx < 0) {
       autoPicked = true;
-      let best = 0, bestScore = -Infinity;
+      let best = 0;
+      let bestScore = -Infinity;
       metas.forEach((m, i) => {
         const s = titleScore(m, headers[i]);
         if (s > bestScore) { bestScore = s; best = i; }
@@ -658,38 +731,62 @@
       titleIdx = best;
     }
     titleColumnName = headers[titleIdx];
+    renderTitleOptions(headers, metas, titleIdx, synthTitle);
 
-    renderTitleOptions(headers, metas, titleIdx);
-
-    // 7. 제목 열을 맨 앞으로 옮긴다. 노션은 첫 열을 제목 속성으로 잡는다.
+    // 8. 제목 열을 맨 앞으로. 노션은 첫 열을 제목 속성으로 잡는다.
     if (titleIdx > 0) {
       const order = [titleIdx].concat(headers.map((_, i) => i).filter(i => i !== titleIdx));
       headers = order.map(i => headers[i]);
       body = body.map(row => order.map(i => row[i]));
     }
-    // 8. 제목 열의 빈 값 채우기. 제목이 비어 있으면 노션에서 제목 없는 페이지가 된다.
+
+    // 9. 제목 열을 새로 만드는 경우. 텍스트이고 비지 않은 첫 열을 보장한다.
+    if (synthTitle) {
+      const existing = {};
+      headers.forEach(h => { existing[h] = true; });
+      let name = '제목';
+      let n = 2;
+      while (existing[name]) { name = '제목 ' + n; n++; }
+      headers = [name].concat(headers);
+      body = body.map((row, i) => {
+        const source = row.find(v => v.trim() !== '') || '';
+        const value = flattenValue(source).slice(0, 80);
+        return [value || ('무제 ' + (i + 1))].concat(row);
+      });
+    }
+
+    // 10. 제목 값은 항상 한 줄로 만든다.
+    let flattenedTitles = 0;
+    for (const row of body) {
+      const flat = flattenValue(row[0]);
+      if (flat !== row[0]) flattenedTitles++;
+      row[0] = flat;
+    }
+
+    // 11. 제목 열의 빈 값 채우기.
     let filledTitles = 0;
     if (fillTitle) {
       for (let i = 0; i < body.length; i++) {
-        if (body[i][0].trim() === '') {
-          body[i][0] = `무제 ${i + 1}`;
+        if (body[i][0] === '') {
+          body[i][0] = '무제 ' + (i + 1);
           filledTitles++;
         }
       }
     }
-    const titleMeta = analyzeColumn(body, 0);
 
+    const titleMeta = analyzeColumn(body, 0);
     cleanedRows = [headers].concat(body);
 
-    // 9. 분할 계획 수립. 행이 중간에서 잘리지 않게 행 단위로 담는다.
-    const headerStr = formatRow(headers);
-    const headerBytes = byteLength(headerStr + '\r\n');
+    // 12. 분할 계획. 행이 중간에서 잘리지 않게 행 단위로 담는다.
+    const sep = rowSeparator();
+    const headerLine = formatRow(headers);
+    const headerBytes = byteLength(headerLine + sep);
     splitParts = [];
     let currentPart = [];
     let currentBytes = headerBytes;
     let totalBytes = headerBytes;
     for (let i = 1; i < cleanedRows.length; i++) {
-      const rowBytes = byteLength(formatRow(cleanedRows[i]) + '\r\n');
+      const rowBytes = byteLength(formatRow(cleanedRows[i]) + sep);
       totalBytes += rowBytes;
       if (currentPart.length > 0 && (currentPart.length >= NOTION_SPLIT_ROWS || currentBytes + rowBytes > NOTION_SPLIT_BYTES)) {
         splitParts.push(currentPart);
@@ -706,67 +803,63 @@
 
     document.getElementById('statRows').innerText = totalDataRows.toLocaleString();
     document.getElementById('statCols').innerText = headers.length;
-    document.getElementById('statSize').innerText = `${totalMB} MB`;
+    document.getElementById('statSize').innerText = totalMB + ' MB';
     document.getElementById('statMultilines').innerText = multilines.toLocaleString();
     document.getElementById('statMismatches').innerText = mismatches.toLocaleString();
     document.getElementById('statHeaderFixes').innerText = headerFixCount;
     document.getElementById('statDroppedCols').innerText = droppedCols;
     document.getElementById('statQuoteFixes').innerText = parseQuoteFixes;
 
-    // 10. 업로드 점검 결과.
-    const titleLabel = KIND_LABEL[titleMeta.kind] || titleMeta.kind;
+    // 13. 점검 결과.
     if (!headers[0]) {
-      addCheck('warn', `제목 열의 이름이 비어 있습니다. 노션이 이름 없는 열은 제목으로 잡지 않습니다. 헤더 자동 보정을 켜 주세요.`);
+      addCheck('warn', '제목 열의 이름이 비어 있습니다. 이름 없는 열은 노션이 제목으로 잡지 않습니다. 헤더 자동 보정을 켜 주세요.');
     } else if (titleMeta.emptyCount > 0) {
-      addCheck('warn', `제목 열 "${headers[0]}"에 값이 빈 행이 ${titleMeta.emptyCount.toLocaleString()}개 있습니다. 제목 열의 빈 값 자동 채움을 켜거나 다른 열을 지정하세요.`);
+      addCheck('warn', '제목 열 "' + headers[0] + '"에 값이 빈 행이 ' + titleMeta.emptyCount.toLocaleString() + '개 있습니다. 빈 값 자동 채움을 켜거나 다른 열을 지정하세요.');
     } else if (titleMeta.kind !== 'text') {
-      addCheck('warn', `제목 열 "${headers[0]}"의 값이 ${titleLabel}만으로 되어 있습니다. 노션이 이 열을 ${titleLabel} 속성으로 자동 매핑해 제목이 비어버릴 수 있으니 텍스트 열을 지정하세요.`);
+      addCheck('warn', '제목 열 "' + headers[0] + '"의 값이 ' + KIND_LABEL[titleMeta.kind] + '만으로 되어 있습니다. 노션이 ' + KIND_LABEL[titleMeta.kind] + ' 속성으로 자동 매핑해 제목이 비어버릴 수 있습니다.');
     } else {
-      addCheck('ok', `제목 열 "${headers[0]}"을(를) 첫 번째 열로 배치했습니다. 노션이 이 열을 제목 속성으로 잡습니다.`);
+      addCheck('ok', '제목 열 "' + headers[0] + '"을(를) 첫 번째 열로 배치했습니다. 값은 모두 한 줄짜리 텍스트입니다.');
     }
-    if (autoPicked) {
-      addCheck('info', '제목 열을 자동으로 골랐습니다. 다른 열을 쓰려면 위 선택 상자에서 바꾸세요.');
+    if (headerLine.indexOf('"') >= 0) {
+      addCheck('warn', '헤더 행에 따옴표가 남아 있습니다. 열 이름을 줄여 주세요.');
+    } else {
+      addCheck('ok', '헤더 행이 따옴표 없는 한 줄입니다: ' + headerLine.slice(0, 80) + (headerLine.length > 80 ? '…' : ''));
     }
-    if (headerNewlineFixes > 0) {
-      addCheck('info', `헤더 ${headerNewlineFixes}개에 들어 있던 줄바꿈·탭을 공백으로 정리했습니다. 이 상태로는 노션이 헤더 행 자체를 읽지 못합니다.`);
+    if (activeDelimiter !== ',') {
+      addCheck('info', '원본이 ' + (activeDelimiter === TAB ? '탭' : '"' + activeDelimiter + '"') + ' 구분 파일이라 ' + headers.length + '개 열로 나눠 읽었습니다. 쉼표로 저장합니다.');
     }
-    if (droppedCols > 0) {
-      addCheck('info', `이름과 값이 모두 비어 있는 열 ${droppedCols}개를 제거했습니다.`);
+    if (headerRowIndex > 0) {
+      addCheck('info', (headerRowIndex + 1) + '번째 행을 헤더로 삼았습니다. 위쪽 ' + headerRowIndex + '개 행은 제외했습니다.');
     }
-    if (addedCols > 0) {
-      addCheck('info', `데이터가 헤더보다 ${addedCols}칸 넓어 열을 추가했습니다. 원본 헤더 행을 확인해 주세요.`);
-    }
-    if (emptyHeaderCount > 0) {
-      addCheck('warn', `이름이 없는 헤더가 ${emptyHeaderCount}개 있습니다. 헤더 자동 보정을 켜면 자동으로 이름이 붙습니다.`);
-    }
-    if (duplicateHeaderCount > 0 && !fixHeaders) {
-      addCheck('warn', `중복된 헤더 이름이 ${duplicateHeaderCount}종 있습니다. 노션에서 열이 합쳐지거나 누락될 수 있습니다.`);
-    }
-    if (filledTitles > 0) {
-      addCheck('info', `비어 있던 제목 ${filledTitles.toLocaleString()}개를 "무제 N"으로 채웠습니다.`);
-    }
-    if (parseQuoteFixes > 0) {
-      addCheck('info', `원본에서 짝이 맞지 않는 따옴표 ${parseQuoteFixes.toLocaleString()}개를 문자 그대로 살렸습니다.`);
-    }
-    if (mismatches > 0) {
-      addCheck('info', `칸 수가 헤더와 다른 행 ${mismatches.toLocaleString()}개를 ${headers.length}칸으로 맞췄습니다.`);
-    }
-    addCheck('ok', `모든 셀의 줄바꿈을 \\n으로, 행 구분을 \\r\\n으로 통일했습니다.`);
+    if (autoPicked && !synthTitle) addCheck('info', '제목 열을 자동으로 골랐습니다. 다른 열을 쓰려면 위에서 바꾸세요.');
+    if (synthTitle) addCheck('info', '제목 열을 새로 만들어 맨 앞에 넣었습니다. 각 행의 첫 번째 값에서 한 줄로 뽑았습니다.');
+    if (headerNewlineFixes > 0) addCheck('info', '헤더 ' + headerNewlineFixes + '개의 줄바꿈과 탭을 공백으로 정리했습니다. 그대로 두면 노션이 헤더 행을 읽지 못합니다.');
+    if (invisibleFixes > 0) addCheck('info', '헤더 ' + invisibleFixes + '개에서 보이지 않는 문자를 제거했습니다. 이름이 있는 것처럼 보여도 노션은 빈 이름으로 읽습니다.');
+    if (droppedCols > 0) addCheck('info', '이름과 값이 모두 비어 있는 열 ' + droppedCols + '개를 제거했습니다.');
+    if (addedCols > 0) addCheck('info', '데이터가 헤더보다 ' + addedCols + '칸 넓어 열을 추가했습니다.');
+    if (emptyHeaderCount > 0) addCheck('warn', '이름이 없는 헤더가 ' + emptyHeaderCount + '개 있습니다. 헤더 자동 보정을 켜 주세요.');
+    if (duplicateHeaderCount > 0 && !fixHeaders) addCheck('warn', '중복된 헤더 이름이 ' + duplicateHeaderCount + '종 있습니다.');
+    if (flattenedTitles > 0) addCheck('info', '제목 값 ' + flattenedTitles.toLocaleString() + '개를 한 줄로 폈습니다.');
+    if (filledTitles > 0) addCheck('info', '비어 있던 제목 ' + filledTitles.toLocaleString() + '개를 "무제 N"으로 채웠습니다.');
+    if (parseQuoteFixes > 0) addCheck('info', '닫는 따옴표가 없던 셀 ' + parseQuoteFixes.toLocaleString() + '개를 행 구조를 지키며 복구했습니다.');
+    if (mismatches > 0) addCheck('info', '칸 수가 헤더와 다른 행 ' + mismatches.toLocaleString() + '개를 ' + headers.length + '칸으로 맞췄습니다.');
+    if (flattenCells) addCheck('info', '셀 안의 줄바꿈을 모두 공백으로 바꿨습니다. 이 파일이 들어가면 원인은 줄바꿈입니다.');
     renderChecks();
+    renderDiagnostics(headers, totalDataRows, totalBytes);
 
     const exceedsRows = totalDataRows >= NOTION_LIMIT_ROWS;
     const exceedsSize = totalBytes >= NOTION_LIMIT_BYTES;
     if (exceedsRows || exceedsSize || splitParts.length > 1) {
       limitAlertBox.style.display = 'flex';
       let msg = '<strong>노션 권장 규격 초과 감지:</strong> ';
-      if (exceedsRows && exceedsSize) msg += `행 수(${totalDataRows.toLocaleString()}행)와 용량(${totalMB}MB) 모두 노션 단일 파일 기준을 초과했습니다.`;
-      else if (exceedsRows) msg += `행 수(${totalDataRows.toLocaleString()}행)가 노션 권장 기준(20,000행)을 초과했습니다.`;
-      else if (exceedsSize) msg += `예상 용량(${totalMB}MB)이 노션 단일 업로드 제한(5MB)을 초과했습니다.`;
-      else msg += `안전 여유를 두고 파일을 나눕니다.`;
+      if (exceedsRows && exceedsSize) msg += '행 수(' + totalDataRows.toLocaleString() + '행)와 용량(' + totalMB + 'MB) 모두 노션 단일 파일 기준을 초과했습니다.';
+      else if (exceedsRows) msg += '행 수(' + totalDataRows.toLocaleString() + '행)가 노션 권장 기준(20,000행)을 초과했습니다.';
+      else if (exceedsSize) msg += '예상 용량(' + totalMB + 'MB)이 노션 단일 업로드 제한(5MB)을 초과했습니다.';
+      else msg += '안전 여유를 두고 파일을 나눕니다.';
       if (splitParts.length > 1) {
-        msg += ` 안전한 업로드를 위해 <strong>${splitParts.length}개 파일로 분할 다운로드</strong>하세요.`;
+        msg += ' <strong>' + splitParts.length + '개 파일로 분할 다운로드</strong>하세요.';
         btnSplitDownload.style.display = 'inline-flex';
-        btnSplitDownload.innerText = `📦 노션 규격 분할 다운로드 (${splitParts.length}개 파일)`;
+        btnSplitDownload.innerText = '📦 노션 규격 분할 다운로드 (' + splitParts.length + '개 파일)';
       } else {
         btnSplitDownload.style.display = 'none';
       }
@@ -776,8 +869,7 @@
       btnSplitDownload.style.display = 'none';
     }
 
-    document.getElementById('logView').innerText = `[변환 준비 완료] 제목 열: ${headers[0] || '(이름 없음)'} | 열 수: ${headers.length}개 | 총 ${totalDataRows.toLocaleString()}행 (${totalMB} MB) | 분할 파일: ${splitParts.length}개`;
-
+    document.getElementById('logView').innerText = '[변환 준비 완료] 제목 열: ' + (headers[0] || '(이름 없음)') + ' | 열 수: ' + headers.length + '개 | 총 ' + totalDataRows.toLocaleString() + '행 (' + totalMB + ' MB) | 분할 파일: ' + splitParts.length + '개';
     renderTable();
   }
 
@@ -789,62 +881,97 @@
     document.getElementById('tblHead').innerHTML = '';
     document.getElementById('tblBody').innerHTML = '';
     titleSelect.innerHTML = '';
+    document.getElementById('diagView').innerText = '';
     addCheck('warn', message);
     renderChecks();
-    document.getElementById('logView').innerText = `[변환 실패] ${message}`;
+    document.getElementById('logView').innerText = '[변환 실패] ' + message;
   }
 
-  function addCheck(level, text) {
-    checks.push({ level: level, text: text });
-  }
+  function addCheck(level, text) { checks.push({ level: level, text: text }); }
 
   function renderChecks() {
     const marks = { ok: '✅', warn: '⚠️', info: 'ℹ️' };
     document.getElementById('checkList').innerHTML = checks.map(c =>
-      `<li class="check-item ${c.level}"><span class="mark">${marks[c.level]}</span><span>${escapeHtml(c.text)}</span></li>`
+      '<li class="check-item ' + c.level + '"><span class="mark">' + marks[c.level] + '</span><span>' + escapeHtml(c.text) + '</span></li>'
     ).join('');
   }
 
-  function renderTitleOptions(headers, metas, selectedIdx) {
+  function escapeForDiag(s) {
+    return String(s).replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(new RegExp(TAB, 'g'), '\\t');
+  }
+
+  // 노션이 실제로 읽게 될 내용을 그대로 보여 준다. 추측 대신 이 화면을 보고 판단한다.
+  function renderDiagnostics(headers, totalDataRows, totalBytes) {
+    const sepName = rowSepSelect.value === 'lf' ? 'LF (\\n)' : 'CRLF (\\r\\n)';
+    const delimName = activeDelimiter === TAB ? '탭' : '"' + activeDelimiter + '"';
+    const headerLine = formatRow(headers);
+    const firstRows = cleanedRows.slice(1, 3).map(formatRow);
+    diagText = [
+      '원본 구분자   : ' + delimName + (delimSelect.value === 'auto' ? ' (자동 감지)' : ' (수동 지정)'),
+      '출력 구분자   : "," (노션 필수)',
+      '행 구분       : ' + sepName,
+      'BOM           : ' + (document.getElementById('optBom').checked ? '포함' : '없음'),
+      '열 수         : ' + headers.length,
+      '데이터 행 수  : ' + totalDataRows.toLocaleString(),
+      '예상 용량     : ' + (totalBytes / (1024 * 1024)).toFixed(2) + ' MB',
+      '제목 열       : ' + (headers[0] || '(이름 없음)'),
+      '',
+      '헤더 줄 (노션이 열 목록을 만드는 줄)',
+      '  ' + escapeForDiag(headerLine),
+      '  ' + byteLength(headerLine) + '바이트, 따옴표 ' + (headerLine.indexOf('"') >= 0 ? '있음' : '없음') + ', 물리적 줄 수 ' + headerLine.split('\n').length,
+      '',
+      '첫 데이터 줄'
+    ].concat(firstRows.map(r => '  ' + escapeForDiag(r).slice(0, 300))).join('\n');
+    document.getElementById('diagView').innerText = diagText;
+  }
+
+  document.getElementById('btnCopyDiag').addEventListener('click', () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(diagText);
+  });
+
+  function renderHeaderRowOptions(rows) {
+    const limit = Math.min(rows.length, 5);
+    let html = '';
+    for (let i = 0; i < limit; i++) {
+      const preview = rows[i].slice(0, 4).map(v => flattenValue(v) || '(빈칸)').join(' | ').slice(0, 60);
+      html += '<option value="' + i + '">' + (i + 1) + '행: ' + escapeHtml(preview) + '</option>';
+    }
+    headerRowSelect.innerHTML = html;
+  }
+
+  function renderTitleOptions(headers, metas, selectedIdx, disabled) {
+    titleSelect.disabled = !!disabled;
     titleSelect.innerHTML = headers.map((h, i) => {
       const meta = metas[i];
-      const label = `${i + 1}. ${h || '(이름 없음)'} · ${KIND_LABEL[meta.kind] || meta.kind}${meta.emptyCount > 0 ? ` · 빈 값 ${meta.emptyCount}` : ''}`;
-      return `<option value="${escapeHtml(h)}"${i === selectedIdx ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+      const label = (i + 1) + '. ' + (h || '(이름 없음)') + ' · ' + KIND_LABEL[meta.kind] + (meta.emptyCount > 0 ? ' · 빈 값 ' + meta.emptyCount : '');
+      return '<option value="' + escapeHtml(h) + '"' + (i === selectedIdx ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
     }).join('');
   }
 
-  titleSelect.addEventListener('change', () => {
-    titleColumnName = titleSelect.value;
-    runClean();
-  });
-
   function renderTable() {
     const head = document.getElementById('tblHead');
-    const body = document.getElementById('tblBody');
+    const tbody = document.getElementById('tblBody');
     const headers = cleanedRows[0] || [];
-    head.innerHTML = `<tr>${headers.map((h, i) =>
-      `<th class="${i === 0 ? 'title-col' : ''}">${escapeHtml(h)}${i === 0 ? '<span class="title-badge">제목</span>' : ''}</th>`
-    ).join('')}</tr>`;
-
-    const preview = cleanedRows.slice(1, 11);
-    body.innerHTML = preview.map(row => {
-      return `<tr>${headers.map((_, i) => {
+    head.innerHTML = '<tr>' + headers.map((h, i) =>
+      '<th class="' + (i === 0 ? 'title-col' : '') + '">' + escapeHtml(h) + (i === 0 ? '<span class="title-badge">제목</span>' : '') + '</th>'
+    ).join('') + '</tr>';
+    tbody.innerHTML = cleanedRows.slice(1, 11).map(row =>
+      '<tr>' + headers.map((_, i) => {
         const val = row[i] || '';
-        if (val.includes('\n')) {
-          const lines = val.split('\n').length;
-          return `<td><span class="badge">${lines}줄</span><div class="cell-line">${escapeHtml(val)}</div></td>`;
+        if (val.indexOf('\n') >= 0) {
+          return '<td><span class="badge">' + val.split('\n').length + '줄</span><div class="cell-line">' + escapeHtml(val) + '</div></td>';
         }
-        return `<td>${escapeHtml(val)}</td>`;
-      }).join('')}</tr>`;
-    }).join('');
+        return '<td>' + escapeHtml(val) + '</td>';
+      }).join('') + '</tr>'
+    ).join('');
   }
 
   function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function downloadCSV(csvContent, filename) {
-    const parts = document.getElementById('optBom').checked ? ['﻿', csvContent] : [csvContent];
+  function downloadCSV(content, filename) {
+    const parts = document.getElementById('optBom').checked ? ['﻿', content] : [content];
     const blob = new Blob(parts, { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -856,20 +983,26 @@
     URL.revokeObjectURL(url);
   }
 
+  delimSelect.addEventListener('change', () => { headerRowIndex = null; titleColumnName = null; reparse(); });
+  headerRowSelect.addEventListener('change', () => { headerRowIndex = Number(headerRowSelect.value); titleColumnName = null; runClean(); });
+  titleSelect.addEventListener('change', () => { titleColumnName = titleSelect.value; runClean(); });
+  newlineSelect.addEventListener('change', runClean);
+  rowSepSelect.addEventListener('change', runClean);
   document.getElementById('btnReapply').addEventListener('click', runClean);
 
   document.getElementById('btnDownload').addEventListener('click', () => {
     if (!cleanedRows.length) return;
-    downloadCSV(cleanedRows.map(formatRow).join('\r\n'), `${originalBaseName}_notion_ready.csv`);
+    downloadCSV(cleanedRows.map(formatRow).join(rowSeparator()), originalBaseName + '_notion_ready.csv');
   });
 
   document.getElementById('btnSplitDownload').addEventListener('click', () => {
     if (!cleanedRows.length) return;
     const headerLine = formatRow(cleanedRows[0]);
+    const sep = rowSeparator();
     splitParts.forEach((partRows, idx) => {
       setTimeout(() => {
-        const fileContent = [headerLine].concat(partRows.map(formatRow)).join('\r\n');
-        downloadCSV(fileContent, `${originalBaseName}_notion_part${idx + 1}_of_${splitParts.length}.csv`);
+        const content = [headerLine].concat(partRows.map(formatRow)).join(sep);
+        downloadCSV(content, originalBaseName + '_notion_part' + (idx + 1) + '_of_' + splitParts.length + '.csv');
       }, idx * 350);
     });
   });
