@@ -171,6 +171,7 @@
       <h3>1. "하나 이상의 열을 제목 속성으로 설정해야 합니다"가 뜨는 경우</h3>
       <p>노션의 <span class="key-badge">CSV 헤더 매핑</span> 화면은 열 하나가 제목(Title) 속성으로 잡혀야 미리보기를 그립니다. 파일 쪽 원인과 화면 쪽 원인이 따로 있습니다.</p>
       <ul>
+        <li><strong>파일 이름부터 확인하세요.</strong> 내려받은 파일이 <span class="key-badge">download</span>처럼 확장자 없는 이름이면 노션이 CSV로 인식하지 못합니다. 다운로드 이름에 한글이 섞이면 브라우저가 이름을 통째로 버리기 때문이며, 본 도구는 저장 이름을 항상 ASCII로 바꿉니다.</li>
         <li><strong>파일 쪽:</strong> 헤더 이름 안의 줄바꿈, 눈에 보이지 않는 문자만 들어 있는 헤더, 이름 없는 첫 열, 값이 전부 빈 열, 숫자나 날짜만 있는 첫 열, 쉼표가 아닌 구분자로 저장된 파일, 첫 행이 제목 배너인 시트. 본 도구가 모두 보정합니다.</li>
         <li><strong>화면 쪽:</strong> 파일이 멀쩡해도 매핑 목록에서 제목이 지정되지 않은 상태면 같은 메시지가 남습니다. 첫 번째 열의 속성 드롭다운을 직접 <span class="key-badge">제목</span>으로 바꾸면 미리보기가 즉시 살아납니다.</li>
       </ul>
@@ -232,6 +233,16 @@
         <span class="hint">유지로 넣었을 때 계속 실패하면 공백 치환으로 한 번 시험해 보세요. 원인이 줄바꿈인지 아닌지 갈립니다.</span>
       </div>
       <div class="control">
+        <label for="partSizeSelect">조각 하나의 최대 크기</label>
+        <select id="partSizeSelect">
+          <option value="4">4MB (기본)</option>
+          <option value="2">2MB</option>
+          <option value="1">1MB</option>
+          <option value="0.5">0.5MB</option>
+        </select>
+        <span class="hint">노션 한도는 5MB지만, 열이 많고 셀이 긴 파일은 더 작게 나눠야 미리보기가 만들어지기도 합니다.</span>
+      </div>
+      <div class="control">
         <label for="rowSepSelect">행 구분</label>
         <select id="rowSepSelect">
           <option value="crlf">CRLF (기본)</option>
@@ -274,7 +285,24 @@
       <button class="btn warning" id="btnSplitDownload" style="display: none;">📦 노션 규격 분할 다운로드</button>
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
+      <button class="btn secondary" id="btnTestSet">🔍 원인 추적용 시험 파일 세트</button>
     </div>
+
+    <details class="diag" id="testSetGuide">
+      <summary>원인 추적용 시험 파일 세트 읽는 법</summary>
+      <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
+        버튼을 누르면 지금 데이터에서 뽑은 작은 파일 4개가 내려옵니다. 모두 5MB를 한참 밑돌고, 정상 업로드가 확인된 최소 파일과 같은 방식으로 저장됩니다.
+        A부터 D까지 순서대로 노션에 올려 보고, 어디서 <strong>미리보기 사용불가</strong>가 나오는지 확인하세요.
+      </p>
+      <ul style="margin: 10px 0 0 20px; line-height: 1.7; color: var(--text-sub); font-size: 0.85rem;">
+        <li><strong>A (전체 열, 10행, 원본 셀):</strong> 열 개수와 셀 길이를 그대로 둔 채 행만 줄인 파일입니다.</li>
+        <li><strong>B (3열, 10행, 원본 셀):</strong> 열만 줄였습니다. A는 실패하고 B가 되면 원인은 <strong>열 개수</strong>입니다.</li>
+        <li><strong>C (전체 열, 10행, 셀 100자):</strong> 셀 길이만 줄였습니다. A는 실패하고 C가 되면 원인은 <strong>셀 길이</strong>입니다.</li>
+        <li><strong>D (3열, 전체 행, 셀 100자):</strong> 행 수만 그대로입니다. 여기서만 실패하면 원인은 <strong>행 수</strong>입니다.</li>
+        <li><strong>넷 다 성공하면</strong> 원인은 파일 크기입니다. 위 <strong>조각 하나의 최대 크기</strong>를 2MB나 1MB로 낮춰 다시 분할하세요.</li>
+        <li><strong>넷 다 실패하면</strong> 원인은 파일이 아닙니다. 매핑 화면에서 첫 열의 속성을 직접 <strong>제목</strong>으로 지정해야 합니다.</li>
+      </ul>
+    </details>
     <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
     <p style="font-size: 0.82rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.5;">
       업로드가 계속 실패하면 <strong>노션 시험용 최소 파일</strong>을 받아 먼저 올려 보세요. 2열 3행에 줄바꿈도 따옴표도 없는 파일입니다.
@@ -348,6 +376,8 @@
   let diagText = '';
   let synthTitleTouched = false;
   let overNotionLimit = false;
+  let maxCellLenSeen = 0;
+  let fileNameSanitized = false;
   const TITLE_MAX_LEN = 80;
 
   const fileInput = document.getElementById('fileInput');
@@ -387,8 +417,21 @@
 
   document.getElementById('btnPickAnother').addEventListener('click', () => fileInput.click());
 
+  // 다운로드 파일 이름에 ASCII가 아닌 글자가 하나라도 있으면, 브라우저가 그 이름을 통째로 버리고
+  // 확장자 없는 "download"로 저장한다. 그러면 노션이 CSV로 인식하지 못해 미리보기를 만들지 못한다.
+  function toSafeBaseName(name) {
+    const ascii = String(name)
+      .replace(/[^A-Za-z0-9._-]+/g, '_')
+      .replace(/_{2,}/g, '_')
+      .replace(/^[._-]+|[._-]+$/g, '')
+      .slice(0, 60);
+    return ascii.length > 0 ? ascii : 'sheet';
+  }
+
   function loadFile(file) {
-    originalBaseName = file.name.replace(/\.[^/.]+$/, '');
+    const rawBaseName = file.name.replace(/\.[^/.]+$/, '');
+    originalBaseName = toSafeBaseName(rawBaseName);
+    fileNameSanitized = originalBaseName !== rawBaseName;
     document.getElementById('fileNameView').innerText = file.name + ' (' + (file.size / (1024 * 1024)).toFixed(2) + ' MB)';
     const reader = new FileReader();
     reader.onload = e => {
@@ -551,6 +594,7 @@
 
   const formatRow = row => row.map(formatCell).join(',');
   const rowSeparator = () => (rowSepSelect.value === 'lf' ? '\n' : '\r\n');
+  const partSizeBytes = () => Number(document.getElementById('partSizeSelect').value || 4) * 1024 * 1024;
   const byteLength = str => new TextEncoder().encode(str).length;
 
   function analyzeColumn(body, idx) {
@@ -796,6 +840,7 @@
     }
 
     const titleMeta = analyzeColumn(body, 0);
+    maxCellLenSeen = maxCellLen;
     cleanedRows = [headers].concat(body);
 
     // 12. 분할 계획. 행이 중간에서 잘리지 않게 행 단위로 담는다.
@@ -809,7 +854,7 @@
     for (let i = 1; i < cleanedRows.length; i++) {
       const rowBytes = byteLength(formatRow(cleanedRows[i]) + sep);
       totalBytes += rowBytes;
-      if (currentPart.length > 0 && (currentPart.length >= NOTION_SPLIT_ROWS || currentBytes + rowBytes > NOTION_SPLIT_BYTES)) {
+      if (currentPart.length > 0 && (currentPart.length >= NOTION_SPLIT_ROWS || currentBytes + rowBytes > partSizeBytes())) {
         splitParts.push(currentPart);
         currentPart = [];
         currentBytes = headerBytes;
@@ -831,8 +876,12 @@
     document.getElementById('statDroppedCols').innerText = droppedCols;
     document.getElementById('statQuoteFixes').innerText = parseQuoteFixes;
 
-    // 13. 점검 결과.
-    const verification = verifyOutput(headers);
+    // 13. 점검 결과. 검증은 실제로 업로드하는 조각 파일을 기준으로 한다.
+    const partInfos = splitParts.map((rows, i) => {
+      const content = buildPartContent(rows);
+      return { idx: i + 1, rows: rows.length, bytes: byteLength(content), verify: verifyContent(content, headers) };
+    });
+    const verification = partInfos.length ? partInfos[0].verify : { ok: false, reason: '데이터 행이 없습니다', cols: 0, rows: 0, checked: 0 };
     const exceedsRows = totalDataRows >= NOTION_LIMIT_ROWS;
     const exceedsSize = totalBytes >= NOTION_LIMIT_BYTES;
     overNotionLimit = exceedsRows || exceedsSize;
@@ -849,7 +898,7 @@
     if (longCells > 0) {
       addCheck('warn', '한 셀에 ' + NOTION_CELL_SOFT_LIMIT.toLocaleString() + '자를 넘는 칸이 ' + longCells.toLocaleString() + '개 있습니다(최대 ' + maxCellLen.toLocaleString() + '자). 노션은 텍스트 속성 값을 잘라 저장할 수 있습니다.');
     }
-    if (biggestRowBytes > NOTION_SPLIT_BYTES) {
+    if (biggestRowBytes > partSizeBytes()) {
       addCheck('warn', '가장 큰 행 하나가 ' + (biggestRowBytes / (1024 * 1024)).toFixed(2) + 'MB입니다. 행은 쪼갤 수 없으므로 이 행이 든 조각은 한도를 넘습니다. 해당 행의 긴 셀을 줄여 주세요.');
     }
     if (!headers[0]) {
@@ -889,13 +938,20 @@
     if (parseQuoteFixes > 0) addCheck('info', '닫는 따옴표가 없던 셀 ' + parseQuoteFixes.toLocaleString() + '개를 행 구조를 지키며 복구했습니다.');
     if (mismatches > 0) addCheck('info', '칸 수가 헤더와 다른 행 ' + mismatches.toLocaleString() + '개를 ' + headers.length + '칸으로 맞췄습니다.');
     if (flattenCells) addCheck('info', '셀 안의 줄바꿈을 모두 공백으로 바꿨습니다. 이 파일이 들어가면 원인은 줄바꿈입니다.');
-    if (verification.ok) {
-      addCheck('ok', '출력 파일을 표준 CSV 파서로 다시 읽어 확인했습니다. ' + verification.cols + '개 열로 정확히 나뉘고, 첫 열에 빈 값이 없습니다.');
+    if (fileNameSanitized) {
+      addCheck('info', '원본 파일 이름에 ASCII가 아닌 글자가 있어 저장 이름을 "' + originalBaseName + '"으로 바꿉니다. 한글이 섞인 이름은 브라우저가 통째로 버리고 확장자 없는 download 파일로 저장해, 노션이 CSV로 인식하지 못합니다.');
+    }
+    const badParts = partInfos.filter(p => !p.verify.ok);
+    if (badParts.length === 0) {
+      addCheck('ok', '실제로 올리게 될 파일 ' + partInfos.length + '개를 각각 표준 CSV 파서로 되읽어 확인했습니다. 모두 ' + verification.cols + '개 열로 정확히 나뉘고, 첫 열에 빈 값이 없습니다.');
     } else {
-      addCheck('warn', '출력 파일 자체 검증에 실패했습니다: ' + verification.reason);
+      addCheck('warn', badParts.length + '개 조각 파일이 자체 검증에 실패했습니다: ' + badParts[0].verify.reason);
+    }
+    if (headers.length >= 40) {
+      addCheck('info', '열이 ' + headers.length + '개입니다. 열이 많고 셀이 긴 파일은 노션이 미리보기를 못 만드는 경우가 있습니다. 원인 추적용 시험 파일 세트로 확인해 보세요.');
     }
     renderChecks();
-    renderDiagnostics(headers, totalDataRows, totalBytes, verification);
+    renderDiagnostics(headers, totalDataRows, totalBytes, verification, partInfos);
 
     updateDownloadButtons();
     if (exceedsRows || exceedsSize || splitParts.length > 1) {
@@ -986,9 +1042,13 @@
     return rows;
   }
 
-  function verifyOutput(headers) {
-    const sample = cleanedRows.slice(0, 501).map(formatRow).join(rowSeparator());
-    const back = strictParseCSV(sample);
+  // 실제로 노션에 올리는 파일은 조각 파일이므로, 조각 내용을 그대로 되읽어 검증한다.
+  function buildPartContent(partRows) {
+    return [formatRow(cleanedRows[0])].concat(partRows.map(formatRow)).join(rowSeparator());
+  }
+
+  function verifyContent(content, headers) {
+    const back = strictParseCSV(content);
     const expected = headers.length;
     const cols = back.length ? back[0].length : 0;
     const badRows = back.filter(r => r.length !== expected).length;
@@ -1007,7 +1067,7 @@
   }
 
   // 노션이 실제로 읽게 될 내용을 그대로 보여 준다. 추측 대신 이 화면을 보고 판단한다.
-  function renderDiagnostics(headers, totalDataRows, totalBytes, verification) {
+  function renderDiagnostics(headers, totalDataRows, totalBytes, verification, partInfos) {
     const sepName = rowSepSelect.value === 'lf' ? 'LF (\\n)' : 'CRLF (\\r\\n)';
     const delimName = activeDelimiter === TAB ? '탭' : '"' + activeDelimiter + '"';
     const headerLine = formatRow(headers);
@@ -1024,16 +1084,21 @@
         ? '초과, 분할 필요 (' + splitParts.length + '개 파일)'
         : '이내, 단일 업로드 가능'),
       '제목 열       : ' + (headers[0] || '(이름 없음)'),
-      '출력 재검증   : ' + (verification.ok
-        ? '앞 ' + verification.checked.toLocaleString() + '행을 표준 파서로 되읽어 ' + verification.cols + '열로 정확히 분리됨'
-        : '실패 (' + verification.reason + ')'),
+      '가장 긴 셀    : ' + maxCellLenSeen.toLocaleString() + '자',
+      '',
+      '실제로 올리게 될 파일 (이 파일들이 노션에 들어갑니다)'
+    ].concat(partInfos.map(p =>
+      '  ' + originalBaseName + (partInfos.length > 1 ? '_notion_part' + p.idx + '_of_' + partInfos.length : '_notion_ready') + '.csv'
+        + ' : ' + p.rows.toLocaleString() + '행, ' + (p.bytes / (1024 * 1024)).toFixed(2) + 'MB, 헤더 포함, '
+        + (p.verify.ok ? p.verify.cols + '열로 정확히 분리됨' : '검증 실패 (' + p.verify.reason + ')')
+    )).concat([
       '',
       '헤더 줄 (노션이 열 목록을 만드는 줄)',
       '  ' + escapeForDiag(headerLine),
       '  ' + byteLength(headerLine) + '바이트, 따옴표 ' + (headerLine.indexOf('"') >= 0 ? '있음' : '없음') + ', 물리적 줄 수 ' + headerLine.split('\n').length,
       '',
       '첫 데이터 줄'
-    ].concat(firstRows.map(r => '  ' + escapeForDiag(r).slice(0, 300))).join('\n');
+    ]).concat(firstRows.map(r => '  ' + escapeForDiag(r).slice(0, 300))).join('\n');
     document.getElementById('diagView').innerText = diagText;
   }
 
@@ -1087,7 +1152,8 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    // 이름에 ASCII가 아닌 글자가 남아 있으면 브라우저가 이름을 버리므로 여기서 마지막으로 막는다.
+    a.download = toSafeBaseName(filename.replace(/\.csv$/i, '')) + '.csv';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1099,6 +1165,7 @@
   titleSelect.addEventListener('change', () => { titleColumnName = titleSelect.value; runClean(); });
   newlineSelect.addEventListener('change', runClean);
   rowSepSelect.addEventListener('change', runClean);
+  document.getElementById('partSizeSelect').addEventListener('change', runClean);
   document.getElementById('optSynthTitle').addEventListener('change', () => { synthTitleTouched = true; runClean(); });
   document.getElementById('btnReapply').addEventListener('click', runClean);
 
@@ -1125,13 +1192,49 @@
 
   document.getElementById('btnSplitDownload').addEventListener('click', () => {
     if (!cleanedRows.length) return;
-    const headerLine = formatRow(cleanedRows[0]);
-    const sep = rowSeparator();
     splitParts.forEach((partRows, idx) => {
       setTimeout(() => {
-        const content = [headerLine].concat(partRows.map(formatRow)).join(sep);
-        downloadCSV(content, originalBaseName + '_notion_part' + (idx + 1) + '_of_' + splitParts.length + '.csv');
+        downloadCSV(buildPartContent(partRows), originalBaseName + '_notion_part' + (idx + 1) + '_of_' + splitParts.length + '.csv');
       }, idx * 350);
+    });
+  });
+
+  // 어떤 성질이 업로드를 막는지 가르는 시험 파일 세트.
+  // 열 개수, 셀 길이, 행 수를 하나씩만 바꿔 뽑아, 실패하는 지점이 곧 원인이 된다.
+  function buildTestSet() {
+    if (cleanedRows.length < 2) return [];
+    const headers = cleanedRows[0];
+    const body = cleanedRows.slice(1);
+    const narrowCount = Math.min(3, headers.length);
+    const narrow = row => row.slice(0, narrowCount);
+    const shorten = row => row.map(v => flattenValue(v).slice(0, 100));
+    const head10 = body.slice(0, 10);
+    return [
+      { name: 'A_allcols_10rows', rows: [headers].concat(head10) },
+      { name: 'B_' + narrowCount + 'cols_10rows', rows: [narrow(headers)].concat(head10.map(narrow)) },
+      { name: 'C_allcols_shortcells', rows: [headers].concat(head10.map(shorten)) },
+      { name: 'D_' + narrowCount + 'cols_allrows', rows: [narrow(headers)].concat(body.map(r => shorten(narrow(r)))) }
+    ];
+  }
+
+  document.getElementById('btnTestSet').addEventListener('click', () => {
+    const files = buildTestSet();
+    if (!files.length) return;
+    document.getElementById('testSetGuide').open = true;
+    files.forEach((file, idx) => {
+      setTimeout(() => {
+        // 정상 업로드가 확인된 최소 파일과 같은 조건으로 저장한다. CRLF, BOM 없음.
+        const content = file.rows.map(formatRow).join('\r\n');
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = originalBaseName + '_test_' + file.name + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, idx * 400);
     });
   });
 </script>
