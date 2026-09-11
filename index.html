@@ -235,24 +235,26 @@
       <div class="control">
         <label for="cellLimitSelect">셀 하나의 최대 길이</label>
         <select id="cellLimitSelect">
-          <option value="2000">2,000자 (기본)</option>
-          <option value="1000">1,000자</option>
-          <option value="500">500자</option>
+          <option value="100">100자 (기본, 통과 확인됨)</option>
+          <option value="150">150자</option>
           <option value="200">200자</option>
-          <option value="100">100자 (C 방식)</option>
-          <option value="4000">4,000자</option>
-          <option value="8000">8,000자</option>
+          <option value="300">300자</option>
+          <option value="400">400자</option>
+          <option value="500">500자</option>
+          <option value="1000">1,000자</option>
+          <option value="2000">2,000자</option>
           <option value="0">제한 없음</option>
         </select>
-        <span class="hint">노션은 셀 하나가 너무 길면 미리보기를 만들지 못합니다. 이 길이를 넘는 셀을 아래 방식으로 처리합니다.</span>
+        <span class="hint">노션은 셀 하나가 너무 길면 미리보기를 만들지 못합니다. 100자는 실제 업로드로 확인된 값이고, 더 큰 값은 아래 한계 찾기 세트로 확인한 뒤 올려 잡으세요.</span>
       </div>
       <div class="control">
         <label for="cellOverflowSelect">길이를 넘는 셀 처리</label>
         <select id="cellOverflowSelect">
-          <option value="split">다음 열로 이어붙이기 (기본)</option>
+          <option value="rows">다음 행으로 이어붙이기 (기본)</option>
+          <option value="split">다음 열로 이어붙이기</option>
           <option value="truncate">잘라내기</option>
         </select>
-        <span class="hint">이어붙이기는 내용을 하나도 잃지 않는 대신 열이 늘어납니다. 잘라내기는 열 수를 지키는 대신 뒷부분을 버립니다.</span>
+        <span class="hint">행으로 이어붙이면 열 이름을 그대로 두고 행이 늘어납니다. 열로 이어붙이면 행 수를 지키는 대신 열이 늘어납니다. 둘 다 글자는 하나도 잃지 않습니다.</span>
       </div>
       <div class="control">
         <label for="partSizeSelect">조각 하나의 최대 크기</label>
@@ -305,16 +307,16 @@
     <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
       <button class="btn" id="btnDownload">단일 CSV 다운로드</button>
       <button class="btn warning" id="btnSplitDownload" style="display: none;">📦 노션 규격 분할 다운로드</button>
-      <button class="btn" id="btnApplyC">✅ C 방식 적용</button>
+      <button class="btn" id="btnApplyC">✅ 통과 설정으로 전체 변환</button>
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
       <button class="btn secondary" id="btnTestSet">🔍 원인 추적용 시험 파일 세트</button>
-      <button class="btn secondary" id="btnMatrixSet">🧪 줄바꿈·길이 교차 시험 세트</button>
+      <button class="btn secondary" id="btnMatrixSet">📏 셀 길이 한계 찾기 세트</button>
     </div>
     <p style="font-size: 0.85rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.6;">
-      <strong style="color: var(--accent);">C 방식 적용</strong> 버튼은 시험 파일 C와 똑같은 조건, 곧 <strong>셀 안 줄바꿈을 모두 공백으로 바꾸고 셀을 100자로 자르는</strong> 설정을 전체 데이터에 겁니다.
-      C가 정상적으로 들어갔다면 이 설정으로 만든 파일도 들어갑니다. 100자를 넘는 글은 버려지므로, 어디까지 늘릴 수 있는지는
-      <strong>줄바꿈·길이 교차 시험 세트</strong>로 확인한 뒤 위 설정을 올려 잡으세요.
+      <strong style="color: var(--accent);">통과 설정으로 전체 변환</strong> 버튼은 업로드가 확인된 조건, 곧 <strong>셀을 100자로 제한하고 넘는 글자를 다음 행으로 이어붙이는</strong> 설정을 전체 데이터에 겁니다.
+      줄바꿈은 그대로 둡니다. 글자는 하나도 버리지 않고 행 수만 늘어납니다.
+      늘어나는 행을 줄이려면 <strong>셀 길이 한계 찾기 세트</strong>로 통과하는 가장 큰 길이를 확인한 뒤 위 설정을 올려 잡으세요.
     </p>
 
     <details class="diag" id="testSetGuide">
@@ -335,15 +337,10 @@
         B와 D에 열이 3개만 보이는 것은 정상입니다. 열 개수를 변수에서 빼기 위해 일부러 앞 3열만 담은 파일입니다.
       </p>
       <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        C는 <strong>줄바꿈 제거</strong>와 <strong>100자로 자르기</strong>가 한꺼번에 걸린 파일이라, C만으로는 둘 중 어느 쪽이 원인인지 갈리지 않습니다.
-        <strong>줄바꿈·길이 교차 시험 세트</strong>가 그것을 떼어 놓습니다.
+        원인은 셀 하나의 길이입니다. 100자는 통과하고 500자는 통과하지 못했으므로 한계는 그 사이에 있습니다.
+        <strong>셀 길이 한계 찾기 세트</strong>는 100자부터 500자까지 여섯 단계로 자른 파일을 뽑습니다. 줄바꿈은 그대로 둡니다.
+        통과하는 가장 큰 값을 위 <strong>셀 하나의 최대 길이</strong>에 넣으면 그만큼 늘어나는 행이 줄어듭니다.
       </p>
-      <ul style="margin: 10px 0 0 20px; line-height: 1.7; color: var(--text-sub); font-size: 0.85rem;">
-        <li><strong>N1 (줄바꿈 제거, 길이 그대로):</strong> 성공하면 원인은 <strong>줄바꿈뿐</strong>입니다. 길이는 건드릴 필요가 없습니다.</li>
-        <li><strong>N2 (줄바꿈 유지, 100자):</strong> 성공하면 원인은 <strong>길이뿐</strong>입니다.</li>
-        <li><strong>N3, N4 (줄바꿈 제거, 2,000자와 8,000자):</strong> N1이 실패했을 때 어디까지 허용되는지 봅니다.</li>
-        <li>통과한 조건을 위 <strong>셀 안 줄바꿈</strong>과 <strong>셀 하나의 최대 길이</strong>에 그대로 넣으면 전체 데이터가 같은 조건으로 변환됩니다.</li>
-      </ul>
     </details>
     <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
     <p style="font-size: 0.82rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.5;">
@@ -657,6 +654,38 @@
       return { headers: headers, body: cut, changedCells: changedCells, addedCols: 0 };
     }
 
+    if (mode === 'rows') {
+      // 열 이름을 그대로 둔 채 행을 늘린다. 한 행이 담지 못하는 글자를 다음 행이 이어받는다.
+      let pieceName = '조각';
+      let n = 2;
+      while (headers.indexOf(pieceName) >= 0) { pieceName = '조각 ' + n; n++; }
+      const newHeaders = headers.concat([pieceName]);
+      const newBody = [];
+      let changedCells = 0;
+      for (const row of body) {
+        let pieces = 1;
+        for (const v of row) {
+          if (v.length > limit) changedCells++;
+          const need = Math.ceil(v.length / limit);
+          if (need > pieces) pieces = need;
+        }
+        for (let c = 0; c < pieces; c++) {
+          const out = row.map(v => v.slice(c * limit, (c + 1) * limit));
+          const title = c === 0 ? (row[0] || '') : (row[0] || '') + ' (' + (c + 1) + '/' + pieces + ')';
+          out[0] = title.slice(0, limit);
+          out.push(String(c + 1));
+          newBody.push(out);
+        }
+      }
+      return {
+        headers: newHeaders,
+        body: newBody,
+        changedCells: changedCells,
+        addedCols: 1,
+        addedRows: newBody.length - body.length
+      };
+    }
+
     const chunkCount = headers.map((_, i) => {
       let max = 1;
       for (const row of body) {
@@ -936,6 +965,7 @@
     // 시험 파일 세트는 길이를 바꿔 가며 만들어야 하므로 제한 전 데이터를 따로 들고 있는다.
     preLimitRows = [headers].concat(body);
     const columnsBeforeLimit = headers.length;
+    const rowsBeforeLimit = body.length;
     const limited = applyCellLimit(headers, body, cellLimit(), cellOverflowMode());
     headers = limited.headers;
     body = limited.body;
@@ -995,6 +1025,8 @@
     }
     if (!cellLimit() && maxCellLen > NOTION_CELL_SOFT_LIMIT) {
       addCheck('warn', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자인데 길이 제한이 꺼져 있습니다. 셀이 길면 노션이 헤더 매핑 미리보기를 만들지 못합니다. 셀 하나의 최대 길이를 2,000자로 두세요.');
+    } else if (limited.changedCells > 0 && cellOverflowMode() === 'rows') {
+      addCheck('info', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자였습니다. ' + cellLimit().toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개를 다음 행으로 이어붙여, 행이 ' + rowsBeforeLimit.toLocaleString() + '행에서 ' + totalDataRows.toLocaleString() + '행이 됐습니다. 글자는 하나도 잃지 않았습니다. 이어지는 행은 제목 뒤에 (2/N) 표시가 붙고 "조각" 열로 순서를 알 수 있습니다.');
     } else if (limited.changedCells > 0 && cellOverflowMode() === 'split') {
       addCheck('info', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자였습니다. ' + cellLimit().toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개를 다음 열로 이어붙여, 열이 ' + columnsBeforeLimit + '개에서 ' + headers.length + '개가 됐습니다. 내용은 그대로입니다.');
     } else if (limited.changedCells > 0) {
@@ -1053,7 +1085,7 @@
       addCheck('warn', badParts.length + '개 조각 파일이 자체 검증에 실패했습니다: ' + badParts[0].verify.reason);
     }
     if (headers.length >= 40) {
-      addCheck('info', '열이 ' + headers.length + '개입니다. 열이 많고 셀이 긴 파일은 노션이 미리보기를 못 만드는 경우가 있습니다. 원인 추적용 시험 파일 세트로 확인해 보세요.');
+      addCheck('info', '열이 ' + headers.length + '개입니다.');
     }
     renderChecks();
     renderDiagnostics(headers, totalDataRows, totalBytes, verification, partInfos);
@@ -1191,7 +1223,9 @@
         : '이내, 단일 업로드 가능'),
       '제목 열       : ' + (headers[0] || '(이름 없음)'),
       '가장 긴 셀    : ' + maxCellLenSeen.toLocaleString() + '자 (보정 전)',
-      '셀 길이 제한  : ' + (cellLimit() ? cellLimit().toLocaleString() + '자, ' + (cellOverflowMode() === 'split' ? '다음 열로 이어붙임' : '잘라냄') : '제한 없음'),
+      '셀 길이 제한  : ' + (cellLimit()
+        ? cellLimit().toLocaleString() + '자, ' + ({ rows: '다음 행으로 이어붙임', split: '다음 열로 이어붙임', truncate: '잘라냄' })[cellOverflowMode()]
+        : '제한 없음'),
       '',
       '실제로 올리게 될 파일 (이 파일들이 노션에 들어갑니다)'
     ].concat(partInfos.map(p =>
@@ -1280,9 +1314,9 @@
 
   // 시험 파일 C와 똑같은 조건을 전체 데이터에 건다. 줄바꿈을 공백으로 바꾸고 셀을 100자로 자른다.
   document.getElementById('btnApplyC').addEventListener('click', () => {
-    newlineSelect.value = 'space';
+    newlineSelect.value = 'keep';
     document.getElementById('cellLimitSelect').value = '100';
-    document.getElementById('cellOverflowSelect').value = 'truncate';
+    document.getElementById('cellOverflowSelect').value = 'rows';
     runClean();
   });
 
@@ -1334,9 +1368,8 @@
     ];
   }
 
-  // 줄바꿈 유무와 셀 길이를 교차시킨 파일들.
-  // 시험 파일 C는 줄바꿈을 없애고 100자로 자른 것이라 두 가지가 한꺼번에 바뀌어 있었다.
-  // 하나씩 떼어 봐야 어느 쪽이 노션을 막는지 갈린다.
+  // 셀 길이만 바꾼 파일들. 줄바꿈은 원인이 아닌 것으로 확인됐으므로 그대로 둔다.
+  // 통과하는 가장 큰 길이를 찾으면 늘어나는 행을 그만큼 줄일 수 있다.
   function buildMatrixSet() {
     if (preLimitRows.length < 2) return [];
     const headers = preLimitRows[0];
@@ -1348,12 +1381,7 @@
         return limit ? t.slice(0, limit) : t;
       })))
     });
-    return [
-      make('N1_noNewline_full', false, 0),
-      make('N2_newline_100', true, 100),
-      make('N3_noNewline_2000', false, 2000),
-      make('N4_noNewline_8000', false, 8000)
-    ];
+    return [100, 150, 200, 300, 400, 500].map(limit => make('len' + limit, true, limit));
   }
 
   function downloadTestFiles(files) {
