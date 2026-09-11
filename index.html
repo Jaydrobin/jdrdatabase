@@ -227,25 +227,22 @@
       <div class="control">
         <label for="newlineSelect">셀 안 줄바꿈</label>
         <select id="newlineSelect">
-          <option value="keep">유지 (기본)</option>
-          <option value="space">공백으로 치환 (최대 호환)</option>
+          <option value="space">공백으로 치환 (기본, 필수)</option>
+          <option value="keep">유지</option>
         </select>
-        <span class="hint">유지로 넣었을 때 계속 실패하면 공백 치환으로 한 번 시험해 보세요. 원인이 줄바꿈인지 아닌지 갈립니다.</span>
+        <span class="hint">노션 가져오기는 셀 안의 줄바꿈을 행 구분으로 읽습니다. 줄바꿈을 남기면 그 자리에서 행이 끊겨 앞쪽 몇 개 열만 들어갑니다.</span>
       </div>
       <div class="control">
-        <label for="cellLimitSelect">셀 하나의 최대 길이</label>
-        <select id="cellLimitSelect">
-          <option value="100">100자 (기본, 통과 확인됨)</option>
-          <option value="150">150자</option>
-          <option value="200">200자</option>
-          <option value="300">300자</option>
-          <option value="400">400자</option>
-          <option value="500">500자</option>
+        <label for="rowBudgetSelect">행 하나의 최대 글자 수</label>
+        <select id="rowBudgetSelect">
+          <option value="2000">2,000자 (기본)</option>
           <option value="1000">1,000자</option>
-          <option value="2000">2,000자</option>
+          <option value="3000">3,000자</option>
+          <option value="5000">5,000자</option>
+          <option value="10000">10,000자</option>
           <option value="0">제한 없음</option>
         </select>
-        <span class="hint">노션은 셀 하나가 너무 길면 미리보기를 만들지 못합니다. 100자는 실제 업로드로 확인된 값이고, 더 큰 값은 아래 한계 찾기 세트로 확인한 뒤 올려 잡으세요.</span>
+        <span class="hint">노션 미리보기는 한 행이 담은 글자가 많으면 그 행을 건너뜁니다. 열 수로 나눈 값이 셀 하나의 한도가 됩니다. 통과하는 가장 큰 값은 아래 한계 찾기 세트로 확인하세요.</span>
       </div>
       <div class="control">
         <label for="cellOverflowSelect">길이를 넘는 셀 처리</label>
@@ -311,12 +308,12 @@
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
       <button class="btn secondary" id="btnTestSet">🔍 원인 추적용 시험 파일 세트</button>
-      <button class="btn secondary" id="btnMatrixSet">📏 셀 길이 한계 찾기 세트</button>
+      <button class="btn secondary" id="btnMatrixSet">📏 행 글자 수 한계 찾기 세트</button>
     </div>
     <p style="font-size: 0.85rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.6;">
-      <strong style="color: var(--accent);">통과 설정으로 전체 변환</strong> 버튼은 업로드가 확인된 조건, 곧 <strong>셀을 100자로 제한하고 넘는 글자를 다음 행으로 이어붙이는</strong> 설정을 전체 데이터에 겁니다.
-      줄바꿈은 그대로 둡니다. 글자는 하나도 버리지 않고 행 수만 늘어납니다.
-      늘어나는 행을 줄이려면 <strong>셀 길이 한계 찾기 세트</strong>로 통과하는 가장 큰 길이를 확인한 뒤 위 설정을 올려 잡으세요.
+      <strong style="color: var(--accent);">통과 설정으로 전체 변환</strong> 버튼은 <strong>셀 안 줄바꿈을 공백으로 바꾸고, 한 행을 2,000자로 제한하고, 넘는 글자를 다음 행으로 이어붙이는</strong> 설정을 전체 데이터에 겁니다.
+      글자는 하나도 버리지 않고 행 수만 늘어납니다.
+      늘어나는 행을 줄이려면 <strong>행 글자 수 한계 찾기 세트</strong>로 통과하는 가장 큰 값을 확인한 뒤 위 설정을 올려 잡으세요.
     </p>
 
     <details class="diag" id="testSetGuide">
@@ -337,9 +334,13 @@
         B와 D에 열이 3개만 보이는 것은 정상입니다. 열 개수를 변수에서 빼기 위해 일부러 앞 3열만 담은 파일입니다.
       </p>
       <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        원인은 셀 하나의 길이입니다. 100자는 통과하고 500자는 통과하지 못했으므로 한계는 그 사이에 있습니다.
-        <strong>셀 길이 한계 찾기 세트</strong>는 100자부터 500자까지 여섯 단계로 자른 파일을 뽑습니다. 줄바꿈은 그대로 둡니다.
-        통과하는 가장 큰 값을 위 <strong>셀 하나의 최대 길이</strong>에 넣으면 그만큼 늘어나는 행이 줄어듭니다.
+        막는 조건은 두 가지입니다. 하나는 <strong>셀 안의 줄바꿈</strong>이고, 다른 하나는 <strong>한 행이 담은 글자 수</strong>입니다.
+        미리보기에서 사라지는 단위가 열이 아니라 행이었고, 셀을 길게 잡을수록 보이는 행이 줄다가 결국 하나도 남지 않았습니다.
+        한 행이 커지면 그 행이 통째로 건너뛰어지고, 남는 행이 없으면 제목으로 쓸 열도 없어져 그 메시지가 뜹니다.
+      </p>
+      <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
+        <strong>행 글자 수 한계 찾기 세트</strong>는 줄바꿈을 모두 없앤 뒤 한 행을 1,000자, 2,000자, 3,000자, 5,000자, 10,000자로 맞춘 파일을 뽑습니다.
+        열 개수는 그대로입니다. 10행이 모두 보이는 가장 큰 값을 위 <strong>행 하나의 최대 글자 수</strong>에 넣으면 그만큼 늘어나는 행이 줄어듭니다.
       </p>
     </details>
     <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
@@ -416,6 +417,9 @@
   let synthTitleTouched = false;
   let overNotionLimit = false;
   let maxCellLenSeen = 0;
+  let maxRowCharsBefore = 0;
+  let maxRowCharsAfter = 0;
+  let maxCellAfter = 0;
   let fileNameSanitized = false;
   let preLimitRows = [];
   const TITLE_MAX_LEN = 80;
@@ -635,8 +639,43 @@
   const formatRow = row => row.map(formatCell).join(',');
   const rowSeparator = () => (rowSepSelect.value === 'lf' ? '\n' : '\r\n');
   const partSizeBytes = () => Number(document.getElementById('partSizeSelect').value || 4) * 1024 * 1024;
-  const cellLimit = () => Number(document.getElementById('cellLimitSelect').value || 0);
+  const rowBudget = () => Number(document.getElementById('rowBudgetSelect').value || 0);
+  // 막는 것은 셀 하나가 아니라 한 행이 담은 글자 수다. 예산을 열 수로 나눠 셀 한도를 정한다.
+  const cellLimitFor = cols => (rowBudget() ? Math.max(20, Math.floor(rowBudget() / Math.max(1, cols))) : 0);
+  let effectiveCellLimit = 0;
   const cellOverflowMode = () => document.getElementById('cellOverflowSelect').value;
+
+  // 한 행에 허용된 글자를 열마다 나눈다. 짧은 열부터 필요한 만큼 주고, 남는 몫을 긴 열이 나눠 갖는다.
+  // 모든 열에 똑같이 나누면 짧은 열까지 잘려 읽을 수 없게 된다.
+  function allocateRowBudget(lengths, budget, cap) {
+    const alloc = lengths.map(() => 0);
+    let active = [];
+    for (let i = 0; i < lengths.length; i++) if (lengths[i] > 0) active.push(i);
+    let left = budget;
+    while (active.length > 0 && left > 0) {
+      const share = Math.floor(left / active.length);
+      if (share < 1) break;
+      const next = [];
+      let used = 0;
+      for (const i of active) {
+        const room = (cap ? Math.min(lengths[i], cap) : lengths[i]) - alloc[i];
+        const give = Math.min(share, room);
+        alloc[i] += give;
+        used += give;
+        if (alloc[i] < (cap ? Math.min(lengths[i], cap) : lengths[i])) next.push(i);
+      }
+      if (used === 0) break;
+      left -= used;
+      active = next;
+    }
+    // 아무 열도 받지 못하면 진행이 멈추므로 가장 긴 열에 한 글자는 준다.
+    if (alloc.every(v => v === 0)) {
+      let longest = -1;
+      for (let i = 0; i < lengths.length; i++) if (lengths[i] > 0 && (longest < 0 || lengths[i] > lengths[longest])) longest = i;
+      if (longest >= 0) alloc[longest] = 1;
+    }
+    return alloc;
+  }
 
   // 긴 셀을 노션이 받아들일 수 있는 길이로 맞춘다.
   // 이어붙이기는 열을 늘려 내용을 그대로 보존하고, 잘라내기는 열 수를 지키는 대신 뒷부분을 버린다.
@@ -662,21 +701,33 @@
       const newHeaders = headers.concat([pieceName]);
       const newBody = [];
       let changedCells = 0;
+      const budget = rowBudget();
+
       for (const row of body) {
-        let pieces = 1;
-        for (const v of row) {
-          if (v.length > limit) changedCells++;
-          const need = Math.ceil(v.length / limit);
-          if (need > pieces) pieces = need;
-        }
-        for (let c = 0; c < pieces; c++) {
-          const out = row.map(v => v.slice(c * limit, (c + 1) * limit));
-          const title = c === 0 ? (row[0] || '') : (row[0] || '') + ' (' + (c + 1) + '/' + pieces + ')';
-          out[0] = title.slice(0, limit);
-          out.push(String(c + 1));
-          newBody.push(out);
-        }
+        const title = row[0] || '';
+        const rest = row.slice(1);
+        for (const v of rest) if (v.length > limit) changedCells++;
+
+        // 한 행에 쓸 수 있는 글자를 열마다 나눈다. 짧은 열은 통째로 넣고 남는 몫을 긴 열에 돌린다.
+        const perRow = budget ? Math.max(1, budget - title.length) : limit * rest.length;
+        const remaining = rest.slice();
+        const pieces = [];
+        let guard = 0;
+        do {
+          // 예산이 있으면 예산 자체가 한도이므로 열마다 따로 상한을 두지 않는다.
+          const alloc = allocateRowBudget(remaining.map(v => v.length), perRow, budget ? 0 : limit);
+          const out = remaining.map((v, i) => v.slice(0, alloc[i]));
+          for (let i = 0; i < remaining.length; i++) remaining[i] = remaining[i].slice(alloc[i]);
+          pieces.push(out);
+          guard++;
+        } while (remaining.some(v => v.length > 0) && guard < 100000);
+
+        pieces.forEach((out, idx) => {
+          const label = idx === 0 ? title : title + ' (' + (idx + 1) + '/' + pieces.length + ')';
+          newBody.push([label].concat(out).concat([String(idx + 1)]));
+        });
       }
+
       return {
         headers: newHeaders,
         body: newBody,
@@ -960,13 +1011,15 @@
 
     const titleMeta = analyzeColumn(body, 0);
     maxCellLenSeen = maxCellLen;
+    maxRowCharsBefore = body.reduce((m, r) => Math.max(m, r.reduce((t, v) => t + v.length, 0)), 0);
 
     // 12. 셀 길이 제한. 노션은 셀 하나가 너무 길면 헤더 매핑 미리보기를 만들지 못한다.
     // 시험 파일 세트는 길이를 바꿔 가며 만들어야 하므로 제한 전 데이터를 따로 들고 있는다.
     preLimitRows = [headers].concat(body);
     const columnsBeforeLimit = headers.length;
     const rowsBeforeLimit = body.length;
-    const limited = applyCellLimit(headers, body, cellLimit(), cellOverflowMode());
+    effectiveCellLimit = cellLimitFor(headers.length);
+    const limited = applyCellLimit(headers, body, effectiveCellLimit, cellOverflowMode());
     headers = limited.headers;
     body = limited.body;
     cleanedRows = [headers].concat(body);
@@ -994,6 +1047,8 @@
 
     const totalDataRows = cleanedRows.length - 1;
     const totalMB = (totalBytes / (1024 * 1024)).toFixed(2);
+    maxRowCharsAfter = cleanedRows.slice(1).reduce((m, r) => Math.max(m, r.reduce((t, v) => t + v.length, 0)), 0);
+    maxCellAfter = cleanedRows.slice(1).reduce((m, r) => Math.max(m, r.reduce((t, v) => Math.max(t, v.length), 0)), 0);
 
     document.getElementById('statRows').innerText = totalDataRows.toLocaleString();
     document.getElementById('statCols').innerText = headers.length;
@@ -1023,14 +1078,14 @@
     if (exceedsRows) {
       addCheck('warn', '데이터 행이 ' + totalDataRows.toLocaleString() + '행으로 노션 한도 20,000행을 넘습니다. 분할 다운로드를 쓰세요.');
     }
-    if (!cellLimit() && maxCellLen > NOTION_CELL_SOFT_LIMIT) {
+    if (!effectiveCellLimit && maxCellLen > NOTION_CELL_SOFT_LIMIT) {
       addCheck('warn', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자인데 길이 제한이 꺼져 있습니다. 셀이 길면 노션이 헤더 매핑 미리보기를 만들지 못합니다. 셀 하나의 최대 길이를 2,000자로 두세요.');
     } else if (limited.changedCells > 0 && cellOverflowMode() === 'rows') {
-      addCheck('info', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자였습니다. ' + cellLimit().toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개를 다음 행으로 이어붙여, 행이 ' + rowsBeforeLimit.toLocaleString() + '행에서 ' + totalDataRows.toLocaleString() + '행이 됐습니다. 글자는 하나도 잃지 않았습니다. 이어지는 행은 제목 뒤에 (2/N) 표시가 붙고 "조각" 열로 순서를 알 수 있습니다.');
+      addCheck('info', '한 행이 ' + maxRowCharsBefore.toLocaleString() + '자까지 갔습니다. 예산 ' + rowBudget().toLocaleString() + '자에 맞춰 넘치는 글자를 다음 행으로 넘겨, 행이 ' + rowsBeforeLimit.toLocaleString() + '행에서 ' + totalDataRows.toLocaleString() + '행이 됐고 가장 큰 행은 ' + maxRowCharsAfter.toLocaleString() + '자가 됐습니다. 글자는 하나도 잃지 않았습니다. 이어지는 행은 제목 뒤에 (2/N) 표시가 붙고 "조각" 열로 순서를 알 수 있습니다.');
     } else if (limited.changedCells > 0 && cellOverflowMode() === 'split') {
-      addCheck('info', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자였습니다. ' + cellLimit().toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개를 다음 열로 이어붙여, 열이 ' + columnsBeforeLimit + '개에서 ' + headers.length + '개가 됐습니다. 내용은 그대로입니다.');
+      addCheck('info', '가장 긴 셀이 ' + maxCellLen.toLocaleString() + '자였습니다. ' + effectiveCellLimit.toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개를 다음 열로 이어붙여, 열이 ' + columnsBeforeLimit + '개에서 ' + headers.length + '개가 됐습니다. 내용은 그대로입니다.');
     } else if (limited.changedCells > 0) {
-      addCheck('warn', cellLimit().toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개의 뒷부분을 잘라냈습니다. 내용을 보존하려면 처리 방식을 이어붙이기로 바꾸세요.');
+      addCheck('warn', effectiveCellLimit.toLocaleString() + '자를 넘는 셀 ' + limited.changedCells.toLocaleString() + '개의 뒷부분을 잘라냈습니다. 내용을 보존하려면 처리 방식을 이어붙이기로 바꾸세요.');
     }
     if (headers.length > 200) {
       addCheck('warn', '열이 ' + headers.length + '개까지 늘었습니다. 노션에서 다루기 어려우면 셀 최대 길이를 늘리거나 처리 방식을 잘라내기로 바꾸세요.');
@@ -1074,7 +1129,11 @@
     if (filledTitles > 0) addCheck('info', '비어 있던 제목 ' + filledTitles.toLocaleString() + '개를 "무제 N"으로 채웠습니다.');
     if (parseQuoteFixes > 0) addCheck('info', '닫는 따옴표가 없던 셀 ' + parseQuoteFixes.toLocaleString() + '개를 행 구조를 지키며 복구했습니다.');
     if (mismatches > 0) addCheck('info', '칸 수가 헤더와 다른 행 ' + mismatches.toLocaleString() + '개를 ' + headers.length + '칸으로 맞췄습니다.');
-    if (flattenCells) addCheck('info', '셀 안의 줄바꿈을 모두 공백으로 바꿨습니다. 이 파일이 들어가면 원인은 줄바꿈입니다.');
+    if (flattenCells) {
+      addCheck('ok', '셀 안의 줄바꿈을 모두 공백으로 바꿨습니다. 노션 가져오기는 셀 안의 줄바꿈을 행 구분으로 읽기 때문에, 이 처리가 없으면 앞쪽 몇 개 열만 들어갑니다.');
+    } else if (multilines > 0) {
+      addCheck('warn', '줄바꿈이 든 셀이 ' + multilines.toLocaleString() + '개 있는데 그대로 두도록 설정돼 있습니다. 노션은 그 자리에서 행을 끊어 읽으므로 앞쪽 몇 개 열만 들어갑니다. 셀 안 줄바꿈을 공백으로 치환으로 바꾸세요.');
+    }
     if (fileNameSanitized) {
       addCheck('info', '파일 이름에 저장에 쓸 수 없는 글자가 있어 "' + originalBaseName + '"으로 바꿉니다.');
     }
@@ -1222,9 +1281,11 @@
         ? '초과, 분할 필요 (' + splitParts.length + '개 파일)'
         : '이내, 단일 업로드 가능'),
       '제목 열       : ' + (headers[0] || '(이름 없음)'),
+      '가장 큰 행    : ' + maxRowCharsBefore.toLocaleString() + '자 → ' + maxRowCharsAfter.toLocaleString() + '자 (보정 전 → 후)',
       '가장 긴 셀    : ' + maxCellLenSeen.toLocaleString() + '자 (보정 전)',
-      '셀 길이 제한  : ' + (cellLimit()
-        ? cellLimit().toLocaleString() + '자, ' + ({ rows: '다음 행으로 이어붙임', split: '다음 열로 이어붙임', truncate: '잘라냄' })[cellOverflowMode()]
+      '행 글자 수 예산: ' + (rowBudget() ? rowBudget().toLocaleString() + '자' : '제한 없음'),
+      '긴 글자 처리  : ' + (effectiveCellLimit
+        ? ({ rows: '다음 행으로 이어붙임', split: '다음 열로 이어붙임', truncate: '잘라냄' })[cellOverflowMode()] + ', 보정 후 가장 긴 셀 ' + maxCellAfter.toLocaleString() + '자'
         : '제한 없음'),
       '',
       '실제로 올리게 될 파일 (이 파일들이 노션에 들어갑니다)'
@@ -1307,15 +1368,15 @@
   newlineSelect.addEventListener('change', runClean);
   rowSepSelect.addEventListener('change', runClean);
   document.getElementById('partSizeSelect').addEventListener('change', runClean);
-  document.getElementById('cellLimitSelect').addEventListener('change', runClean);
+  document.getElementById('rowBudgetSelect').addEventListener('change', runClean);
   document.getElementById('cellOverflowSelect').addEventListener('change', runClean);
   document.getElementById('optSynthTitle').addEventListener('change', () => { synthTitleTouched = true; runClean(); });
   document.getElementById('btnReapply').addEventListener('click', runClean);
 
   // 시험 파일 C와 똑같은 조건을 전체 데이터에 건다. 줄바꿈을 공백으로 바꾸고 셀을 100자로 자른다.
   document.getElementById('btnApplyC').addEventListener('click', () => {
-    newlineSelect.value = 'keep';
-    document.getElementById('cellLimitSelect').value = '100';
+    newlineSelect.value = 'space';
+    document.getElementById('rowBudgetSelect').value = '2000';
     document.getElementById('cellOverflowSelect').value = 'rows';
     runClean();
   });
@@ -1368,20 +1429,20 @@
     ];
   }
 
-  // 셀 길이만 바꾼 파일들. 줄바꿈은 원인이 아닌 것으로 확인됐으므로 그대로 둔다.
-  // 통과하는 가장 큰 길이를 찾으면 늘어나는 행을 그만큼 줄일 수 있다.
+  // 줄바꿈을 모두 없앤 뒤 한 행이 담는 글자 수만 바꾼 파일들.
+  // 미리보기에서 사라지는 단위가 행이므로, 재야 할 값도 셀이 아니라 행이다.
+  // 통과하는 가장 큰 값을 찾으면 늘어나는 행을 그만큼 줄일 수 있다.
   function buildMatrixSet() {
     if (preLimitRows.length < 2) return [];
     const headers = preLimitRows[0];
     const head10 = preLimitRows.slice(1, 11);
-    const make = (name, keepNewline, limit) => ({
-      name: name,
-      rows: [headers].concat(head10.map(row => row.map(v => {
-        const t = keepNewline ? v : flattenValue(v);
-        return limit ? t.slice(0, limit) : t;
-      })))
+    return [1000, 2000, 3000, 5000, 10000].map(budget => {
+      const per = Math.max(20, Math.floor(budget / Math.max(1, headers.length)));
+      return {
+        name: 'row' + budget,
+        rows: [headers].concat(head10.map(row => row.map(v => flattenValue(v).slice(0, per))))
+      };
     });
-    return [100, 150, 200, 300, 400, 500].map(limit => make('len' + limit, true, limit));
   }
 
   function downloadTestFiles(files) {
