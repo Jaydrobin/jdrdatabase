@@ -275,6 +275,7 @@
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
     </div>
+    <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
     <p style="font-size: 0.82rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.5;">
       업로드가 계속 실패하면 <strong>노션 시험용 최소 파일</strong>을 받아 먼저 올려 보세요. 2열 3행에 줄바꿈도 따옴표도 없는 파일입니다.
       이 파일에서도 같은 메시지가 나오면 원인은 변환 결과가 아니라 매핑 화면이며, 첫 열의 속성을 직접 <strong>제목</strong>으로 바꾸면 됩니다.
@@ -328,6 +329,7 @@
   const NOTION_SPLIT_BYTES = 4.0 * 1024 * 1024;
   const NOTION_LIMIT_ROWS = 20000;
   const NOTION_LIMIT_BYTES = 5 * 1024 * 1024;
+  const NOTION_CELL_SOFT_LIMIT = 2000;
   const TAB = String.fromCharCode(9);
 
   // 눈에 보이지 않지만 헤더 이름을 망가뜨리는 문자들. 웹에서 복사한 텍스트에 흔히 섞인다.
@@ -345,6 +347,7 @@
   let checks = [];
   let diagText = '';
   let synthTitleTouched = false;
+  let overNotionLimit = false;
   const TITLE_MAX_LEN = 80;
 
   const fileInput = document.getElementById('fileInput');
@@ -663,12 +666,16 @@
     // 4. 본문 정규화. 모든 행을 같은 칸 수로 맞추고 셀 내부 개행을 정제한다.
     let multilines = 0;
     let mismatches = 0;
+    let maxCellLen = 0;
+    let longCells = 0;
     let body = [];
     for (const src of dataRows) {
       if (src.length !== maxCols) mismatches++;
       const row = [];
       for (let i = 0; i < maxCols; i++) {
         let text = stripInvisible(src[i]);
+        if (text.length > maxCellLen) maxCellLen = text.length;
+        if (text.length > NOTION_CELL_SOFT_LIMIT) longCells++;
         if (/[\r\n]/.test(text)) {
           multilines++;
           text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -826,6 +833,25 @@
 
     // 13. 점검 결과.
     const verification = verifyOutput(headers);
+    const exceedsRows = totalDataRows >= NOTION_LIMIT_ROWS;
+    const exceedsSize = totalBytes >= NOTION_LIMIT_BYTES;
+    overNotionLimit = exceedsRows || exceedsSize;
+    const biggestRowBytes = cleanedRows.slice(1).reduce((m, r) => Math.max(m, byteLength(formatRow(r))), 0);
+
+    // 한도를 넘은 파일은 노션이 업로드는 받아 주지만 미리보기를 만들지 못한다.
+    // 이때 화면에는 제목 속성을 지정하라는 메시지만 남아 원인을 오해하기 쉽다.
+    if (exceedsSize) {
+      addCheck('warn', '이 파일은 ' + totalMB + 'MB로 노션 단일 업로드 한도 5MB를 넘습니다. 단일 파일로 올리면 미리보기가 만들어지지 않고 "하나 이상의 열을 제목 속성으로 설정해야 합니다"만 표시됩니다. 아래 분할 다운로드로 받아 순서대로 올리세요.');
+    }
+    if (exceedsRows) {
+      addCheck('warn', '데이터 행이 ' + totalDataRows.toLocaleString() + '행으로 노션 한도 20,000행을 넘습니다. 분할 다운로드를 쓰세요.');
+    }
+    if (longCells > 0) {
+      addCheck('warn', '한 셀에 ' + NOTION_CELL_SOFT_LIMIT.toLocaleString() + '자를 넘는 칸이 ' + longCells.toLocaleString() + '개 있습니다(최대 ' + maxCellLen.toLocaleString() + '자). 노션은 텍스트 속성 값을 잘라 저장할 수 있습니다.');
+    }
+    if (biggestRowBytes > NOTION_SPLIT_BYTES) {
+      addCheck('warn', '가장 큰 행 하나가 ' + (biggestRowBytes / (1024 * 1024)).toFixed(2) + 'MB입니다. 행은 쪼갤 수 없으므로 이 행이 든 조각은 한도를 넘습니다. 해당 행의 긴 셀을 줄여 주세요.');
+    }
     if (!headers[0]) {
       addCheck('warn', '제목 열의 이름이 비어 있습니다. 이름 없는 열은 노션이 제목으로 잡지 않습니다. 헤더 자동 보정을 켜 주세요.');
     } else if (titleMeta.emptyCount > 0) {
@@ -871,8 +897,7 @@
     renderChecks();
     renderDiagnostics(headers, totalDataRows, totalBytes, verification);
 
-    const exceedsRows = totalDataRows >= NOTION_LIMIT_ROWS;
-    const exceedsSize = totalBytes >= NOTION_LIMIT_BYTES;
+    updateDownloadButtons();
     if (exceedsRows || exceedsSize || splitParts.length > 1) {
       limitAlertBox.style.display = 'flex';
       let msg = '<strong>노션 권장 규격 초과 감지:</strong> ';
@@ -895,6 +920,23 @@
 
     document.getElementById('logView').innerText = '[변환 준비 완료] 제목 열: ' + (headers[0] || '(이름 없음)') + ' | 열 수: ' + headers.length + '개 | 총 ' + totalDataRows.toLocaleString() + '행 (' + totalMB + ' MB) | 분할 파일: ' + splitParts.length + '개';
     renderTable();
+  }
+
+  // 한도를 넘은 파일에서 단일 다운로드가 기본 동작처럼 보이면 그 파일을 그대로 올리게 된다.
+  // 그 결과가 바로 미리보기 없는 제목 속성 메시지다.
+  function updateDownloadButtons() {
+    const single = document.getElementById('btnDownload');
+    const note = document.getElementById('limitNote');
+    if (overNotionLimit) {
+      single.className = 'btn secondary';
+      single.innerText = '단일 CSV 다운로드 (노션 한도 초과)';
+      note.style.display = 'block';
+      note.innerText = '이 파일은 노션 한 번에 올릴 수 있는 크기를 넘습니다. 분할 다운로드로 받은 파일을 첫 번째부터 순서대로 올리세요.';
+    } else {
+      single.className = 'btn';
+      single.innerText = '단일 CSV 다운로드';
+      note.style.display = 'none';
+    }
   }
 
   function failClean(message) {
@@ -978,6 +1020,9 @@
       '열 수         : ' + headers.length,
       '데이터 행 수  : ' + totalDataRows.toLocaleString(),
       '예상 용량     : ' + (totalBytes / (1024 * 1024)).toFixed(2) + ' MB',
+      '노션 한도     : 5MB / 20,000행 → ' + (overNotionLimit
+        ? '초과, 분할 필요 (' + splitParts.length + '개 파일)'
+        : '이내, 단일 업로드 가능'),
       '제목 열       : ' + (headers[0] || '(이름 없음)'),
       '출력 재검증   : ' + (verification.ok
         ? '앞 ' + verification.checked.toLocaleString() + '행을 표준 파서로 되읽어 ' + verification.cols + '열로 정확히 분리됨'
@@ -1074,6 +1119,7 @@
 
   document.getElementById('btnDownload').addEventListener('click', () => {
     if (!cleanedRows.length) return;
+    if (overNotionLimit && !window.confirm('이 파일은 노션 단일 업로드 한도를 넘습니다. 그대로 올리면 미리보기가 만들어지지 않습니다.\n\n그래도 단일 파일로 받으시겠습니까?')) return;
     downloadCSV(cleanedRows.map(formatRow).join(rowSeparator()), originalBaseName + '_notion_ready.csv');
   });
 
