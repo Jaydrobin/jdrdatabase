@@ -309,7 +309,7 @@
       <button class="btn secondary" id="btnReapply">옵션 재적용</button>
       <button class="btn secondary" id="btnTestFile">🧪 노션 시험용 최소 파일</button>
       <button class="btn secondary" id="btnTestSet">🔍 원인 추적용 시험 파일 세트</button>
-      <button class="btn secondary" id="btnMatrixSet">📏 셀 글자 수 한계 찾기 세트</button>
+      <button class="btn secondary" id="btnMatrixSet">📏 한계 찾기 세트</button>
     </div>
     <p style="font-size: 0.85rem; color: var(--text-sub); margin-bottom: 14px; line-height: 1.6;">
       <strong style="color: var(--accent);">통과 설정으로 전체 변환</strong> 버튼은 <strong>셀 안 줄바꿈을 공백으로 바꾸고, 한 행을 2,000자로 제한하고, 넘는 글자를 다음 행으로 이어붙이는</strong> 설정을 전체 데이터에 겁니다.
@@ -340,13 +340,14 @@
         한 행이 커지면 그 행이 통째로 건너뛰어지고, 남는 행이 없으면 제목으로 쓸 열도 없어져 그 메시지가 뜹니다.
       </p>
       <p style="margin-top: 10px; line-height: 1.65; color: var(--text-sub); font-size: 0.85rem;">
-        <strong>셀 글자 수 한계 찾기 세트</strong>는 줄바꿈을 없앤 뒤 셀 하나를 500자, 2,000자, 4,000자, 8,000자, 16,000자로 자른 파일과 자르지 않은 파일을 뽑습니다.
-        열 개수와 행 수는 모든 파일이 같고, 바뀌는 것은 셀 하나의 글자 수뿐입니다. <strong>current_</strong> 파일만 위 설정을 그대로 따릅니다.
+        셀 하나의 길이와 행 전체의 크기를 떼어 놓고 재는 파일들입니다. 열을 모두 두고 셀만 늘리면 행도 같이 커져 무엇이 한계인지 가려지지 않습니다.
       </p>
       <ul style="margin: 10px 0 0 20px; line-height: 1.7; color: var(--text-sub); font-size: 0.85rem;">
-        <li><strong>미리보기로 판단하지 마세요.</strong> 미리보기에 보이는 행 수는 노션이 고른 표본입니다. 가져오기를 끝까지 진행한 뒤, 만들어진 페이지 수와 셀 내용을 보세요.</li>
-        <li><strong>가져오기가 되는 가장 큰 값</strong>을 찾으면, 그 값을 열 수로 곱한 값을 <strong>행 하나의 최대 글자 수</strong>에 넣으세요. 셀 하나가 그 길이를 넘지 않게 됩니다.</li>
-        <li>이 시험 파일들은 잘라서 만든 것이라 내용이 남지 않습니다. 실제 변환에서는 잘라내지 않고 넘치는 글자를 다음 행이 이어받습니다.</li>
+        <li><strong>one500, one2000, one8000, one32000, onefull:</strong> 제목과 가장 긴 열, 두 열만 담았습니다. 행 크기가 곧 셀 크기입니다. 어디까지 들어가는지 보세요.</li>
+        <li><strong>allcols_row2000:</strong> 열을 모두 두고 행 전체를 2,000자로 맞췄습니다. 이 파일은 앞서 들어갔던 것과 같은 모양입니다.</li>
+        <li><strong>one2000은 되는데 allcols_row2000이 안 되면</strong> 한계는 열 개수 쪽입니다. <strong>one2000이 안 되고 allcols_row2000이 되면</strong> 한계는 셀 하나의 길이입니다.</li>
+        <li><strong>current_…:</strong> 지금 설정을 그대로 적용한 파일입니다.</li>
+        <li><strong>미리보기로 판단하지 마세요.</strong> 가져오기를 끝까지 진행한 뒤 만들어진 페이지 수와 셀 내용을 보세요.</li>
       </ul>
     </details>
     <p id="limitNote" style="display: none; font-size: 0.85rem; color: var(--warn); font-weight: 600; margin-bottom: 14px; line-height: 1.5;"></p>
@@ -1473,17 +1474,34 @@
     if (preLimitRows.length < 2) return [];
     const headers = preLimitRows[0];
     const head10 = preLimitRows.slice(1, 11);
-    // 셀 하나에 담기는 글자 수만 바꾼다. 열 수와 행 수는 모두 같다.
-    const cut = per => head10.map((row, i) => {
-      const out = row.map(v => (per ? flattenValue(v).slice(0, per) : flattenValue(v)));
-      out[0] = originalTitles[i] !== undefined ? originalTitles[i] : out[0];
-      return out;
-    });
-    const files = [500, 2000, 4000, 8000, 16000].map(per => ({
-      name: 'cell' + per,
-      rows: [headers].concat(cut(per))
+    // 긴 열 하나만 남기고 그 길이를 바꾼다.
+    // 열을 모두 두면 셀을 늘릴 때 행도 같이 커져, 셀이 한계인지 행이 한계인지 가려지지 않는다.
+    let longIdx = 1;
+    let longest = -1;
+    for (let i = 1; i < headers.length; i++) {
+      const len = head10.reduce((m, row) => Math.max(m, (row[i] || '').length), 0);
+      if (len > longest) { longest = len; longIdx = i; }
+    }
+    const twoCol = per => head10.map((row, i) => [
+      originalTitles[i] !== undefined ? originalTitles[i] : row[0],
+      per ? flattenValue(row[longIdx]).slice(0, per) : flattenValue(row[longIdx])
+    ]);
+    const twoColHeader = [headers[0], headers[longIdx]];
+    const files = [500, 2000, 8000, 32000].map(per => ({
+      name: 'one' + per,
+      rows: [twoColHeader].concat(twoCol(per))
     }));
-    files.push({ name: 'cellfull', rows: [headers].concat(cut(0)) });
+    files.push({ name: 'onefull', rows: [twoColHeader].concat(twoCol(0)) });
+    // 열은 모두 두고 행 전체를 작게 맞춘 파일. one 계열과 견주면 셀과 행 가운데 무엇이 한계인지 갈린다.
+    files.push({
+      name: 'allcols_row2000',
+      rows: [headers].concat(head10.map((row, i) => {
+        const per = Math.max(20, Math.floor(2000 / Math.max(1, headers.length)));
+        const out = row.map(v => flattenValue(v).slice(0, per));
+        out[0] = originalTitles[i] !== undefined ? originalTitles[i] : out[0];
+        return out;
+      }))
+    });
     // 지금 설정을 그대로 적용한 파일. 실제로 내려받을 파일과 같은 모양이라 설정을 바로 시험할 수 있다.
     if (cleanedRows.length > 1) {
       files.push({
