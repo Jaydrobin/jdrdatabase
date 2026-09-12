@@ -337,6 +337,13 @@ related: "[[두 번째 글]]"
 
 각 단계는 목표 / 산출물 / 작업 항목 / 예외 처리 / 완료 기준으로 구성됩니다. 앞 단계가 끝나야 다음 단계를 시작하되, Step 4의 파서는 Step 2와 병행 가능합니다.
 
+모든 단계에 공통으로 적용되는 완료 기준이 있습니다. 단계의 마지막 PR에 다음이 포함되어야 합니다.
+
+- `CLAUDE.md`의 "환경과 도구"에 이 단계에서 생긴 실행 방법이나 규칙 반영
+- `REVIEW.md`의 해당 단계 절에 점검 항목, 확인 방법, 코드 위치 기입
+- 이 단계에서 추가된 순수 함수의 단위 테스트
+- 설계 결정이 바뀌었다면 해당 ADR 수정
+
 ### Step 0. 사전 준비와 저장소 구조
 
 목표: 코드를 한 줄도 쓰기 전에 OAuth가 동작하는 환경을 확보합니다.
@@ -363,6 +370,9 @@ src/worker.js       Worker 본문 (build 시 Blob 문자열로 인라인)
 scripts/build.mjs   dist/index.html 생성
 scripts/serve.mjs   localhost:8080 정적 서버 (Node 내장 http만 사용)
 tests/*.test.mjs    Node 기본 test runner (node --test)
+CLAUDE.md           개발 규약. 저장소 구조, 도구 제약, 불변 조건, 커밋 관례
+REVIEW.md           제3자 점검 체크리스트. 공통 항목과 단계별 절
+docs/DESIGN.md      이 문서
 dist/               빌드 결과. .gitignore 대상이며 커밋하지 않음
 .github/workflows/release.yml   main 푸시 시 빌드 후 latest 릴리스에 dist/index.html 첨부
 ```
@@ -370,7 +380,8 @@ dist/               빌드 결과. .gitignore 대상이며 커밋하지 않음
 빌드 결과물을 얻는 경로는 두 가지입니다. 저장소를 내려받아 `node scripts/serve.mjs`로 여는 경우에는 빌드가 필요 없고, 단일 파일이 필요하면 저장소의 Releases 페이지에서 `latest` 릴리스의 `index.html`을 내려받습니다.
 
 3. `clientId`는 코드에 상수로 두지 않고 최초 실행 시 입력받아 `localStorage`에 저장. 배포 HTML에 개인 클라이언트 ID가 박히지 않게 하는 것이 목적이며, 저장소에는 예시 값만 둡니다.
-4. 릴리스 워크플로(`.github/workflows/release.yml`)를 저장소에 둡니다. 트리거는 `main` 푸시 중 앱 소스 경로가 바뀐 경우와 수동 실행(`workflow_dispatch`)이며, 워크플로 토큰에 `contents: write` 권한을 줍니다. 같은 릴리스를 동시에 두 실행이 갱신하지 않도록 `concurrency` 그룹을 지정합니다. `scripts/build.mjs`가 아직 없는 동안에는 경로 필터 때문에 실행되지 않으며, 빌드 스크립트가 처음 `main`에 들어가는 푸시에서 첫 릴리스가 만들어집니다.
+4. `CLAUDE.md`와 `REVIEW.md`를 저장소 루트에 둡니다. `CLAUDE.md`는 이 문서의 ADR과 §6에서 작업 시 매번 지켜야 하는 것만 추려 담고 근거는 이 문서를 가리킵니다. `REVIEW.md`는 §6.2의 무결성 규칙, 권한과 보안, 오류 처리, 성능을 공통 절로 두고 단계별 절은 각 단계가 끝날 때 채웁니다. 자동 코드 리뷰 도구가 저장소 루트의 `REVIEW.md`를 규칙으로 읽으므로 사람과 자동 리뷰가 같은 기준을 씁니다.
+5. 릴리스 워크플로(`.github/workflows/release.yml`)를 저장소에 둡니다. 트리거는 `main` 푸시 중 앱 소스 경로가 바뀐 경우와 수동 실행(`workflow_dispatch`)이며, 워크플로 토큰에 `contents: write` 권한을 줍니다. 같은 릴리스를 동시에 두 실행이 갱신하지 않도록 `concurrency` 그룹을 지정합니다. `scripts/build.mjs`가 아직 없는 동안에는 경로 필터 때문에 실행되지 않으며, 빌드 스크립트가 처음 `main`에 들어가는 푸시에서 첫 릴리스가 만들어집니다.
 
 예외 처리:
 
