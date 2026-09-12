@@ -109,9 +109,16 @@
 
 ### ADR-10. 개발 구조는 다중 파일, 배포는 단일 파일
 
-- 결정: 개발 중에는 `index.html` + `src/*.js`로 나누어 작성하고, 20줄 정도의 인라이너 스크립트(`scripts/build.mjs`)가 `dist/index.html` 하나로 합칩니다. npm 의존성이나 번들러는 쓰지 않습니다.
+- 결정: 개발 중에는 `index.html` + `src/*.js`로 나누어 작성하고, 20줄 정도의 인라이너 스크립트(`scripts/build.mjs`)가 `dist/index.html` 하나로 합칩니다. npm 의존성이나 번들러는 쓰지 않습니다. 개발용 `index.html`은 `src/*.js`를 `<script src>`로 직접 불러오므로 저장소를 내려받아 로컬 서버로 열면 빌드 없이 그대로 실행됩니다.
 - 근거: 순수 함수(파서, 쿼리 엔진, 파일명 정규화)를 브라우저 없이 Node에서 테스트할 수 있어야 합니다. 배포물은 여전히 단일 HTML입니다.
 - 기각 대안: 처음부터 단일 파일에 모두 작성. 테스트 불가와 3,000줄 이상의 파일 편집 부담으로 기각.
+
+### ADR-13. 빌드는 GitHub Actions가 수행하고 결과물은 GitHub Release의 `latest` 태그에만 첨부
+
+- 결정: `main`에 앱 소스(`index.html`, `src/**`, `scripts/build.mjs`)가 바뀐 푸시가 도착하면 워크플로 `.github/workflows/release.yml`이 빌드를 실행하고, 기존 `latest` 릴리스와 태그를 삭제한 뒤 같은 이름으로 다시 만들어 `dist/index.html`을 첨부합니다. `dist/`는 `.gitignore`에 넣어 저장소에 커밋하지 않습니다. GitHub Pages 배포는 하지 않습니다.
+- 근거: 개발 세션에서 빌드를 따로 지시하거나 빌드 결과를 커밋 diff에 섞을 필요가 없어집니다. 릴리스 주소가 항상 같으므로 "최신 단일 파일을 내려받는 곳"이 하나로 고정됩니다. 문서만 바뀐 병합은 경로 필터로 건너뜁니다.
+- 대가: 이전 빌드 이력이 남지 않습니다. 이전 버전이 필요하면 해당 커밋을 체크아웃해 로컬에서 빌드합니다. 또한 Pages가 없으므로 내려받은 파일은 로컬 서버나 직접 운영하는 https 호스팅에서 열어야 합니다(§1.2의 출처 제약).
+- 기각 대안: 실행 번호별 릴리스 누적(이력은 남지만 주소가 매번 바뀜), 커밋마다 개발 환경에서 빌드해 `dist/`를 커밋(소스 변경마다 diff가 두 배로 늘어남), Pages 배포(현재는 필요하지 않음. 필요해지면 같은 워크플로에 배포 단계만 추가).
 
 ### ADR-11. 무거운 파싱은 Web Worker에서 수행
 
@@ -336,7 +343,7 @@ related: "[[두 번째 글]]"
 
 작업 항목:
 
-1. Google Cloud 프로젝트 생성 → Drive API 활성화 → OAuth 동의 화면(외부, 테스트 상태, 본인 계정을 테스트 사용자로 등록) → 웹 애플리케이션 OAuth 클라이언트 ID 생성. 승인된 JavaScript 원본에 `http://localhost:8080`과 GitHub Pages 주소를 등록.
+1. Google Cloud 프로젝트 생성 → Drive API 활성화 → OAuth 동의 화면(외부, 테스트 상태, 본인 계정을 테스트 사용자로 등록) → 웹 애플리케이션 OAuth 클라이언트 ID 생성. 승인된 JavaScript 원본에 `http://localhost:8080`과, 앱을 실제로 열 https 주소가 있다면 그 주소를 등록.
 2. 저장소 구조 확정.
 
 ```text
@@ -356,10 +363,14 @@ src/worker.js       Worker 본문 (build 시 Blob 문자열로 인라인)
 scripts/build.mjs   dist/index.html 생성
 scripts/serve.mjs   localhost:8080 정적 서버 (Node 내장 http만 사용)
 tests/*.test.mjs    Node 기본 test runner (node --test)
-dist/index.html     배포물 (커밋 대상)
+dist/               빌드 결과. .gitignore 대상이며 커밋하지 않음
+.github/workflows/release.yml   main 푸시 시 빌드 후 latest 릴리스에 dist/index.html 첨부
 ```
 
+빌드 결과물을 얻는 경로는 두 가지입니다. 저장소를 내려받아 `node scripts/serve.mjs`로 여는 경우에는 빌드가 필요 없고, 단일 파일이 필요하면 저장소의 Releases 페이지에서 `latest` 릴리스의 `index.html`을 내려받습니다.
+
 3. `clientId`는 코드에 상수로 두지 않고 최초 실행 시 입력받아 `localStorage`에 저장. 배포 HTML에 개인 클라이언트 ID가 박히지 않게 하는 것이 목적이며, 저장소에는 예시 값만 둡니다.
+4. 릴리스 워크플로(`.github/workflows/release.yml`)를 저장소에 둡니다. 트리거는 `main` 푸시 중 앱 소스 경로가 바뀐 경우와 수동 실행(`workflow_dispatch`)이며, 워크플로 토큰에 `contents: write` 권한을 줍니다. 같은 릴리스를 동시에 두 실행이 갱신하지 않도록 `concurrency` 그룹을 지정합니다. `scripts/build.mjs`가 아직 없는 동안에는 경로 필터 때문에 실행되지 않으며, 빌드 스크립트가 처음 `main`에 들어가는 푸시에서 첫 릴리스가 만들어집니다.
 
 예외 처리:
 
@@ -618,16 +629,18 @@ LIMIT n
 2. 오프라인: 캐시 데이터 읽기·편집을 허용하고 큐로 저장. 앱 자체는 CDN 의존 때문에 최초 로드가 필요함을 안내.
 3. 단축키: `Ctrl+K` 팔레트, `Ctrl+N` 새 노트, `Ctrl+S` 저장, `Esc` 패널 닫기, 표에서 방향키 이동.
 4. 선택 항목: 이름 변경 시 위키링크 자동 갱신(백링크 노트 각각에 대해 충돌 검사 후 저장, 하나라도 실패하면 보고서), Google Docs 읽기 전용 가져오기, CodeMirror 편집기.
-5. 빌드: `scripts/build.mjs`가 `src/*.js`와 `worker.js`를 인라인해 `dist/index.html` 생성. CDN `<script>`에 SRI `integrity`와 고정 버전. `dist`를 GitHub Pages로 배포.
-6. 문서: README에 GCP 설정 절차, 배포 절차, 알려진 한계.
+5. 빌드: `scripts/build.mjs`가 `src/*.js`와 `worker.js`를 인라인해 `dist/index.html` 생성. CDN `<script>`에 SRI `integrity`와 고정 버전. 스크립트는 인자 없이 실행되고 종료 코드로 성공·실패를 알리며, 생성된 파일 크기를 출력합니다. 릴리스 워크플로가 이 스크립트를 그대로 호출합니다.
+6. 문서: README에 GCP 설정 절차, 릴리스에서 파일을 내려받아 여는 절차, 알려진 한계.
 
 예외 처리:
 
 - 검색 중 사용자가 검색어를 바꿈: 이전 Worker 작업을 `AbortController`로 취소.
 - 오프라인 큐 재생 시 충돌: 온라인 복귀 후 충돌 파일 목록을 한 번에 표시.
-- SRI 불일치(CDN이 파일을 바꿈): 로드 실패로 취급하고 배너에 라이브러리명 표시. 배포 전 `scripts/build.mjs`가 해시를 다시 계산하는지 확인.
+- SRI 불일치(CDN이 파일을 바꿈): 로드 실패로 취급하고 배너에 라이브러리명 표시. `scripts/build.mjs`가 해시를 다시 계산하는지 확인.
+- 빌드 스크립트 실패: 워크플로가 실패로 끝나고 기존 `latest` 릴리스는 삭제 단계에 도달하지 않아 그대로 남습니다. 삭제 단계는 빌드 성공 뒤에만 실행됩니다.
+- 릴리스 삭제 후 생성 실패(네트워크, 권한): `latest`가 비어 있는 상태가 됩니다. 워크플로를 수동 실행하면 복구됩니다.
 
-완료 기준: `dist/index.html` 하나를 GitHub Pages에 올려 모바일 브라우저에서 로그인·보기·편집이 동작합니다.
+완료 기준: Releases 페이지의 `latest`에서 내려받은 `index.html` 하나를 로컬 서버 또는 https 호스팅에서 열어 로그인·보기·편집이 동작합니다.
 
 ---
 
