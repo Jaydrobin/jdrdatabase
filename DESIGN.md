@@ -565,7 +565,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 - `pipeline.run({ source, mapping, target, policy, onProgress, signal })`: 1,000행 트랜잭션, prepared statement 재사용, `_created_at` 일괄, 종료 시 `{ inserted, skipped, errors[] }` 보고서
 
 **예외 처리**
-- 인코딩 오판(깨진 문자 `�` 비율 1% 초과): 미리보기 단계에서 경고하고 인코딩 재선택 유도.
+- 인코딩 오판(깨진 문자(U+FFFD) 비율 1% 초과): 미리보기 단계에서 경고하고 인코딩 재선택 유도.
 - 행마다 필드 수가 다른 경우: 부족한 필드는 NULL, 넘치는 필드는 버리고 보고서에 행 번호 기록. 헤더보다 필드가 많은 행이 10% 넘으면 구분자 재감지 제안.
 - 따옴표가 끝나지 않은 채 파일이 끝남: 남은 텍스트를 마지막 필드로 처리하고 경고.
 - 값 변환 실패 정책(열 단위): `null`(기본), `text`(그 열 전체를 text로 강등하고 처음부터 재시도), `abort`.
