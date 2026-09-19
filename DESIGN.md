@@ -1,0 +1,761 @@
+# jdrdatabase 설계 문서
+
+| 항목 | 내용 |
+|---|---|
+| 문서 버전 | 0.1 (초안) |
+| 작성일 | 2026-09-19 |
+| 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱 |
+| 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
+
+이 문서는 "NocoDB 데스크톱/로컬 구동" 방식, 즉 서버 없이 사용자의 PC에서 단독으로 동작하는 스프레드시트형 데이터베이스 관리 프로그램을 **단일 HTML 파일**로 구현하기 위한 설계도이다. 0장에서 타당성 질문 세 가지에 답하고, 1장부터 실제 설계와 단계별 구현 계획을 기술한다.
+
+---
+
+## 0. 타당성 요약: 세 가지 질문에 대한 답
+
+### Q1. 단일 HTML 웹앱으로 "수십만 자를 담을 수 있는 셀 수십만 건"을 조회·편집할 수 있는가?
+
+**가능하다. 단, 아래 조건과 상한을 전제로 한다.**
+
+- 저장·질의 엔진은 SQLite를 WebAssembly로 컴파일한 **sql.js**를 사용한다. wasm 바이너리를 base64로 HTML에 인라인하므로 외부 파일이나 네트워크가 필요 없다. 데이터베이스 전체는 브라우저 메모리에 상주하고, 모든 질의는 Web Worker에서 실행되어 UI가 멈추지 않는다.
+- 화면은 **가상 스크롤 그리드**로 구현한다. 수십만 행 중 화면에 보이는 수십 행만 DOM으로 만들고, 스크롤할 때 `LIMIT/OFFSET` 창 질의로 필요한 행만 가져온다.
+- 장문 셀은 그리드에서 앞부분 256자만 `substr()`로 가져와 미리보기로 표시하고, 전문은 사용자가 편집기를 열 때만 로드한다. 따라서 셀 하나가 수십만 자라도 스크롤 성능에 영향을 주지 않는다.
+- SQLite 자체의 문자열 상한은 기본 10억 바이트(`SQLITE_MAX_LENGTH`)이므로 수십만 자(UTF-8 한글 기준 수백 KB) 셀은 문제없이 저장된다.
+
+**정직하게 밝혀야 할 상한**
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 설계상 DB 파일 상한 | 약 700 MB | 브라우저 탭당 실용 메모리 약 1.5–2 GB. 저장 시 `export()`가 사본을 만들어 최대 2배가 필요 |
+| 단일 ArrayBuffer 상한 | 2 GB | 파일 읽기·쓰기 경로가 하나의 버퍼를 사용 |
+| 현실적 셀 수 | 수십만~수백만 셀 | 셀 30만 개 × 평균 2 KB = 600 MB → 가능 |
+| 지원하지 않는 경우 | 모든 셀이 수십만 자 | 셀 30만 개 × 300 KB = 90 GB → 브라우저에서 불가 |
+
+즉 "수십만 자를 담을 수 있는 셀"이 수십만 건 있는 것(대부분 짧고 일부만 긴 실제 데이터)은 지원 대상이고, "모든 셀이 수십만 자"인 데이터는 지원 대상이 아니다. 이 상한은 앱이 파일을 열 때 크기를 검사하여 사용자에게 경고하는 형태로 반영한다.
+
+### Q2. 데이터베이스를 단일 바이너리 파일로 두고 구글 드라이브로 여러 PC를 오가며 관리할 수 있는가?
+
+**가능하다. 아래 방식으로 설계하면 안전하다.**
+
+- 저장 형식은 **표준 SQLite 파일** 하나(예: `my-database.db`)이다. `sqlite3` CLI나 DB Browser for SQLite로도 열린다.
+- 앱은 파일을 통째로 메모리에 읽고, 저장할 때 통째로 다시 쓴다. sql.js가 메모리 내 DB이므로 WAL이나 journal 같은 부속 파일이 생기지 않는다. 클라우드 동기화가 부속 파일을 누락하여 DB가 깨지는 전형적인 문제가 원천적으로 없다.
+- 저장은 File System Access API의 `createWritable()`로 수행한다. 이 API는 임시 파일에 쓴 뒤 `close()` 시점에 교체하므로 저장 도중 전원이 꺼져도 원본이 반쯤 덮어써지는 일이 없다.
+
+**한계와 완화책**
+
+- 동시 편집은 불가능하다. 구글 드라이브에는 파일 잠금이 없어서 두 PC가 각자 편집 후 업로드하면 한쪽이 "충돌 사본"이 되거나 마지막 저장이 이긴다. 이 앱은 "한 번에 한 PC에서만 편집하고, 다른 PC로 넘어가기 전에 저장·동기화를 완료한다"는 사용 규칙을 전제한다.
+- 완화책으로 DB 안의 메타 테이블에 `db_id`, `revision`(저장마다 1 증가), `saved_at`, `saved_by`(기기 이름)를 기록하고, 각 기기의 IndexedDB에 "이 기기가 마지막으로 본 revision"을 남긴다. 파일을 열 때 두 값을 비교하여 되돌아간 파일(동기화가 덜 된 파일)이나 다른 revision 위에 남은 미저장 변경을 감지해 경고한다. 자동 병합은 하지 않는다.
+- 파일 크기가 수백 MB이면 저장할 때마다 전체가 재업로드되어 느리다. 선택 기능으로 `CompressionStream`을 이용한 gzip 저장(`.db.gz`)을 둔다. 텍스트 위주의 SQLite 파일은 보통 3~5배 압축된다.
+
+### Q3. xlsx·csv 파일을 이 앱의 데이터 형식으로 변환하는 기능을 구현할 수 있는가?
+
+**가능하다.**
+
+- CSV: 자체 스트리밍 파서를 구현한다. RFC 4180(따옴표, 따옴표 안의 개행·쉼표), BOM, 구분자 자동 감지(`,` `;` `\t` `|`), 인코딩 감지·선택(UTF-8, UTF-16, EUC-KR/CP949)을 지원한다. 파일을 조각 단위로 읽으므로 수백 MB CSV도 메모리를 한꺼번에 쓰지 않는다.
+- XLSX: **SheetJS Community Edition**(Apache-2.0)을 인라인한다. 시트 선택, 헤더 행 지정, 엑셀 날짜 일련번호 변환, 수식은 계산된 값만 가져오기를 지원한다. XLSX는 파일 구조상 통째로 파싱해야 하므로 CSV보다 메모리 상한이 낮다(파일 기준 약 100 MB).
+- 타입 추론: 상위 1,000행을 표본으로 `integer / real / boolean / date / datetime / text / longtext`를 추론하고, 사용자가 매핑 화면에서 열 이름·타입·건너뛰기를 수정한 뒤 가져온다. 변환에 실패한 값은 규칙에 따라 NULL 처리 또는 열 전체를 text로 강등하며, 결과 보고서에 남긴다.
+- 대용량 처리: Worker 안에서 1,000행 단위 트랜잭션과 재사용 prepared statement로 삽입하고, 진행률과 취소를 지원한다.
+
+---
+
+## 1. 목표와 비목표
+
+### 1.1 목표 (v1)
+
+1. 브라우저에서 HTML 파일 하나를 열면 즉시 동작한다. 설치, 서버, 네트워크가 필요 없다.
+2. 스프레드시트와 같은 그리드 UI로 테이블을 만들고, 열을 정의하고, 셀을 편집한다.
+3. 수십만 행·수십만 셀 규모에서 스크롤·정렬·필터·검색이 체감상 즉시 반응한다.
+4. 셀 하나에 수십만 자의 텍스트를 저장하고 편집할 수 있다.
+5. 데이터는 표준 SQLite 파일 하나로 저장되며, 클라우드 드라이브로 옮겨 다른 PC에서 이어서 작업할 수 있다.
+6. CSV·XLSX 가져오기와 CSV·XLSX 내보내기를 지원한다.
+7. 실수로부터 보호한다: 되돌리기/다시 실행, 미저장 변경 복구, 저장 전 백업.
+
+### 1.2 비목표 (v1에서 하지 않는 것)
+
+- 다중 사용자 동시 편집, 실시간 동기화, 서버 API
+- 테이블 간 관계(링크 필드), 수식 필드, 자동화·웹훅
+- 첨부 파일(이미지·바이너리) 필드
+- 모바일 터치 최적화
+- 데이터베이스 파일이 브라우저 메모리를 넘는 규모(수 GB)
+
+---
+
+## 2. 핵심 설계 결정 (ADR)
+
+각 결정은 `D-번호`로 식별하며, 이후 장에서 이 번호로 참조한다. 결정을 바꿀 때는 이 표를 갱신하고 사유를 남긴다.
+
+### D-01. 배포는 단일 HTML, 소스는 모듈로 분리하고 빌드로 인라인한다
+
+- 소스는 `src/`의 ES 모듈로 작성하고 `build/build.mjs`가 JS·CSS·wasm(base64)·Worker 소스를 `dist/jdrdatabase.html` 하나로 합친다.
+- 런타임 네트워크 요청은 0건이다. `<meta http-equiv="Content-Security-Policy">`로 `default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data:`를 선언하여 외부 자원 참조가 섞이면 실행 단계에서 드러나게 한다.
+- 사유: 개발·테스트 편의와 단일 파일 배포를 양립시키기 위함이다. 소스를 직접 단일 파일로 쓰면 테스트와 코드 리뷰가 불가능해진다.
+
+### D-02. 저장 엔진은 sql.js(SQLite WASM)이며 Web Worker에서 실행한다
+
+| 대안 | 탈락 사유 |
+|---|---|
+| 순수 JS 배열 + JSON 파일 | 수십만 건 정렬·검색·부분 로드가 비효율적이고 파일 포맷을 자작해야 한다 |
+| IndexedDB 직접 사용 | 단일 파일 내보내기가 어렵고 질의 능력이 부족하다 |
+| 공식 sqlite-wasm + OPFS | `file://` 오리진에서는 OPFS를 쓸 수 없고, ESM·Worker 파일 분리를 요구하여 단일 파일화가 복잡하다 |
+
+- sql.js는 FTS5, JSON1이 포함된 빌드이다. 실제 사용 버전의 `PRAGMA compile_options` 결과를 Step 1 테스트로 고정한다.
+- wasm은 `initSqlJs({ wasmBinary })`로 전달한다. base64를 디코딩한 ArrayBuffer를 넘기므로 `locateFile`이나 별도 파일이 필요 없다.
+- Worker는 `<script type="text/plain">` 블록의 소스를 Blob URL로 만들어 생성한다. Worker 생성이 막힌 환경에서는 같은 API를 메인 스레드에서 실행하는 인라인 전송 계층으로 자동 폴백한다(D-11 RPC 추상화 덕분에 비용이 낮다).
+- 중요한 특성: sql.js의 `Database.export()`는 내부적으로 DB를 닫았다가 다시 연다. 따라서 **export 전후로 모든 prepared statement가 무효화되고 `PRAGMA` 설정이 초기화된다.** Worker의 statement 캐시는 export 직후 반드시 비우고 PRAGMA를 다시 적용한다.
+
+### D-03. 파일 포맷은 표준 SQLite 파일이고, 사용자 테이블·열의 물리 이름은 불투명 ID를 쓴다
+
+- 사용자 테이블은 실제 SQLite 테이블 `t_<8hex>`, 열은 `c_<8hex>`로 만든다. 사용자에게 보이는 이름·타입·순서·너비는 메타 테이블(`_jdr_tables`, `_jdr_columns`)에 둔다.
+- 사유: 이름 변경이 `ALTER TABLE` 없이 메타 갱신만으로 끝난다. 한글·공백·중복 이름 같은 식별자 문제가 사라진다. NocoDB의 메타 구조와 같은 방향이다.
+- 대가: `sqlite3`로 직접 열면 이름이 불투명하다. 내보내기 시 표시 이름을 사용하고, "SQL 뷰 생성" 기능(표시 이름으로 `CREATE VIEW`)을 v1.1 후보로 둔다.
+- 모든 사용자 테이블은 `STRICT` 테이블(SQLite 3.37+)로 만들어 열 타입이 섞여 정렬이 깨지는 문제를 막는다. 값 검증은 앱이 쓰기 전에 수행한다.
+- 시스템 열: `id INTEGER PRIMARY KEY`(rowid 별칭), `_created_at TEXT`, `_updated_at TEXT`. 시스템 열은 사용자가 지울 수 없다.
+
+### D-04. 영속화는 3중 구조: 정본 파일, 폴백 다운로드, 미저장 변경 저널
+
+| 층 | 구현 | 역할 |
+|---|---|---|
+| 1. 정본 | File System Access API(`showOpenFilePicker`, `showSaveFilePicker`, `createWritable`). 파일 핸들을 IndexedDB에 저장해 다음 실행 때 "최근 파일"로 재개 | 사용자가 지정한 `.db` 파일 |
+| 2. 폴백 | `<input type="file">` 읽기 + `<a download>` 쓰기 | Firefox, Safari, API가 막힌 환경 |
+| 3. 저널 | 커맨드(D-08)를 IndexedDB `journal` 스토어에 순서대로 기록. 파일 저장 시 비움 | 탭이 죽거나 저장을 잊었을 때 복구 |
+
+- 저장 = `db.export()` → `Uint8Array` → `writable.write()` → `close()`. `close()`에서 원자적으로 교체된다.
+- 저장 직전에 기존 파일 바이트를 IndexedDB `backups` 스토어에 1세대 보관한다(파일이 200 MB 이하일 때). 그보다 크면 보관을 건너뛰고 사용자에게 알린다.
+- IndexedDB는 기능 감지로 사용하며, 없어도(일부 브라우저의 `file://` 오리진) 1·2층만으로 동작해야 한다.
+
+### D-05. 그리드는 Canvas가 아니라 DOM 가상화로 그린다
+
+- 사유: 텍스트 선택, 한글 IME 조합, 접근성 트리, 브라우저 기본 복사·붙여넣기를 그대로 쓸 수 있다. Canvas는 IME 처리와 접근성을 직접 구현해야 하는데 v1 범위에서 감당할 이유가 없다.
+- 행 높이는 고정(기본 32 px). "줄바꿈 보기" 옵션도 고정 3줄 높이로 제한한다. 고정 높이여야 스크롤 위치에서 행 인덱스를 O(1)로 계산할 수 있다.
+- 열 가상화도 함께 구현한다(열 수백 개 대응).
+- 셀 미리보기는 `substr(col, 1, 256)`과 `length(col)`을 함께 가져온다. 256자를 넘으면 말줄임과 길이 배지를 표시한다.
+- 편집기: 단문은 셀 위 인라인 `<input>`, `longtext`는 우측 사이드 패널의 `<textarea>`. 수십만 자 textarea는 브라우저가 문제없이 처리한다.
+- 브라우저의 요소 높이 상한(Chromium 약 3,355만 px)을 넘는 경우(예: 100만 행 × 32 px = 3,200만 px, 경계 근접)에는 스크롤 스케일링(가상 높이를 1/k로 줄이고 스크롤 위치를 환산)을 적용한다.
+
+### D-06. 데이터는 "창(window)" 단위로 가져오고 블록 캐시를 둔다
+
+- 그리드는 `[첫 가시 행 - 버퍼, 마지막 가시 행 + 버퍼]` 범위를 `SELECT ... ORDER BY <사용자 정렬>, id LIMIT n OFFSET m`으로 요청한다. 30만 행 규모의 OFFSET은 인덱스가 없어도 수십 ms 안에 끝난다.
+- 블록 크기 200행의 LRU 캐시(최대 50블록)를 두고, 편집·정렬·필터·가져오기 후에는 해당 테이블 캐시를 전부 무효화한다.
+- 총 행 수는 필터 조건을 포함한 `count(*)`로 필터 변경 시 1회만 계산한다.
+- 정렬은 항상 `id`를 보조 키로 붙여 안정적으로 만든다.
+
+### D-07. 검색은 FTS5 trigram을 테이블 단위로 옵트인하고, 없으면 LIKE로 처리한다
+
+- 전문 검색이 필요한 테이블에 대해 사용자가 "검색 인덱스 만들기"를 켜면 FTS5 external-content 가상 테이블과 동기화 트리거를 만든다. 토크나이저는 `trigram`(SQLite 3.34+)을 사용해 한글 부분 일치를 지원한다.
+- trigram은 3자 미만 질의를 처리하지 못하므로 그 경우와 인덱스가 없는 경우는 `LIKE '%q%'`로 폴백한다.
+- 인덱스는 파일 크기와 가져오기 시간을 늘리므로 기본값은 꺼짐이다.
+
+### D-08. 모든 변경은 커맨드 객체이며, 되돌리기·저널·붙여넣기가 이 위에서 동작한다
+
+- 커맨드 = `{ type, tableId, do: SQL[], undo: SQL[], summary }`. Worker의 `applyCommand`가 하나의 트랜잭션으로 실행한다.
+- 메인 스레드는 undo/redo 스택(최대 200개)을 유지하고, 같은 커맨드를 저널(D-04)에 기록한다.
+- 대량 붙여넣기·행 다중 삭제는 하나의 복합 커맨드다. 되돌리기용 스냅샷이 10,000행을 넘으면 사용자에게 "되돌릴 수 없는 작업"임을 확인받고 히스토리를 비운다.
+- 열 삭제는 **소프트 삭제**다. `_jdr_columns.deleted_at`만 설정하고 물리 열은 남긴다. 되돌리기가 가능하고 비용이 0이다. 물리 `DROP COLUMN`은 "데이터베이스 정리(VACUUM)" 메뉴에서만 수행한다.
+
+### D-09. 가져오기는 파서·추론·매핑·삽입의 4단계 파이프라인이며 파서는 행 이터레이터로 통일한다
+
+- 모든 파서는 `AsyncIterable<{ rowIndex, cells: (string|number|boolean|Date|null)[] }>`를 반환한다. CSV와 XLSX가 같은 추론·매핑·삽입 코드를 공유한다.
+- 추론은 표본 1,000행으로 하고, 삽입 중 표본 밖의 값이 타입에 맞지 않으면 열 단위 규칙(NULL 처리 / text 강등 / 중단)에 따른다.
+- 전 과정은 Worker에서 실행하고 진행률 이벤트를 보낸다. 취소하면 트랜잭션을 롤백하고 만들다 만 테이블을 지운다.
+
+### D-10. 클라우드 왕복은 수동 프로토콜로 지원하고 자동 병합은 하지 않는다
+
+- 메타에 `db_id`, `revision`, `saved_at`, `saved_by`를 기록한다.
+- 기기별 IndexedDB `known_revisions[db_id]`와 비교하여 파일 열기 시 경고 조건을 판정한다(4.3절).
+- 앱은 절대 파일을 자동으로 덮어쓰지 않는다. 저장은 사용자의 명시적 동작(단축키 포함) 또는 사용자가 켠 자동 저장에 의해서만 일어난다.
+
+### D-11. 메인 스레드와 Worker는 요청·응답 RPC로만 통신한다
+
+- 메시지 형식은 6장에 정의한다. 전송 가능한 값(구조화 복제 가능)만 넘긴다. 큰 바이너리는 transferable로 이동한다.
+- 이 경계 덕분에 Worker 미지원 환경 폴백(D-02), 테스트에서 Worker 없이 Node로 Worker 코드를 실행하는 것이 가능하다.
+
+### D-12. 기술 스택은 프레임워크 없는 Vanilla JS + JSDoc 타입이다
+
+| 영역 | 선택 |
+|---|---|
+| 언어 | JavaScript(ES2022, ESM). 타입은 JSDoc으로 쓰고 `tsc --checkJs --noEmit --strict`로 검사 |
+| 빌드 | Node.js 20+, 의존성 없는 `build/build.mjs` (esbuild 등 번들러는 빌드 도구로만 허용, 런타임 의존 금지) |
+| 단위 테스트 | `node:test`. sql.js는 Node에서도 동작하므로 스키마·질의·파서·커맨드 로직을 Node에서 검증 |
+| E2E | Playwright(Chromium). `dist/jdrdatabase.html`을 `file://`로 열어 실제 산출물을 검증 |
+| 린트·포맷 | ESLint(flat config) + Prettier |
+| 서드파티 런타임 | sql.js, SheetJS CE 두 개만. `vendor/`에 버전 고정 파일과 LICENSE, SHA-256을 함께 커밋 |
+
+- 프레임워크를 쓰지 않는 사유: 가상 그리드는 어차피 직접 DOM을 제어해야 하고, 단일 파일 크기와 시작 시간을 아끼며, 의존성 수명 문제를 피한다.
+
+### D-13. 브라우저 지원
+
+- 1순위: Chromium 계열(Chrome, Edge) 최신 2개 버전. File System Access API로 완전한 경험.
+- 2순위: Firefox, Safari 최신 버전. 다운로드 폴백으로 동작하되 "저장 시 파일이 다운로드 폴더에 생성됨"을 안내.
+- `file://`로 직접 연 경우와 로컬 정적 서버로 연 경우 모두 지원한다. `file://`에서의 Worker(Blob URL), IndexedDB, File System Access API 가용성은 브라우저마다 다르므로 모두 기능 감지 후 폴백한다. Step 1·2에서 실측하여 지원 매트릭스를 README에 기록한다.
+
+### D-14. UI 문자열은 한국어 기본이며 문자열 테이블로 분리한다
+
+- `src/i18n/ko.js`가 기본, `en.js`는 키만 준비한다. 코드에 리터럴 UI 문자열을 쓰지 않는다.
+
+---
+
+## 3. 아키텍처
+
+### 3.1 모듈 구성
+
+```
+dist/jdrdatabase.html            ← 빌드 산출물 (배포 단위)
+
+src/
+  main.js                        부트스트랩: 기능 감지, Worker 기동, 초기 화면
+  app/
+    store.js                     앱 상태(열린 파일, 현재 테이블·뷰, 선택, dirty) + 이벤트 버스
+    history.js                   undo/redo 스택, 저널 연동
+    commands.js                  커맨드 생성 함수(셀 편집, 행 추가·삭제, 열 추가·변경·소프트삭제, 붙여넣기)
+    shortcuts.js                 키보드 단축키 매핑
+  ui/
+    grid/
+      grid.js                    가상 그리드 컨트롤러(뷰포트 계산, 행·열 풀, 스크롤)
+      cells.js                   셀 렌더러(타입별 표시, 미리보기, 배지)
+      selection.js               셀·범위·행 선택 모델
+      clipboard.js               TSV 복사·붙여넣기
+    editor/
+      inline.js                  인라인 편집기(input, 타입별 검증, IME 처리)
+      longtext.js                사이드 패널 장문 편집기
+    dialogs/
+      table.js column.js import.js export.js settings.js conflict.js
+    toolbar.js sidebar.js statusbar.js toast.js
+  io/
+    filesystem.js                File System Access + 폴백 다운로드 추상화
+    idb.js                       IndexedDB 래퍼(handles, journal, backups, known_revisions)
+    autosave.js                  저널 기록·복구, 자동 저장 타이머
+  db/
+    client.js                    RPC 클라이언트(메인 측), Worker/인라인 전송 선택
+    worker.js                    Worker 진입점: RPC 디스패치
+    engine.js                    sql.js 초기화, export, statement 캐시, PRAGMA
+    schema.js                    메타 테이블 DDL, 마이그레이션, 물리 이름 생성
+    tables.js                    테이블·열 CRUD(메타 + DDL)
+    query.js                     창 질의 빌더(정렬·필터·검색), count
+    values.js                    논리 타입 ↔ 저장값 변환·검증
+    search.js                    FTS5 인덱스 생성·삭제·질의
+  import/
+    csv.js                       스트리밍 CSV 파서(인코딩·구분자 감지)
+    xlsx.js                      SheetJS 어댑터
+    infer.js                     타입 추론
+    pipeline.js                  매핑 적용·트랜잭션 삽입·진행률·취소
+  export/
+    csv.js xlsx.js
+  i18n/
+    ko.js en.js index.js
+  util/
+    errors.js                    AppError, 오류 코드
+    ids.js                       uuid, 물리 이름
+    format.js                    숫자·날짜 표시
+    bytes.js                     base64, 크기 계산
+  styles/
+    app.css grid.css dialogs.css
+
+vendor/
+  sql-wasm.js sql-wasm.wasm LICENSE.sqljs CHECKSUMS
+  xlsx.full.min.js LICENSE.sheetjs
+
+build/
+  build.mjs                      단일 HTML 생성
+  verify.mjs                     산출물 검증(외부 참조 0건, 크기 예산)
+
+test/
+  unit/                          node:test
+  e2e/                           Playwright
+  fixtures/                      CSV·XLSX·DB 표본
+scripts/
+  gen-fixture.mjs                벤치마크용 대용량 CSV 생성
+```
+
+### 3.2 실행 시 구조
+
+```
+┌───────────────── Main thread ─────────────────┐
+│ ui/*  ──이벤트──▶ app/store ──▶ app/history   │
+│   ▲                  │               │        │
+│   └───렌더────────────┘               ▼        │
+│                              io/autosave(IDB) │
+│                                               │
+│ db/client ─── postMessage RPC ───────────────┐│
+└──────────────────────────────────────────────┼┘
+                                               ▼
+┌───────────────── Worker ──────────────────────┐
+│ db/worker ─▶ db/engine(sql.js) ─▶ 메모리 DB    │
+│           ─▶ db/query, tables, search, values │
+│           ─▶ import/* (파서·추론·삽입)          │
+└───────────────────────────────────────────────┘
+        ▲ 파일 바이트(transfer)          │ export 바이트(transfer)
+        └──── io/filesystem ◀────────────┘
+```
+
+### 3.3 대표 흐름
+
+**스크롤**: 스크롤 이벤트 → `grid.computeRange()` → 캐시에 없는 블록만 `client.fetchWindow(tableId, viewSpec, offset, limit)` → Worker `query.buildWindowSQL()` 실행 → 행 배열 반환 → 캐시 저장 → 행 풀 재사용하여 렌더.
+
+**셀 편집**: 인라인 편집기 확정 → `values.validate(type, raw)` → `commands.editCell()`이 커맨드 생성 → `history.push()` → `client.applyCommand()` → Worker 트랜잭션 실행 → 성공 시 캐시의 해당 행 갱신, 저널 기록, dirty 표시. 실패 시 히스토리에서 제거하고 토스트.
+
+**저장**: `Ctrl+S` → `client.exportDb()`(Worker가 `revision+1`, `saved_at`, `saved_by` 기록 후 export) → 바이트 transfer → 기존 파일 백업(IDB) → `filesystem.write()` → 성공 시 저널 비움, `known_revisions` 갱신, dirty 해제.
+
+---
+
+## 4. 데이터 모델
+
+### 4.1 메타 테이블
+
+```sql
+CREATE TABLE IF NOT EXISTS _jdr_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+-- keys: schema_version, db_id, revision, saved_at, saved_by, created_at, app_version
+
+CREATE TABLE IF NOT EXISTS _jdr_tables (
+  id TEXT PRIMARY KEY,            -- 't_' || 8hex
+  name TEXT NOT NULL,             -- 표시 이름
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  fts_enabled INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS _jdr_columns (
+  id TEXT PRIMARY KEY,            -- 'c_' || 8hex
+  table_id TEXT NOT NULL REFERENCES _jdr_tables(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,             -- 4.2 논리 타입
+  position INTEGER NOT NULL,
+  width INTEGER NOT NULL DEFAULT 160,
+  options TEXT,                   -- JSON: select 항목, 숫자 소수 자릿수 등
+  deleted_at TEXT                 -- 소프트 삭제 (D-08)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS _jdr_views (
+  id TEXT PRIMARY KEY,
+  table_id TEXT NOT NULL REFERENCES _jdr_tables(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  spec TEXT NOT NULL              -- JSON: sort[], filter[], hidden[], row_height
+) STRICT;
+```
+
+`schema_version`은 정수이며 `db/schema.js`의 마이그레이션 배열 길이와 같다. 앱보다 새로운 `schema_version`의 파일은 읽기 전용으로 열고 경고한다.
+
+### 4.2 논리 타입과 물리 저장
+
+| 논리 타입 | STRICT 물리 타입 | 저장 규칙 | 표시·편집 |
+|---|---|---|---|
+| `text` | TEXT | 그대로. 앞뒤 공백 유지 | 인라인 input |
+| `longtext` | TEXT | 그대로 | 사이드 패널 textarea, 그리드에는 256자 미리보기 |
+| `integer` | INTEGER | 안전 정수 범위(±2^53) 검증 | 우측 정렬 |
+| `real` | REAL | 유한 수만 허용 | 소수 자릿수 옵션 |
+| `boolean` | INTEGER | 0/1 | 체크박스 |
+| `date` | TEXT | `YYYY-MM-DD` | 날짜 입력 |
+| `datetime` | TEXT | `YYYY-MM-DDTHH:mm:ss` (표준시 정보 없음, 스프레드시트 의미) | 날짜시간 입력 |
+| `select` | TEXT | `options.choices` 중 하나. 없는 값은 편집 시 거부, 가져오기 시 자동 추가 | 드롭다운 |
+
+- NULL은 모든 타입에서 "비어 있음"이다. 빈 문자열과 NULL을 구분하지 않고, 편집기에서 빈 값을 확정하면 NULL을 저장한다.
+- 텍스트 정렬은 `COLLATE NOCASE`(ASCII만 대소문자 무시). 한글은 코드 포인트 순서가 가나다 순과 일치한다. 로케일 정렬은 v1 비목표.
+- 타입 변경(`ALTER` 상당)은 "새 열 생성 → 변환 복사 → 옛 열 소프트 삭제"로 수행하며 하나의 커맨드로 되돌릴 수 있다.
+
+### 4.3 revision 프로토콜 (D-10)
+
+파일을 열 때:
+
+| 조건 | 판정 | 조치 |
+|---|---|---|
+| `known[db_id]` 없음 | 이 기기에서 처음 여는 파일 | 정상 |
+| `file.revision >= known.revision` | 정상 | `known` 갱신 |
+| `file.revision < known.revision` | 이 기기에서 더 나중 버전을 저장한 적이 있음. 클라우드 동기화가 덜 된 파일일 가능성 | 경고 대화상자: "그대로 열기 / 취소" |
+| 저널에 `db_id` 일치, `base_revision == file.revision` | 미저장 변경 존재 | "복구 / 버리기" 선택 |
+| 저널에 `db_id` 일치, `base_revision != file.revision` | 다른 버전 위의 미저장 변경 | 경고 후 "버리기 / 별도 파일로 내보내기" |
+
+---
+
+## 5. 단계별 구현 계획
+
+각 단계는 하나의 PR로 끝내며, "완료 기준"이 모두 충족되어야 다음 단계로 간다. 단계 안의 세부 순서는 위에서 아래로 진행한다.
+
+### Step 0. 저장소 골격과 빌드·테스트 기반
+
+**목표**: 빈 앱이 단일 HTML로 빌드되고, 테스트·린트·타입 검사 명령이 동작한다.
+
+**산출물**
+- `package.json`(scripts: `build`, `verify`, `test`, `test:e2e`, `lint`, `typecheck`, `check`), `tsconfig.json`(`checkJs`, `strict`, `noEmit`), `eslint.config.js`, `.prettierrc`
+- `build/build.mjs`, `build/verify.mjs`
+- `src/main.js`, `src/styles/app.css`, `src/i18n/*`
+- `test/unit/build.test.js`, `test/e2e/smoke.spec.js`
+- `.github/workflows/ci.yml`(check + build + e2e)
+
+**주요 함수**
+- `build.mjs`: `readModuleGraph(entry)`, `inlineImports(graph)`(ESM import를 단일 스코프로 접는 자체 번들러이거나 esbuild 호출), `embedBase64(path)`, `renderTemplate({ css, mainJs, workerJs, wasmB64 })`, `writeDist()`
+- `verify.mjs`: `assertNoExternalRefs(html)`(`http://`, `https://`, `src=`/`href=`에 외부 경로 없음), `assertSizeBudget(html, 6 * 1024 * 1024)`, `assertCsp(html)`
+
+**예외 처리**
+- 빌드 중 import 순환 감지 시 실패. 상대 경로가 `src/` 밖을 가리키면 실패.
+- `verify` 실패는 빌드 실패로 취급하고 CI에서 막는다.
+
+**완료 기준**
+- `npm run check`(lint + typecheck + unit) 통과, `npm run build && npm run verify` 통과
+- Playwright가 `file://.../dist/jdrdatabase.html`을 열어 제목 텍스트를 확인
+
+### Step 1. DB 엔진과 RPC 계층
+
+**목표**: Worker 안에서 sql.js가 기동하고, 메인에서 RPC로 SQL을 실행하며, 메모리 DB를 바이트로 내보내고 다시 연다.
+
+**산출물**: `db/engine.js`, `db/worker.js`, `db/client.js`, `util/errors.js`, `util/bytes.js`, `vendor/sql-wasm.*`
+
+**주요 함수**
+- `engine.init({ wasmBinary })`, `engine.open(bytes?)`, `engine.close()`, `engine.exec(sql, params)`, `engine.run(sql, params)`, `engine.prepareCached(sql)`, `engine.transaction(fn)`, `engine.export()`, `engine.applyPragmas()`
+- `client.createClient({ transport })`, `client.call(op, args, { transfer, onProgress, signal })`
+- `worker.js`: `dispatch(msg)` → `handlers[op]`. 진행 이벤트 `{ id, progress: { done, total, phase } }`
+- `createTransport()`: Worker 생성 시도 → 실패 시 `InlineTransport`(같은 스레드에서 `dispatch` 직접 호출)
+
+**예외 처리**
+- Worker 생성 실패(`SecurityError`, `file://` 제한): 인라인 전송으로 폴백하고 상태바에 "단일 스레드 모드" 표시.
+- wasm 인스턴스화 실패(메모리 부족, 지원 안 되는 브라우저): 시작 화면에 원인과 지원 브라우저 안내를 표시하고 앱을 잠근다.
+- `export()` 이후 statement 캐시 무효화와 PRAGMA 재적용을 `engine.export()` 내부에서 반드시 수행한다(D-02).
+- RPC 타임아웃은 두지 않는다(대용량 작업은 수십 초가 정상). 대신 취소 신호(`signal`)를 지원하는 작업만 취소 가능하고, 그 외에는 진행률만 보고한다.
+- 메시지 크기: 결과 행이 10,000행을 넘는 요청은 Worker가 `E_RESULT_TOO_LARGE`로 거부한다(창 질의만 허용, 전체 SELECT 금지).
+
+**완료 기준**
+- 단위 테스트: Node에서 `engine`을 초기화해 `PRAGMA compile_options`에 `ENABLE_FTS5`가 있고 `sqlite_version() >= 3.37`임을 고정한다.
+- 왕복 테스트: 테이블 생성 → export → 새 엔진에 import → 같은 데이터.
+- E2E: Worker 모드와 인라인 모드 각각에서 `SELECT 1` 성공.
+
+### Step 2. 파일 열기·저장·저널·백업
+
+**목표**: 사용자가 새 DB를 만들고, `.db` 파일을 열고, 저장하고, 탭을 닫았다 열어도 미저장 변경을 복구할 수 있다.
+
+**산출물**: `io/filesystem.js`, `io/idb.js`, `io/autosave.js`, `app/store.js`(파일 상태 부분), `ui/toolbar.js`, `ui/dialogs/conflict.js`
+
+**주요 함수**
+- `filesystem.capabilities()` → `{ fsa: boolean, idb: boolean }`
+- `filesystem.pickOpen()`, `filesystem.pickSaveAs(suggestedName)`, `filesystem.readAll(handleOrFile)` → `Uint8Array`, `filesystem.write(handle, bytes)`, `filesystem.download(name, bytes)`
+- `idb.open()`; 스토어 `handles`, `journal`, `backups`, `known_revisions`, `settings`
+- `autosave.recordCommand(cmd)`, `autosave.clear()`, `autosave.recoverable(dbId)`, `autosave.replay(commands)`
+- `store.openFile()`, `store.newDatabase()`, `store.save()`, `store.saveAs()`, `store.markDirty()`
+- `schema.validateHeader(bytes)`(SQLite 매직 헤더 `SQLite format 3\0` 확인), `schema.readMeta()`, `schema.migrate()`
+
+**예외 처리**
+- SQLite 파일이 아님 / 손상: `E_FILE_NOT_SQLITE`, `E_FILE_CORRUPT`(`PRAGMA integrity_check` 실패). 열지 않고 안내.
+- `_jdr_meta`가 없는 일반 SQLite 파일: "이 파일은 다른 도구가 만든 SQLite 파일입니다. 메타 정보를 추가하여 이 앱에서 관리하시겠습니까?" → 승인 시 기존 테이블을 `_jdr_tables`에 등록(열 타입은 `text`로 추정, STRICT 아님을 표시).
+- 파일 크기 상한: 700 MB 초과 시 경고 후 계속, 1.5 GB 초과 시 거부(`E_FILE_TOO_LARGE`).
+- 메모리 부족(`RangeError`, wasm `abort`): 열기·저장을 중단하고 "파일이 너무 큽니다" 안내. 저장 중이었으면 원본은 그대로임을 명시.
+- 파일 핸들 권한 만료: `queryPermission` → `requestPermission` 순으로 재요청. 거부 시 "다른 이름으로 저장"으로 유도.
+- 저장 도중 브라우저가 닫히는 경우: `createWritable`의 원자성으로 원본은 보존됨. `beforeunload`에서 dirty이면 이탈 확인.
+- 저널 용량이 50 MB를 넘으면 기록을 멈추고 "지금 저장하세요" 배너를 띄운다.
+- 두 탭이 같은 DB를 여는 경우: `BroadcastChannel`로 `db_id` 점유를 알리고, 두 번째 탭은 읽기 전용으로 연다.
+- `revision` 판정(4.3절)에 따른 경고 대화상자.
+
+**완료 기준**
+- E2E(폴백 경로): 새 DB → 테이블 생성 → 다운로드된 파일을 `setInputFiles`로 다시 열기 → 데이터 동일.
+- 단위: `validateHeader`, 마이그레이션(빈 파일 → 최신), revision 판정표 5개 조건.
+- 손상 파일·비SQLite 파일 픽스처가 올바른 오류 코드로 거부됨.
+
+### Step 3. 메타 스키마와 테이블·열 관리
+
+**목표**: 테이블과 열을 만들고, 이름·타입·순서를 바꾸고, 소프트 삭제할 수 있다.
+
+**산출물**: `db/schema.js`, `db/tables.js`, `db/values.js`, `app/commands.js`(스키마 커맨드), `ui/sidebar.js`, `ui/dialogs/table.js`, `ui/dialogs/column.js`
+
+**주요 함수**
+- `tables.create({ name })` → `{ tableId }`, `tables.rename()`, `tables.drop()`(물리 삭제, 되돌리기 불가 확인), `tables.list()`
+- `tables.addColumn(tableId, { name, type, options })`, `tables.renameColumn()`, `tables.reorderColumns()`, `tables.softDeleteColumn()`, `tables.restoreColumn()`, `tables.changeColumnType()`(새 열 + 변환 복사)
+- `values.validate(type, raw)` → `{ ok, value } | { ok: false, reason }`, `values.coerce(type, raw, policy)`, `values.toDisplay(type, value)`
+- `ids.newTableId()`, `ids.newColumnId()`(`crypto.getRandomValues`, 충돌 시 재생성)
+- `schema.physicalType(logicalType)`, `schema.quoteIdent(name)`
+
+**예외 처리**
+- 테이블 이름 중복·빈 이름: UI에서 거부(`E_NAME_INVALID`). 물리 이름은 항상 고유하므로 DB 제약에는 걸리지 않는다.
+- 열 개수 상한: SQLite 기본 2,000열. 1,000열에서 경고.
+- 타입 변경 중 변환 실패 값: 사용자가 미리 선택한 정책(NULL 처리 / 중단). 중단 시 트랜잭션 롤백으로 원상복구.
+- `changeColumnType`이 대용량(10만 행 이상)일 때 진행률 표시, 취소 가능.
+- 시스템 열(`id`, `_created_at`, `_updated_at`)에 대한 변경 요청은 `E_SYSTEM_COLUMN`으로 거부.
+
+**완료 기준**
+- 단위: 각 논리 타입의 `validate` 경계값(정수 2^53, 잘못된 날짜 `2026-02-30`, 빈 문자열 → NULL).
+- 단위: 타입 변경 후 되돌리기로 완전 복원.
+- E2E: 테이블 2개, 열 5개 만들고 저장·재열기.
+
+### Step 4. 가상 그리드 (읽기 전용)
+
+**목표**: 30만 행 테이블을 60 fps로 스크롤하고, 열 너비 조절·열 고정·행 번호가 동작한다.
+
+**산출물**: `ui/grid/grid.js`, `ui/grid/cells.js`, `db/query.js`(창 질의), `app/store.js`(뷰 상태)
+
+**주요 함수**
+- `grid.mount(container, { tableId, viewSpec })`, `grid.setRowCount(n)`, `grid.computeRange(scrollTop, viewportHeight)` → `{ start, end }`, `grid.render(range)`, `grid.invalidate()`, `grid.scrollToRow(i)`, `grid.scrollToCell(row, col)`
+- 행 풀: `acquireRow()`, `releaseRow()`, 열 풀 동일
+- `cells.render(el, column, value, meta)`(타입별), `cells.preview(text, length)`
+- `query.buildWindowSQL(table, columns, viewSpec, { offset, limit })`, `query.count(table, viewSpec)`, `query.fetchRow(table, id)`(편집용 전문 로드)
+- 블록 캐시: `cache.get(tableId, block)`, `cache.put()`, `cache.invalidate(tableId)`
+
+**예외 처리**
+- 스크롤 중 도착한 응답이 이미 지나간 범위이면 버린다(요청에 순번 부여, 최신 순번만 렌더).
+- 창 질의 실패(테이블이 삭제됨 등): 빈 상태로 그리고 사이드바로 복귀.
+- 행 수 × 행 높이가 1,000만 px를 넘으면 스크롤 스케일링 활성화(D-05).
+- 셀 값이 미리보기 길이를 넘는 경우 말줄임과 길이 배지. `length()`가 큰 값(100만 자 이상)도 그리드는 256자만 받는다.
+- 열이 모두 소프트 삭제된 테이블: "열이 없습니다" 빈 상태.
+
+**완료 기준**
+- `scripts/gen-fixture.mjs`로 만든 30만 행 × 20열(그중 2열은 평균 5 KB, 1%는 100 KB 이상 텍스트) DB에서 스크롤 프레임당 렌더 16 ms 이하, 창 질의 50 ms 이하(Playwright 성능 트레이스로 측정).
+- 단위: `computeRange` 경계(첫 행, 마지막 행, 뷰포트보다 적은 행 수).
+
+### Step 5. 편집: 인라인·장문 편집기, 행 추가·삭제, 붙여넣기, 되돌리기
+
+**목표**: 셀을 편집하고, 행을 넣고 지우고, 범위를 복사·붙여넣기하며, 모든 변경을 되돌릴 수 있다.
+
+**산출물**: `ui/editor/inline.js`, `ui/editor/longtext.js`, `ui/grid/selection.js`, `ui/grid/clipboard.js`, `app/history.js`, `app/commands.js`(데이터 커맨드), `app/shortcuts.js`
+
+**주요 함수**
+- `inline.open(cell, { initialText })`, `inline.commit()`, `inline.cancel()`
+- `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정)
+- `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`
+- `clipboard.copy(range)` → TSV, `clipboard.paste(text, anchor)` → 복합 커맨드
+- `commands.editCell({ tableId, rowId, colId, oldValue, newValue })`, `commands.insertRows({ tableId, count, at })`, `commands.deleteRows({ tableId, rowIds, snapshot })`, `commands.bulkEdit({ tableId, edits })`
+- `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`
+- Worker: `applyCommand(cmd)`(`BEGIN` ... `COMMIT`, 실패 시 `ROLLBACK`), `_updated_at` 갱신 트리거 대신 커맨드가 명시적으로 갱신
+
+**예외 처리**
+- IME: `compositionstart` 중에는 Enter/Esc를 확정·취소로 처리하지 않는다(`event.isComposing` 검사). 셀에서 바로 타이핑을 시작하면 첫 글자를 편집기의 초기값으로 넘긴다.
+- 편집 확정값 검증 실패(타입 불일치): 편집기를 닫지 않고 오류를 표시한다.
+- 편집 중 다른 곳 클릭: 확정 시도 → 실패하면 원래 값으로 되돌리고 토스트.
+- 붙여넣기 범위가 그리드 경계를 넘는 경우: 행은 자동 추가, 열은 넘치는 만큼 무시하고 안내.
+- 붙여넣기 셀 수 상한 100만 셀. 초과 시 거부(`E_PASTE_TOO_LARGE`)하고 CSV 가져오기를 안내.
+- 되돌리기 스냅샷 상한 10,000행(D-08). 초과 삭제는 확인 후 히스토리 비움.
+- 커맨드 실행 중 Worker 오류: 히스토리에서 제거, 캐시 무효화 후 재조회, 오류 토스트. 앱 상태와 DB 상태의 불일치를 남기지 않는다.
+- 장문 편집기 열림 상태에서 그리드 행이 삭제됨: 편집기를 닫고 안내.
+- 크기 예산: 장문 편집기 입력값이 5 MB를 넘으면 경고(저장은 허용).
+
+**완료 기준**
+- 단위: 커맨드 do/undo 대칭성(모든 커맨드 타입에 대해 적용 → 되돌리기 → DB 덤프 동일).
+- E2E: 한글 IME 시뮬레이션(Playwright `keyboard.insertText` + composition 이벤트)으로 셀 편집 확정.
+- E2E: 1,000 × 20 TSV 붙여넣기 → 되돌리기 → 다시 실행.
+
+### Step 6. 정렬·필터·검색과 뷰 저장
+
+**목표**: 열 정렬(다중), 조건 필터(AND/OR 1단계), 전체 텍스트 검색, 뷰(정렬·필터·숨김 열·너비) 저장.
+
+**산출물**: `db/query.js`(필터 빌더), `db/search.js`, `ui/dialogs/filter.js`, `ui/toolbar.js`(검색 상자), `_jdr_views` 활용
+
+**주요 함수**
+- `query.buildWhere(filterSpec, columns)` → `{ sql, params }`(연산자: `=`, `!=`, `<`, `>`, `<=`, `>=`, `contains`, `starts`, `empty`, `not_empty`, `in`)
+- `query.buildOrderBy(sortSpec)`; 타입에 맞는 정렬(숫자는 수치, 텍스트는 NOCASE)
+- `search.enable(tableId)`(FTS5 테이블 + 트리거 생성, 초기 인덱싱 진행률), `search.disable(tableId)`, `search.query(tableId, q)` → `WHERE id IN (SELECT rowid FROM fts WHERE fts MATCH ?)` 조각, `search.fallbackLike(columns, q)`
+- `views.save()`, `views.load()`, `views.list()`
+
+**예외 처리**
+- 필터 값이 열 타입과 맞지 않으면(숫자 열에 문자) 필터 UI에서 거부.
+- FTS 질의 문법 오류(따옴표 불균형 등): 사용자 입력을 항상 `"..."`로 감싸고 내부 따옴표를 이스케이프하여 구문 오류를 원천 차단.
+- 3자 미만 검색어 또는 인덱스 없음 → LIKE 폴백. LIKE의 `%`, `_`는 `ESCAPE '\'`로 이스케이프.
+- FTS 인덱스 생성 중 취소: 트랜잭션 롤백, `fts_enabled = 0`.
+- 필터 결과 0건이면 빈 상태와 "필터 지우기" 버튼.
+- 정렬 대상 열이 소프트 삭제되면 뷰에서 그 정렬 항목을 제거하고 안내.
+
+**완료 기준**
+- 단위: `buildWhere`가 항상 파라미터 바인딩을 쓰고 문자열 연결로 값을 넣지 않음(테스트가 `'` 포함 값을 넣어 확인).
+- 30만 행에서 trigram 검색 200 ms 이하, 인덱스 없이 LIKE 1초 이하.
+- E2E: 정렬·필터·검색 조합 후 뷰 저장 → 재열기 시 복원.
+
+### Step 7. CSV 가져오기
+
+**목표**: 수백 MB CSV를 새 테이블 또는 기존 테이블에 추가로 가져온다.
+
+**산출물**: `import/csv.js`, `import/infer.js`, `import/pipeline.js`, `ui/dialogs/import.js`
+
+**주요 함수**
+- `csv.detectEncoding(headBytes)` → `'utf-8' | 'utf-16le' | 'utf-16be' | 'euc-kr'`(BOM → UTF-8 `fatal` 시도 → EUC-KR 추정, 사용자 재지정 가능)
+- `csv.detectDelimiter(headText)`(후보별 행 간 필드 수 분산이 최소인 것)
+- `csv.parse(file, { encoding, delimiter, hasHeader })` → 행 이터레이터. `file.stream().pipeThrough(new TextDecoderStream(encoding))`에 상태 기계(필드 안/따옴표 안/따옴표 뒤) 적용, 조각 경계에 걸친 레코드는 다음 조각으로 이월
+- `infer.sample(iterator, 1000)`, `infer.column(values)` → `{ type, confidence, examples }`(우선순위 boolean → integer → real → date → datetime → text; 최대 길이 2,000자 초과가 하나라도 있으면 longtext)
+- `pipeline.run({ source, mapping, target, policy, onProgress, signal })`: 1,000행 트랜잭션, prepared statement 재사용, `_created_at` 일괄, 종료 시 `{ inserted, skipped, errors[] }` 보고서
+
+**예외 처리**
+- 인코딩 오판(깨진 문자 `�` 비율 1% 초과): 미리보기 단계에서 경고하고 인코딩 재선택 유도.
+- 행마다 필드 수가 다른 경우: 부족한 필드는 NULL, 넘치는 필드는 버리고 보고서에 행 번호 기록. 헤더보다 필드가 많은 행이 10% 넘으면 구분자 재감지 제안.
+- 따옴표가 끝나지 않은 채 파일이 끝남: 남은 텍스트를 마지막 필드로 처리하고 경고.
+- 값 변환 실패 정책(열 단위): `null`(기본), `text`(그 열 전체를 text로 강등하고 처음부터 재시도), `abort`.
+- 셀 값 길이 상한 10 MB 초과: 건너뛰고 보고서에 기록.
+- 기존 테이블에 추가 시 열 매핑 불일치: 매핑 UI에서 반드시 대응시키게 하고, 대응 없는 원본 열은 "건너뜀".
+- 취소: 현재 트랜잭션 롤백, 새 테이블이었으면 테이블 삭제, 기존 테이블이면 지금까지 커밋된 행은 유지되었음을 명시.
+- 메모리: 파서는 조각 단위지만 sql.js DB는 메모리에 있으므로 예상 결과 크기(파일 크기 × 1.2)가 남은 예산을 넘으면 시작 전에 경고.
+- 가져오기 도중에는 그리드 편집을 잠근다(같은 DB에 두 트랜잭션 불가).
+
+**완료 기준**
+- 단위 픽스처: 따옴표 안 개행·쉼표, BOM 있는 UTF-8, UTF-16LE, EUC-KR 바이트, 빈 줄, CRLF/LF 혼재, 필드 수 불일치, 32 KB 조각 경계에 걸친 따옴표 필드.
+- 30만 행 × 20열 CSV(약 150 MB) 가져오기 60초 이하(Chromium, Worker 모드).
+- 취소 후 DB에 잔여물이 없음을 확인하는 테스트.
+
+### Step 8. XLSX 가져오기
+
+**목표**: 엑셀·구글 스프레드시트에서 내려받은 `.xlsx`를 시트 단위로 가져온다.
+
+**산출물**: `import/xlsx.js`, `vendor/xlsx.full.min.js`, `ui/dialogs/import.js`(시트 선택 단계)
+
+**주요 함수**
+- `xlsx.listSheets(bytes)` → `[{ name, rows, cols }]`(`bookSheets`, `sheetRows` 옵션으로 가볍게)
+- `xlsx.parse(bytes, { sheet, headerRow, range })` → 행 이터레이터. `XLSX.read(bytes, { type: 'array', dense: true, cellDates: true })` 후 셀 타입 `n/s/b/d/e`를 논리값으로 변환. 수식 셀은 `v`(계산값)만 사용
+- 날짜: SheetJS의 `cellDates`로 Date 객체를 받아 `date`/`datetime` 판정(시각이 00:00:00이면 `date`)
+- 추론·매핑·삽입은 Step 7의 `infer`·`pipeline`을 그대로 사용
+
+**예외 처리**
+- 암호화된 통합 문서: `E_XLSX_ENCRYPTED`로 거부하고 안내.
+- 파일 크기 상한 100 MB(전체를 메모리에 올려야 함). 초과 시 "CSV로 저장 후 가져오기" 안내.
+- 병합 셀: 좌상단 값만 사용, 나머지는 NULL. 미리보기에 표시.
+- 오류 셀(`#N/A`, `#REF!`): NULL 처리 후 보고서 기록.
+- 헤더 행이 비어 있거나 중복: `열1`, `열2` 자동 이름과 중복 접미사 `(2)`.
+- 1900 윤년 버그(1900-02-29)와 1904 날짜 체계(`Workbook.WBProps.date1904`): SheetJS 처리에 위임하되 픽스처로 검증.
+- 숫자 서식이 텍스트인 열(예: 우편번호 `01234`): 추론이 integer로 판정하면 선행 0이 사라지므로, 표본에 선행 0 문자열이 있으면 text로 판정.
+- SheetJS 파싱 중 예외(손상 zip): `E_XLSX_CORRUPT`.
+
+**완료 기준**
+- 픽스처: 날짜·시간·불리언·수식·병합·오류 셀·빈 헤더·1904 체계.
+- 5만 행 × 20열 xlsx 가져오기 20초 이하.
+
+### Step 9. 내보내기, 백업, 압축 저장, 클라우드 사용 안내
+
+**목표**: CSV·XLSX 내보내기, `.db.gz` 저장 옵션, 백업 복원, 클라우드 왕복 사용 설명.
+
+**산출물**: `export/csv.js`, `export/xlsx.js`, `io/filesystem.js`(gzip), `ui/dialogs/export.js`, `ui/dialogs/settings.js`(기기 이름, 자동 저장), `docs/cloud-sync.md`
+
+**주요 함수**
+- `exportCsv(tableId, viewSpec?, { encoding: 'utf-8-bom' | 'utf-8', delimiter })`: 창 질의로 5,000행씩 스트리밍하여 `WritableStream`에 쓰기(전체를 문자열로 만들지 않음)
+- `exportXlsx(tableId)`: 10만 행 초과 시 경고(SheetJS 쓰기는 메모리 상주). 100만 행은 XLSX 규격 상한.
+- `filesystem.write(handle, bytes, { gzip })`: `new CompressionStream('gzip')`, 확장자 `.db.gz`. 열기 시 gzip 매직(`1f 8b`)으로 자동 판별
+- `backups.restore()`: IDB의 직전 저장본을 새 이름으로 내보내기
+- 자동 저장: dirty 후 N초(기본 꺼짐, 30초~5분)마다 `store.save()`. 정본 파일 핸들이 있을 때만.
+
+**예외 처리**
+- 내보내기 대상 셀에 구분자·개행·따옴표 포함: RFC 4180 인용. 엑셀 호환을 위해 UTF-8 BOM 기본.
+- 수식 주입 방지: `=`, `+`, `-`, `@`로 시작하는 텍스트는 CSV 내보내기 시 앞에 `'`를 붙이는 옵션(기본 켜짐).
+- gzip 파일을 압축 미지원 브라우저에서 열기: `DecompressionStream` 부재 시 `E_GZIP_UNSUPPORTED`.
+- 자동 저장과 사용자 저장이 겹침: 저장 뮤텍스. 진행 중이면 다음 틱으로 미룸.
+- 백업 스토어 용량 부족(`QuotaExceededError`): 백업을 건너뛰고 저장은 진행하되 상태바에 표시.
+
+**완료 기준**
+- 왕복 테스트: 내보낸 CSV를 다시 가져오면 타입·값이 동일(날짜, 불리언, NULL, 따옴표 포함 텍스트).
+- `.db.gz` 저장 → 열기 왕복.
+- `docs/cloud-sync.md`에 "PC A에서 저장·동기화 완료 확인 → PC B에서 열기" 절차와 경고 메시지 의미를 기술.
+
+### Step 10. 성능 검증, 하드닝, 접근성, 마무리
+
+**목표**: 성능 예산(8장)을 측정으로 확인하고, 오류 경로를 점검하며, 키보드만으로 모든 기능을 쓸 수 있게 한다.
+
+**산출물**: `test/e2e/perf.spec.js`, `docs/support-matrix.md`, README 갱신, 릴리스 빌드
+
+**작업**
+- 성능 트레이스 자동화: 30만 행 픽스처로 열기·스크롤·검색·저장·가져오기 시간을 CI에서 기록(회귀 감지, 임계 초과 시 실패).
+- 메모리 프로파일: 열기 → 가져오기 → 저장 순으로 힙 스냅샷을 비교하여 누수 확인(캐시·행 풀·statement 캐시).
+- 오류 주입 테스트: Worker 강제 종료, IDB 열기 실패, 파일 쓰기 중 예외, wasm 메모리 한계 근접.
+- 접근성: 그리드에 `role="grid"`, `aria-rowcount`, `aria-colcount`, 활성 셀 `aria-selected`, 포커스 가시성, 대화상자 포커스 트랩, 명도 대비 4.5:1.
+- 보안 점검: 셀 값은 항상 `textContent`로만 렌더링(`innerHTML` 금지), CSP 검증, CSV 수식 주입 옵션 확인.
+- 지원 매트릭스 실측 기록(Chromium/Firefox/Safari × `file://`/`http://localhost`).
+
+**완료 기준**
+- 8장 예산 전 항목 통과.
+- Playwright axe 검사에서 critical 0건.
+- `dist/jdrdatabase.html` 6 MB 이하.
+
+---
+
+## 6. RPC 프로토콜 (D-11)
+
+```js
+// 요청 (main → worker)
+{ id: 17, op: 'query.window', args: { tableId, viewSpec, offset, limit } }
+// 응답
+{ id: 17, ok: true, result: { rows: [...], seq } }
+{ id: 17, ok: false, error: { code: 'E_DB_QUERY', message, detail } }
+// 진행 이벤트 (응답 전에 0회 이상)
+{ id: 17, progress: { phase: 'insert', done: 120000, total: 300000 } }
+// 취소 (main → worker)
+{ id: 17, cancel: true }
+```
+
+| op | 인자 | 결과 | 취소 |
+|---|---|---|---|
+| `engine.init` | `{ wasmBinary }` (transfer) | `{ version, compileOptions }` | 불가 |
+| `db.open` | `{ bytes? }` (transfer) | `{ meta, tables }` | 불가 |
+| `db.export` | `{ bumpRevision, savedBy }` | `{ bytes }` (transfer) | 불가 |
+| `db.close` | | | |
+| `schema.*` | 3장 `tables` 함수와 1:1 | | 타입 변경만 가능 |
+| `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, seq }` | 불가(짧음) |
+| `query.count` | `{ tableId, viewSpec }` | `{ count }` | |
+| `query.row` | `{ tableId, rowId, colIds }` | `{ row }` (전문) | |
+| `command.apply` | `{ cmd }` | `{ affected }` | 불가 |
+| `search.enable` | `{ tableId }` | | 가능 |
+| `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
+| `import.run` | `{ file, mapping, target, policy }` | `{ report }` | 가능 |
+| `export.stream` | `{ tableId, viewSpec, format, options }` | 조각 이벤트 `{ chunk }` 후 완료 | 가능 |
+
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_BUSY`. `command.apply`, `import.run`, `search.enable`은 서로 배타적이며 동시에 오면 `E_BUSY`. `query.*`는 언제나 허용된다(읽기).
+
+---
+
+## 7. 공통 예외 처리 카탈로그
+
+모든 오류는 `AppError { code, message, detail?, recoverable }`이다. UI는 `code`로 문구(i18n)와 다음 행동을 결정한다. 원인 예외는 `cause`에 보존한다.
+
+| 코드 | 상황 | 복구 가능 | UI 행동 |
+|---|---|---|---|
+| `E_ENV_NO_WASM` | wasm 지원 없음 | 아니오 | 시작 화면에서 잠금, 지원 브라우저 안내 |
+| `E_ENV_NO_WORKER` | Worker 생성 실패 | 예 | 인라인 모드로 계속, 상태바 표시 |
+| `E_ENV_NO_IDB` | IndexedDB 사용 불가 | 예 | 저널·백업·최근 파일 비활성 안내 |
+| `E_FILE_NOT_SQLITE` | 헤더 불일치 | 예 | 열기 취소 |
+| `E_FILE_CORRUPT` | integrity_check 실패 | 예 | 열기 취소, sqlite3 `.recover` 안내 |
+| `E_FILE_TOO_LARGE` | 1.5 GB 초과 | 예 | 열기 거부 |
+| `E_FILE_NEWER_SCHEMA` | 앱보다 새 schema_version | 예 | 읽기 전용으로 열기 |
+| `E_FILE_PERMISSION` | 핸들 권한 거부 | 예 | 다른 이름으로 저장 유도 |
+| `E_FILE_WRITE` | 쓰기 실패 | 예 | 원본 보존 안내, 재시도·다운로드 대안 |
+| `E_REVISION_BEHIND` | 4.3절 경고 조건 | 예 | 경고 대화상자 |
+| `E_DB_QUERY` | SQL 실행 오류 | 예 | 토스트, 캐시 무효화 |
+| `E_DB_BUSY` | 배타 작업 충돌 | 예 | "가져오기 진행 중" 안내 |
+| `E_RESULT_TOO_LARGE` | 1만 행 초과 결과 | 아니오(버그) | 콘솔 오류, 개발 중 발견 대상 |
+| `E_MEM` | 메모리 부족 | 부분 | 작업 중단, 저장 유도 |
+| `E_NAME_INVALID` | 빈·중복 이름 | 예 | 폼 오류 |
+| `E_SYSTEM_COLUMN` | 시스템 열 변경 시도 | 예 | 거부 |
+| `E_VALUE_INVALID` | 타입 검증 실패 | 예 | 편집기 유지 |
+| `E_PASTE_TOO_LARGE` | 100만 셀 초과 | 예 | CSV 가져오기 안내 |
+| `E_UNDO_LIMIT` | 되돌리기 스냅샷 초과 | 예 | 확인 후 히스토리 비움 |
+| `E_IMPORT_ENCODING` | 깨진 문자 비율 초과 | 예 | 인코딩 재선택 |
+| `E_IMPORT_CANCELLED` | 사용자 취소 | 예 | 롤백 결과 안내 |
+| `E_XLSX_ENCRYPTED` / `E_XLSX_CORRUPT` | 파일 문제 | 예 | 거부 |
+| `E_GZIP_UNSUPPORTED` | 압축 스트림 없음 | 예 | 비압축 안내 |
+| `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내 |
+
+원칙:
+1. 데이터 유실 가능성이 있는 경로(저장, 삭제, 가져오기 취소)는 실패 시 **원본이 어떤 상태인지**를 메시지에 반드시 포함한다.
+2. Worker에서 던진 오류는 직렬화하여 메인에서 같은 `AppError`로 복원한다.
+3. 예상 못 한 예외(`E_UNKNOWN`)는 콘솔에 전체 스택을 남기고, 사용자에게는 "저장 후 다시 시작"을 권한다. 조용히 삼키지 않는다.
+
+---
+
+## 8. 성능 예산과 검증
+
+측정 환경: Chromium 최신, 4코어 노트북, 30만 행 × 20열 픽스처(약 300 MB DB, 장문 열 2개).
+
+| 항목 | 목표 | 측정 방법 |
+|---|---|---|
+| 앱 시작(빈 DB) | 1.5초 이하 | Playwright 첫 렌더 시간 |
+| 300 MB 파일 열기 | 5초 이하 | `db.open` 응답 시간 |
+| 스크롤 프레임 렌더 | 16 ms 이하 | 성능 트레이스 `render` 마크 |
+| 창 질의(200행) | 50 ms 이하 | Worker 측 타이머 |
+| 셀 편집 반영 | 30 ms 이하 | `command.apply` 왕복 |
+| 정렬 변경(인덱스 없음) | 1초 이하 | `query.window` 첫 응답 |
+| trigram 검색 | 200 ms 이하 | `query.count` |
+| 300 MB 저장 | 5초 이하 + 디스크 시간 | `db.export` + write |
+| 150 MB CSV 가져오기 | 60초 이하 | `import.run` |
+| 산출물 크기 | 6 MB 이하 | `verify.mjs` |
+| 최대 힙(300 MB DB 저장 시점) | 1.2 GB 이하 | 힙 스냅샷 |
+
+예산을 넘기면 원인을 기록하고 설계(D-05, D-06)를 재검토한다. 예산을 낮추는 것으로 해결하지 않는다.
+
+---
+
+## 9. 리스크와 미확정 사항
+
+| # | 리스크 | 영향 | 대응 |
+|---|---|---|---|
+| R1 | `file://`에서 Blob Worker·IndexedDB·File System Access의 브라우저별 가용성 | 폴백 경로로만 동작할 수 있음 | Step 1·2에서 실측, 지원 매트릭스 문서화, 모든 기능 감지 후 폴백 |
+| R2 | sql.js wasm 메모리 성장 한계(브라우저 탭 한계) | 대용량 파일 열기·저장 실패 | 파일 크기 경고·거부 상한, export 시점 메모리 2배 예산 반영 |
+| R3 | SheetJS CE 유지보수·배포 방식 변경 | XLSX 기능 의존성 | `vendor/`에 고정 버전 커밋, fflate + 자체 파서로 교체 가능한 어댑터 경계 유지 |
+| R4 | 클라우드 충돌 사본으로 인한 사용자 혼란 | 편집 유실 | revision 경고, 백업 1세대, 사용 안내 문서 |
+| R5 | 한글 로케일 정렬·대소문자 무시 요구 | 정렬 결과 기대 불일치 | v1은 코드 포인트 정렬로 한정하고 문서화. v1.1에서 `create_function` 기반 정렬 키 검토 |
+| R6 | 100만 행 이상에서 OFFSET 지연 | 스크롤 끝부분 느림 | 필요 시 정렬 열 인덱스 자동 생성(사용자 옵션) 또는 keyset 페이징 |
+| R7 | STRICT 테이블이 아닌 외부 SQLite 파일 편집 | 타입 혼재 | "관리 대상 등록" 시 읽기 전용 기본, 변환 마법사는 v1.1 |
+
+미확정: 기본 파일 확장자를 `.db`로 할지 `.jdr.db`로 할지(현재 `.db`). 자동 저장의 기본 켜짐 여부(현재 꺼짐).
