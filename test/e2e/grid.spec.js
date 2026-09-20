@@ -232,7 +232,7 @@ test('키보드: 화살표·PageDown·Ctrl+End로 이동하면 활성 셀이 따
   page,
 }) => {
   await seed(page);
-  await page.locator('.jdr-grid').focus();
+  await page.locator('.jdr-grid__scroller').focus();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowRight');
   const activeCell = page.locator('.jdr-grid__cell--active');
@@ -310,7 +310,7 @@ test('그리드를 닫았다 다시 열어도 고정·너비·클릭·키보드�
   await expect(activeCell).toHaveText('9');
 
   // 키보드 이동.
-  await page.locator('.jdr-grid').press('ArrowDown');
+  await page.locator('.jdr-grid__scroller').press('ArrowDown');
   await expect(activeCell).toHaveText('12');
 
   // 머리글 손잡이 끌기.
@@ -399,4 +399,31 @@ test('열 구성이 그대로면 목록을 다시 읽어도 스크롤·활성 �
   await addColumn(page, '비고', '텍스트');
   await expect(page.locator('.jdr-grid__hcell[data-col="5"]')).toHaveText('비고');
   await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(0);
+});
+
+test('접근성: role="grid"가 행·행 그룹을 직접 소유하고 다른 자식이 없다', async ({ page }) => {
+  await seed(page);
+  const childRoles = await page.evaluate(() => {
+    const grid = document.querySelector('[role="grid"]');
+    if (!grid) return null;
+    return [...grid.children].map((c) => c.getAttribute('role'));
+  });
+  // grid가 소유할 수 있는 것은 row와 rowgroup뿐이다(ARIA). 도구 모음이나 스크롤 상자가
+  // 사이에 끼면 행이 grid의 것이 아니게 되어 행·열 번호 안내가 성립하지 않는다.
+  expect(childRoles).toEqual(['row', 'rowgroup']);
+
+  const grid = page.locator('[role="grid"]');
+  await expect(grid).toHaveAttribute('aria-rowcount', String(ROWS + 1));
+  await expect(grid).toHaveAttribute('aria-colcount', '6');
+  await expect(grid.locator('> [role="row"] > [role="columnheader"]')).toHaveCount(6);
+  await expect(
+    grid.locator('> [role="rowgroup"] > [role="row"]:not([hidden]) > [role="rowheader"]').first(),
+  ).toHaveText('1');
+
+  // 그리드는 키보드로 도달할 수 있고, 포커스를 받는 것이 grid 자신이어야 한다.
+  await expect(grid).toHaveAttribute('tabindex', '0');
+  await grid.focus();
+  await expect
+    .poll(async () => page.evaluate(() => document.activeElement?.getAttribute('role')))
+    .toBe('grid');
 });

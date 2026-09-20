@@ -235,9 +235,9 @@ export function createGrid(deps) {
   const { client, store, onError } = deps;
   const cache = createBlockCache();
 
-  const el = div('jdr-grid', 'grid');
-  el.tabIndex = 0;
-  el.setAttribute('aria-label', t('grid.label'));
+  // `role="grid"`는 자식이 `row`·`rowgroup`이어야 한다. 바깥 상자에 두면 그 사이의 도구 모음과
+  // 스크롤 영역이 끼어들어 브라우저가 행·머리글·셀 역할을 전부 버린다(실측: 평평한 텍스트 목록).
+  const el = div('jdr-grid');
 
   const bar = div('jdr-grid__bar');
   const rowCountLabel = document.createElement('span');
@@ -251,7 +251,9 @@ export function createGrid(deps) {
   frozenLabel.append(frozenText, frozenSelect);
   bar.append(rowCountLabel, frozenLabel);
 
-  const scroller = div('jdr-grid__scroller');
+  const scroller = div('jdr-grid__scroller', 'grid');
+  scroller.tabIndex = 0;
+  scroller.setAttribute('aria-label', t('grid.label'));
   const header = div('jdr-grid__header', 'row');
   header.setAttribute('aria-rowindex', '1');
   const canvas = div('jdr-grid__canvas', 'rowgroup');
@@ -804,7 +806,7 @@ export function createGrid(deps) {
     header.addEventListener('pointerup', onHeaderPointerUp);
     header.addEventListener('pointercancel', onHeaderPointerUp);
     canvas.addEventListener('click', onCanvasClick);
-    el.addEventListener('keydown', onKeydown);
+    scroller.addEventListener('keydown', onKeydown);
   }
 
   function removeListeners() {
@@ -815,7 +817,7 @@ export function createGrid(deps) {
     header.removeEventListener('pointerup', onHeaderPointerUp);
     header.removeEventListener('pointercancel', onHeaderPointerUp);
     canvas.removeEventListener('click', onCanvasClick);
-    el.removeEventListener('keydown', onKeydown);
+    scroller.removeEventListener('keydown', onKeydown);
   }
 
   function clearRows() {
@@ -850,7 +852,7 @@ export function createGrid(deps) {
       scroller.scrollTop = 0;
       scroller.scrollLeft = 0;
       rowCountLabel.textContent = '';
-      el.setAttribute('aria-colcount', String(columns.length + 1));
+      scroller.setAttribute('aria-colcount', String(columns.length + 1));
       void recount(table.id, generation);
       scheduleRender();
     },
@@ -880,7 +882,7 @@ export function createGrid(deps) {
       rowCount = Math.max(0, Math.trunc(n));
       stats.rowCount = rowCount;
       canvas.style.height = `${canvasHeightFor(layout())}px`;
-      el.setAttribute('aria-rowcount', String(rowCount + 1));
+      scroller.setAttribute('aria-rowcount', String(rowCount + 1));
       rowCountLabel.textContent = t('grid.rowCount', { count: formatInteger(rowCount) });
       if (cursor.row >= rowCount) cursor.row = Math.max(0, rowCount - 1);
       scheduleRender();
