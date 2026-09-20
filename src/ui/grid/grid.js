@@ -1020,7 +1020,11 @@ export function createGrid(deps) {
     const text = ev.clipboardData?.getData('text/plain') ?? '';
     if (!text) return;
     ev.preventDefault();
-    hooks.onPaste(text, selection.getActive());
+    // 앵커는 범위의 왼쪽 위다. 활성 셀은 범위를 어느 방향으로 넓혔느냐에 따라 네 귀퉁이 중
+    // 아무 데나 있을 수 있어(아래로 끌면 오른쪽 아래, Ctrl+A면 마지막 행), 그것을 앵커로 쓰면
+    // 복사한 범위를 그 자리에 다시 붙여넣는 것만으로 값이 밀린다.
+    const range = selection.getRange();
+    hooks.onPaste(text, { row: range.r0, col: range.c0 });
   };
   const onRowInsertClick = () => hooks?.onRowInsert();
   const onRowDeleteClick = () => hooks?.onRowDelete(selection.getRange());

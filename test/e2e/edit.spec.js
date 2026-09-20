@@ -385,3 +385,32 @@ test('복사: 범위를 Ctrl+C로 복사하면 클립보드에 TSV가 들어간�
   const text = await page.evaluate(() => navigator.clipboard.readText());
   expect(text).toBe('이름1\t3\n이름2\t6');
 });
+
+test('붙여넣기는 선택 범위의 왼쪽 위에서 시작한다(복사한 자리에 그대로 붙여넣기)', async ({
+  page,
+}) => {
+  await seed(page);
+  // 아래로 끌어 고른 범위는 활성 셀이 오른쪽 아래에 있다. 붙여넣기가 활성 셀에서 시작하면
+  // 복사한 범위를 그 자리에 다시 붙여넣는 것만으로 값이 한 칸 밀리고 행이 늘어난다.
+  await cell(page, 0, 0).click();
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Control+c');
+  await expect(page.locator('.jdr-toast--info', { hasText: '2행 × 1열을 복사' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('이름1\n이름2');
+
+  await page.keyboard.press('Control+v');
+  await expect(
+    page.locator('.jdr-toast--info', { hasText: '2행 × 1열을 붙여넣었습니다' }),
+  ).toBeVisible();
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 20개');
+  await expect(cell(page, 0, 0)).toHaveText('이름1');
+  await expect(cell(page, 1, 0)).toHaveText('이름2');
+  await expect(cell(page, 2, 0)).toHaveText('이름3');
+
+  // Ctrl+A로 고른 범위도 마찬가지로 첫 행·첫 열에서 시작한다.
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+v');
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 20개');
+  await expect(cell(page, 0, 0)).toHaveText('이름1');
+  await expect(cell(page, 1, 0)).toHaveText('이름2');
+});
