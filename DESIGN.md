@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.3 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영) |
+| 문서 버전 | 0.4 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -115,6 +115,7 @@
 ### D-03. 파일 포맷은 표준 SQLite 파일이고, 사용자 테이블·열의 물리 이름은 불투명 ID를 쓴다
 
 - 사용자 테이블은 실제 SQLite 테이블 `t_<8hex>`, 열은 `c_<8hex>`로 만든다. 사용자에게 보이는 이름·타입·순서·너비는 메타 테이블(`_jdr_tables`, `_jdr_columns`)에 둔다.
+- 메타의 `id`는 물리 이름 그 자체다. 앱이 만든 테이블·열은 `t_<8hex>`·`c_<8hex>`이고, 다른 도구가 만든 SQLite 파일을 등록(Step 2)하면 기존 테이블·열의 원래 이름이 그대로 `id`가 된다. 그런 테이블은 `_jdr_tables.strict = 0`으로 표시하고 v1에서는 읽기 전용으로 다룬다(R7).
 - 사유: 이름 변경이 `ALTER TABLE` 없이 메타 갱신만으로 끝난다. 한글·공백·중복 이름 같은 식별자 문제가 사라진다. NocoDB의 메타 구조와 같은 방향이다.
 - 대가: `sqlite3`로 직접 열면 이름이 불투명하다. 내보내기 시 표시 이름을 사용하고, "SQL 뷰 생성" 기능(표시 이름으로 `CREATE VIEW`)을 v1.1 후보로 둔다.
 - 모든 사용자 테이블은 `STRICT` 테이블(SQLite 3.37+)로 만들어 열 타입이 섞여 정렬이 깨지는 문제를 막는다. 값 검증은 앱이 쓰기 전에 수행한다.
@@ -157,7 +158,11 @@
 
 ### D-08. 모든 변경은 커맨드 객체이며, 되돌리기·저널·붙여넣기가 이 위에서 동작한다
 
-- 커맨드 = `{ type, tableId, do: SQL[], undo: SQL[], summary }`. Worker의 `applyCommand`가 하나의 트랜잭션으로 실행한다.
+- 커맨드 = `{ type, tableId, do: Statement[], undo: Statement[], summary, irreversible? }`. Worker의 `applyCommand(cmd, direction)`가 `do` 또는 `undo` 목록을 하나의 트랜잭션으로 실행한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록하고 Worker 경계를 넘는다).
+- `Statement`는 두 가지다. `{ sql, params? }`는 파라미터 바인딩된 문장 하나이고, `{ convert: { table, from, to, type, policy } }`는 열 타입 변경(Step 3)의 "변환 복사" 단계다. 변환 복사는 값 검증(`values.coerce`)이 JS에 있고 10만 행 이상에서 진행률·취소가 필요하므로 SQL 한 문장으로 쓰지 않고 Worker가 5,000행씩 읽어 `runBatch`로 갱신한다. 그 밖의 단계는 모두 `{ sql, params }`다. 사유: 커맨드를 순수 SQL 목록으로 두면 되돌리기·저널 재생·붙여넣기가 실행기 하나로 끝나고, 변환 단계만 예외로 두면 진행률·취소 요구를 충족하면서 형식은 하나로 유지된다.
+- 스키마 커맨드(테이블·열 생성·이름 변경·순서·소프트 삭제·타입 변경)는 Worker의 `db/tables.js`가 만들고 즉시 적용한 뒤 커맨드 객체를 메인에 돌려준다(`schema.*` op). 메인은 그 객체를 히스토리와 저널에 그대로 넣는다. 데이터 커맨드(Step 5)는 메인의 `app/commands.js`가 만들어 `command.apply`로 보낸다.
+- 되돌리기의 물리 삭제 예외: 커맨드가 스스로 만든 물리 테이블·열은 그 커맨드의 `undo`가 `DROP TABLE`·`DROP COLUMN`으로 지운다(테이블 생성, 열 추가, 타입 변경이 만든 새 열). 그 안에는 사용자 데이터가 없거나(빈 테이블, 새 열) 원본 열에 그대로 남아 있으므로(타입 변경) 아래 소프트 삭제 규칙과 충돌하지 않으며, 이렇게 해야 "적용 → 되돌리기 → DB 덤프 동일"이 성립하고 다시 실행의 `ADD COLUMN`이 이름 충돌 없이 재실행된다.
+- 테이블 삭제(`tables.drop`)는 `undo`가 비어 있고 `irreversible: true`다. UI가 되돌릴 수 없음을 확인받고 히스토리를 비운다.
 - 메인 스레드는 undo/redo 스택(최대 200개)을 유지하고, 같은 커맨드를 저널(D-04)에 기록한다.
 - 대량 붙여넣기·행 다중 삭제는 하나의 복합 커맨드다. 되돌리기용 스냅샷이 10,000행을 넘으면 사용자에게 "되돌릴 수 없는 작업"임을 확인받고 히스토리를 비운다.
 - 열 삭제는 **소프트 삭제**다. `_jdr_columns.deleted_at`만 설정하고 물리 열은 남긴다. 되돌리기가 가능하고 비용이 0이다. 물리 `DROP COLUMN`은 "데이터베이스 정리(VACUUM)" 메뉴에서만 수행한다.
@@ -253,6 +258,7 @@ src/
     store.js                     앱 상태(열린 파일, 현재 테이블·뷰, 선택, dirty) + 이벤트 버스
     history.js                   undo/redo 스택, 저널 연동
     commands.js                  커맨드 생성 함수(셀 편집, 행 추가·삭제, 열 추가·변경·소프트삭제, 붙여넣기)
+    revision.js                  revision 판정표(4.3)의 순수 함수
     shortcuts.js                 키보드 단축키 매핑
   ui/
     grid/
@@ -264,21 +270,24 @@ src/
       inline.js                  인라인 편집기(input, 타입별 검증, IME 처리)
       longtext.js                사이드 패널 장문 편집기
     dialogs/
+      dialog.js                  모달 기반(포커스 트랩, Esc, 버튼 행). 다른 대화상자가 이 위에 만들어진다
       table.js column.js import.js export.js settings.js conflict.js
     toolbar.js sidebar.js statusbar.js toast.js
   io/
     filesystem.js                File System Access + 폴백 다운로드 + 타우리 dialog/fs 추상화
     ipc-bridge.js                메인 스레드에서 Worker의 engine:call 메시지를 타우리 invoke로 중계
-    idb.js                       IndexedDB 래퍼(handles, journal, backups, known_revisions)
+    idb.js                       IndexedDB 래퍼(handles, journal, backups, known_revisions, settings)
     autosave.js                  저널 기록·복구, 자동 저장 타이머
+    tablock.js                   BroadcastChannel로 같은 db_id를 연 다른 탭 감지(두 번째 탭은 읽기 전용)
   db/
     client.js                    RPC 클라이언트(메인 측), Worker/인라인 전송 선택
     worker.js                    Worker 진입점: RPC 디스패치
     engine.js                    엔진 인터페이스, 모드별 구현 선택, 공통 검증(1만 행 상한, 배치 크기)
     engine-wasm.js               SQLite Wasm 구현: 초기화, snapshot(export), statement 캐시, PRAGMA
     engine-native.js             타우리 구현: IPC 호출, Worker→메인 중계 클라이언트
-    schema.js                    메타 테이블 DDL, 마이그레이션, 물리 이름 생성
-    tables.js                    테이블·열 CRUD(메타 + DDL)
+    schema.js                    메타 테이블 DDL, 마이그레이션, 헤더·무결성 검사, 외부 파일 등록, 식별자 인용
+    command.js                   커맨드 실행기(D-08): 문장 목록을 하나의 트랜잭션으로, 변환 단계는 청크·진행률·취소
+    tables.js                    테이블·열 CRUD(메타 + DDL)를 커맨드로 만들어 적용
     query.js                     창 질의 빌더(정렬·필터·검색), count
     values.js                    논리 타입 ↔ 저장값 변환·검증
     search.js                    FTS5 인덱스 생성·삭제·질의
@@ -390,22 +399,24 @@ CREATE TABLE IF NOT EXISTS _jdr_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)
 --       dirty (데스크톱 모드 작업 사본 전용, D-15)
 
 CREATE TABLE IF NOT EXISTS _jdr_tables (
-  id TEXT PRIMARY KEY,            -- 't_' || 8hex
+  id TEXT PRIMARY KEY,            -- 물리 테이블 이름. 앱 생성 't_' || 8hex, 외부 파일 등록 시 원래 이름
   name TEXT NOT NULL,             -- 표시 이름
   position INTEGER NOT NULL,
   created_at TEXT NOT NULL,
-  fts_enabled INTEGER NOT NULL DEFAULT 0
+  fts_enabled INTEGER NOT NULL DEFAULT 0,
+  strict INTEGER NOT NULL DEFAULT 1   -- 0이면 다른 도구가 만든 비STRICT 테이블(Step 2 등록). v1은 읽기 전용
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS _jdr_columns (
-  id TEXT PRIMARY KEY,            -- 'c_' || 8hex
+  id TEXT NOT NULL,               -- 물리 열 이름. 앱 생성 'c_' || 8hex, 외부 파일 등록 시 원래 이름
   table_id TEXT NOT NULL REFERENCES _jdr_tables(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   type TEXT NOT NULL,             -- 4.2 논리 타입
   position INTEGER NOT NULL,
   width INTEGER NOT NULL DEFAULT 160,
   options TEXT,                   -- JSON: select 항목, 숫자 소수 자릿수 등
-  deleted_at TEXT                 -- 소프트 삭제 (D-08)
+  deleted_at TEXT,                -- 소프트 삭제 (D-08)
+  PRIMARY KEY (table_id, id)      -- 외부 파일의 서로 다른 테이블이 같은 열 이름을 가질 수 있으므로 테이블 단위로 고유
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS _jdr_views (
@@ -416,7 +427,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 ) STRICT;
 ```
 
-`schema_version`은 정수이며 `db/schema.js`의 마이그레이션 배열 길이와 같다. 앱보다 새로운 `schema_version`의 파일은 읽기 전용으로 열고 경고한다.
+`schema_version`은 정수이며 `db/schema.js`의 마이그레이션 배열 길이와 같다. 앱보다 새로운 `schema_version`의 파일은 읽기 전용으로 열고 경고한다. 열 메타는 항상 `(table_id, id)`로 조회한다. 시스템 열(`id`, `_created_at`, `_updated_at`)은 `_jdr_columns`에 넣지 않는다.
 
 ### 4.2 논리 타입과 물리 저장
 
@@ -538,19 +549,22 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 사용자가 새 DB를 만들고, `.db` 파일을 열고, 저장하고, 탭을 닫았다 열어도 미저장 변경을 복구할 수 있다.
 
-**산출물**: `io/filesystem.js`, `io/idb.js`, `io/autosave.js`, `app/store.js`(파일 상태 부분), `ui/toolbar.js`, `ui/dialogs/conflict.js`
+**산출물**: `io/filesystem.js`, `io/idb.js`, `io/autosave.js`, `io/tablock.js`, `app/store.js`(파일 상태 부분), `app/revision.js`, `db/schema.js`(메타 DDL·마이그레이션·헤더·무결성·외부 등록), `db/command.js`(저널 재생이 쓰는 커맨드 실행기), `ui/toolbar.js`, `ui/statusbar.js`, `ui/toast.js`, `ui/dialogs/dialog.js`, `ui/dialogs/conflict.js`
 
 **주요 함수**
 - `filesystem.capabilities()` → `{ fsa: boolean, idb: boolean, native: boolean }`. `native`는 데스크톱 모드에서만 참이며, 그때 `pickOpen()`·`pickSaveAs()`는 타우리 dialog 플러그인을 호출해 경로 문자열을 돌려주고 `readAll()`·`write()`는 호출되지 않는다(바이트 이동은 러스트가 담당). 이 분기는 이 단계에서 인터페이스와 스텁만 두고 구현은 Step 11에서 채운다.
 - `filesystem.pickOpen()`, `filesystem.pickSaveAs(suggestedName)`, `filesystem.readAll(handleOrFile)` → `Uint8Array`, `filesystem.write(handle, bytes)`, `filesystem.download(name, bytes)`
 - `idb.open()`; 스토어 `handles`, `journal`, `backups`, `known_revisions`, `settings`
-- `autosave.recordCommand(cmd)`, `autosave.clear()`, `autosave.recoverable(dbId)`, `autosave.replay(commands)`
+- `autosave.recordCommand(cmd)`, `autosave.clear()`, `autosave.recoverable(dbId)`, `autosave.replay(commands)`. 저널은 가장 최근에 편집한 DB 하나의 기록만 담는다(다른 `db_id`의 기록이 시작되면 이전 기록은 지운다). 저장한 적 없는 새 DB의 기록은 `fileName = null`로 남기고, 다음 시작 때 같은 `db_id`의 빈 DB를 만들어(`db.open { dbId }`) 재생을 제안한다.
 - `store.openFile()`, `store.newDatabase()`, `store.save()`, `store.saveAs()`, `store.markDirty()`
-- `schema.validateHeader(bytes)`(SQLite 매직 헤더 `SQLite format 3\0` 확인), `schema.readMeta()`, `schema.migrate()`
+- `revision.judge({ fileRevision, known, journal })` → 4.3 판정표의 한 행(`first` / `ok` / `behind` / `journal` / `journalMismatch`)
+- `tablock.claim(dbId)` → 다른 탭이 같은 `db_id`를 쥐고 있으면 `{ heldElsewhere: true }`
+- `schema.validateHeader(bytes)`(SQLite 매직 헤더 `SQLite format 3\0` 확인), `schema.integrityCheck()`, `schema.hasMeta()`, `schema.readMeta()`, `schema.migrate()`, `schema.adoptExternal()`(다른 도구가 만든 파일의 테이블을 `strict = 0`으로 등록), `schema.bumpRevision({ savedBy })`
+- `command.applyCommand(engine, cmd, direction, ctx)`(D-08 실행기. Step 3의 스키마 커맨드와 Step 5의 데이터 커맨드가 같은 실행기를 쓴다)
 
 **예외 처리**
 - SQLite 파일이 아님 / 손상: `E_FILE_NOT_SQLITE`, `E_FILE_CORRUPT`(`PRAGMA integrity_check` 실패). 열지 않고 안내.
-- `_jdr_meta`가 없는 일반 SQLite 파일: "이 파일은 다른 도구가 만든 SQLite 파일입니다. 메타 정보를 추가하여 이 앱에서 관리하시겠습니까?" → 승인 시 기존 테이블을 `_jdr_tables`에 등록(열 타입은 `text`로 추정, STRICT 아님을 표시).
+- `_jdr_meta`가 없는 일반 SQLite 파일: `db.open`이 DB를 연 채 `unmanaged: true`를 돌려주고, UI가 "이 파일은 다른 도구가 만든 SQLite 파일입니다. 메타 정보를 추가하여 이 앱에서 관리하시겠습니까?"를 묻는다 → 승인 시 `schema.adopt`가 기존 테이블을 `_jdr_tables`에 등록(열 타입은 `text`로 추정, `strict = 0`으로 STRICT 아님을 표시, 읽기 전용). 거절 시 새 빈 DB로 돌아간다(열기 전 미저장 변경 확인을 이미 거쳤으므로 잃는 것은 없다).
 - 파일 크기 상한: 엔진의 `capabilities().warnFileBytes` 초과 시 경고 후 계속, `maxFileBytes` 초과 시 거부(`E_FILE_TOO_LARGE`). wasm 엔진에서는 각각 700 MB, 1.5 GB이고 네이티브 엔진에서는 검사가 발생하지 않는다.
 - 메모리 부족(`RangeError`, wasm `abort`): 열기·저장을 중단하고 "파일이 너무 큽니다" 안내. 저장 중이었으면 원본은 그대로임을 명시.
 - 파일 핸들 권한 만료: `queryPermission` → `requestPermission` 순으로 재요청. 거부 시 "다른 이름으로 저장"으로 유도.
@@ -568,11 +582,12 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 테이블과 열을 만들고, 이름·타입·순서를 바꾸고, 소프트 삭제할 수 있다.
 
-**산출물**: `db/schema.js`, `db/tables.js`, `db/values.js`, `app/commands.js`(스키마 커맨드), `ui/sidebar.js`, `ui/dialogs/table.js`, `ui/dialogs/column.js`
+**산출물**: `db/schema.js`(물리 타입), `db/tables.js`, `db/values.js`, `db/command.js`(변환 단계), `util/ids.js`, `app/commands.js`(스키마 커맨드), `ui/sidebar.js`, `ui/dialogs/table.js`, `ui/dialogs/column.js`
 
 **주요 함수**
-- `tables.create({ name })` → `{ tableId }`, `tables.rename()`, `tables.drop()`(물리 삭제, 되돌리기 불가 확인), `tables.list()`
-- `tables.addColumn(tableId, { name, type, options })`, `tables.renameColumn()`, `tables.reorderColumns()`, `tables.softDeleteColumn()`, `tables.restoreColumn()`, `tables.changeColumnType()`(새 열 + 변환 복사)
+- Worker 측 `db/tables.js`. 각 함수는 현재 메타를 읽어 D-08 커맨드를 만들고 `command.applyCommand`로 즉시 적용한 뒤 `{ cmd, ... }`를 돌려준다. RPC op `schema.*`와 1:1이다.
+- `tables.create({ name })` → `{ tableId, cmd }`, `tables.rename()`, `tables.drop()`(물리 삭제, 되돌리기 불가 확인), `tables.list()`
+- `tables.addColumn(tableId, { name, type, options })` → `{ columnId, columnCount, cmd }`, `tables.renameColumn()`, `tables.reorderColumns()`, `tables.softDeleteColumn()`, `tables.restoreColumn()`, `tables.changeColumnType()`(새 열 + 변환 복사)
 - `values.validate(type, raw)` → `{ ok, value } | { ok: false, reason }`, `values.coerce(type, raw, policy)`, `values.toDisplay(type, value)`
 - `ids.newTableId()`, `ids.newColumnId()`(`crypto.getRandomValues`, 충돌 시 재생성)
 - `schema.physicalType(logicalType)`, `schema.quoteIdent(name)`
@@ -833,15 +848,17 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 |---|---|---|---|
 | `engine.init` | wasm: `{ wasmBinary }` (transfer) / native: `{}` | `{ version, compileOptions, capabilities }` | 불가 |
 | `engine.exec` | `{ sql, params }` | `{ columns, rows }`. 결과 열이 없는 문장은 `{ columns: [], rows: [] }`. 진단·테스트 전용(Step 1 E2E의 `SELECT 1`과 FTS5 trigram, `window.__jdrTest`). 한 문장을 트랜잭션 하나로 감싸 실행하므로 DDL도 보낼 수 있다. UI 코드는 이 op를 호출하지 않는다 | 불가 |
-| `db.open` | wasm: `{ bytes? }` (transfer) / native: `{ originalPath? }` | `{ meta, tables, dirtyWorkcopy? }` | 불가 |
-| `db.snapshot` | `{ bumpRevision, savedBy }` | `{ bytes }` (transfer). wasm 전용, native는 `E_UNSUPPORTED` | 불가 |
+| `db.open` | wasm: `{ bytes?, dbId?, adoptExternal? }` (transfer) / native: `{ originalPath? }` | `{ meta, tables, unmanaged?, readOnly?, dirtyWorkcopy? }`. `bytes`가 없으면 새 빈 DB(마이그레이션 적용, `dbId`를 주면 그 값으로). `_jdr_meta`가 없는 파일은 `adoptExternal`이 아니면 `unmanaged: true`와 함께 열린 채로 둔다. 앱보다 새 `schema_version`은 `readOnly: true` | 불가 |
+| `db.snapshot` | `{ bumpRevision, savedBy }` | `{ bytes, meta }` (transfer). `bumpRevision`이면 `revision + 1`, `saved_at`, `saved_by`를 먼저 기록하고 갱신된 meta를 함께 돌려준다. wasm 전용, native는 `E_UNSUPPORTED` | 불가 |
 | `db.save` | `{ originalPath, bumpRevision, savedBy }` | `{ revision, savedAt }`. native 전용, wasm은 `E_UNSUPPORTED` | 불가 |
 | `db.close` | | | |
-| `schema.*` | 3장 `tables` 함수와 1:1 | | 타입 변경만 가능 |
+| `schema.list` | | `{ tables }`(3장 `tables.list`) | |
+| `schema.adopt` | | `{ meta, tables }`. `unmanaged`로 열린 파일에 메타를 만들고 기존 테이블을 등록 | 불가 |
+| `schema.create` / `schema.rename` / `schema.drop` / `schema.addColumn` / `schema.renameColumn` / `schema.reorderColumns` / `schema.softDeleteColumn` / `schema.restoreColumn` / `schema.changeColumnType` | 3장 `tables` 함수와 1:1 | `{ cmd, ... }`. 적용된 D-08 커맨드를 돌려주어 메인이 히스토리·저널에 넣는다 | 타입 변경만 가능 |
 | `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, seq }` | 불가(짧음) |
 | `query.count` | `{ tableId, viewSpec }` | `{ count }` | |
 | `query.row` | `{ tableId, rowId, colIds }` | `{ row }` (전문) | |
-| `command.apply` | `{ cmd }` | `{ affected }` | 불가 |
+| `command.apply` | `{ cmd, direction? }` | `{ affected }`. `direction`은 `'do'`(기본) 또는 `'undo'`. 저널 재생과 되돌리기가 쓴다 | 불가 |
 | `search.enable` | `{ tableId }` | | 가능 |
 | `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
 | `import.run` | `{ file, mapping, target, policy }` | `{ report }` | 가능 |
@@ -849,7 +866,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다.
 
-규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_BUSY`. `command.apply`, `import.run`, `search.enable`은 서로 배타적이며 동시에 오면 `E_BUSY`. `query.*`는 언제나 허용된다(읽기).
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `import.run`, `search.enable`)는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`와 `schema.list`는 언제나 허용된다(읽기).
 
 ---
 
@@ -880,7 +897,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_PASTE_TOO_LARGE` | 100만 셀 초과 | 예 | CSV 가져오기 안내 |
 | `E_UNDO_LIMIT` | 되돌리기 스냅샷 초과 | 예 | 확인 후 히스토리 비움 |
 | `E_IMPORT_ENCODING` | 깨진 문자 비율 초과 | 예 | 인코딩 재선택 |
-| `E_IMPORT_CANCELLED` | 사용자 취소 | 예 | 롤백 결과 안내 |
+| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경) | 예 | 롤백 결과 안내 |
 | `E_XLSX_ENCRYPTED` / `E_XLSX_CORRUPT` | 파일 문제 | 예 | 거부 |
 | `E_GZIP_UNSUPPORTED` | 압축 스트림 없음 | 예 | 비압축 안내 |
 | `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내 |
