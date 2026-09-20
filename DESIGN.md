@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.5 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정) |
+| 문서 버전 | 0.6 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -160,8 +160,10 @@
 ### D-08. 모든 변경은 커맨드 객체이며, 되돌리기·저널·붙여넣기가 이 위에서 동작한다
 
 - 커맨드 = `{ type, tableId, do: Statement[], undo: Statement[], summary, irreversible? }`. Worker의 `applyCommand(cmd, direction)`가 `do` 또는 `undo` 목록을 하나의 트랜잭션으로 실행한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록하고 Worker 경계를 넘는다).
-- `Statement`는 두 가지다. `{ sql, params? }`는 파라미터 바인딩된 문장 하나이고, `{ convert: { table, from, to, type, policy } }`는 열 타입 변경(Step 3)의 "변환 복사" 단계다. 변환 복사는 값 검증(`values.coerce`)이 JS에 있고 10만 행 이상에서 진행률·취소가 필요하므로 SQL 한 문장으로 쓰지 않고 Worker가 5,000행씩 읽어 `runBatch`로 갱신한다. 그 밖의 단계는 모두 `{ sql, params }`다. 사유: 커맨드를 순수 SQL 목록으로 두면 되돌리기·저널 재생·붙여넣기가 실행기 하나로 끝나고, 변환 단계만 예외로 두면 진행률·취소 요구를 충족하면서 형식은 하나로 유지된다.
-- 스키마 커맨드(테이블·열 생성·이름 변경·순서·소프트 삭제·타입 변경)는 Worker의 `db/tables.js`가 만들고 즉시 적용한 뒤 커맨드 객체를 메인에 돌려준다(`schema.*` op). 메인은 그 객체를 히스토리와 저널에 그대로 넣는다. 데이터 커맨드(Step 5)는 메인의 `app/commands.js`가 만들어 `command.apply`로 보낸다.
+- `Statement`는 세 가지다. `{ sql, params? }`는 파라미터 바인딩된 문장 하나이고, `{ batch: { sql, paramsList } }`는 같은 문장을 파라미터 목록만큼 반복하는 단계(Worker가 `engine.runBatch()`로 실행. 붙여넣기·다중 편집·행 다중 삭제와 그 되돌리기가 쓴다. 목록 하나는 `runBatch` 상한(1만 건·64 MB) 안이어야 하며 커맨드 생성기가 그 단위로 나눈다), `{ convert: { table, from, to, type, policy } }`는 열 타입 변경(Step 3)의 "변환 복사" 단계다. 변환 복사는 값 검증(`values.coerce`)이 JS에 있고 10만 행 이상에서 진행률·취소가 필요하므로 SQL 한 문장으로 쓰지 않고 Worker가 5,000행씩 읽어 `runBatch`로 갱신한다. 그 밖의 단계는 모두 `{ sql, params }`다. 사유: 커맨드를 순수 SQL 목록으로 두면 되돌리기·저널 재생·붙여넣기가 실행기 하나로 끝나고, 변환 단계만 예외로 두면 진행률·취소 요구를 충족하면서 형식은 하나로 유지된다.
+- 스키마 커맨드(테이블·열 생성·이름 변경·순서·소프트 삭제·타입 변경)는 Worker의 `db/tables.js`가 만들고 즉시 적용한 뒤 커맨드 객체를 메인에 돌려준다(`schema.*` op). 메인은 그 객체를 히스토리와 저널에 그대로 넣는다. 데이터 커맨드(Step 5)는 메인의 `app/commands.js`가 만들어 `command.apply`로 보낸다. 데이터 커맨드는 물리 이름(테이블 `id`, 열 `id`)으로 SQL을 만들고 값은 모두 바인딩한다. 되돌리기에 필요한 옛 값(셀 값, `_updated_at`, 삭제할 행 전체)은 커맨드를 만들기 전에 `query.rows`·`query.row`로 읽어 커맨드 안에 넣는다. 그래야 되돌리기가 DB를 다시 읽지 않고도 "적용 → 되돌리기 → 덤프 동일"을 만족하고, 저널에 기록된 커맨드만으로 재생이 끝난다.
+- 되돌리기·다시 실행도 저널에 기록한다. 저널 재생은 항상 `do` 방향이므로, 되돌리기는 `do`와 `undo`를 맞바꾼 역커맨드(`commands.invert`)를 기록하고 다시 실행은 원래 커맨드를 다시 기록한다. 재생 결과는 사용자가 마지막으로 본 상태와 같다.
+- 새 행의 `id`는 커맨드를 만들 때 정한다(`query.stats`의 `maxId + 1`부터 연속). SQLite가 배정하게 두면 되돌리기가 지울 행과 다시 실행이 만들 행의 `id`를 알 수 없다. 행은 언제나 `id` 순서의 끝에 붙는다. 그리드가 `id` 순으로 그리므로 "중간에 삽입"은 다른 행의 `id`를 바꿔야 하는데, 그러면 앞선 커맨드의 되돌리기가 가리키는 행이 달라진다.
 - 되돌리기의 물리 삭제 예외: 커맨드가 스스로 만든 물리 테이블·열은 그 커맨드의 `undo`가 `DROP TABLE`·`DROP COLUMN`으로 지운다(테이블 생성, 열 추가, 타입 변경이 만든 새 열). 그 안에는 사용자 데이터가 없거나(빈 테이블, 새 열) 원본 열에 그대로 남아 있으므로(타입 변경) 아래 소프트 삭제 규칙과 충돌하지 않으며, 이렇게 해야 "적용 → 되돌리기 → DB 덤프 동일"이 성립하고 다시 실행의 `ADD COLUMN`이 이름 충돌 없이 재실행된다.
 - 테이블 삭제(`tables.drop`)는 `undo`가 비어 있고 `irreversible: true`다. UI가 되돌릴 수 없음을 확인받고 히스토리를 비운다.
 - 메인 스레드는 undo/redo 스택(최대 200개)을 유지하고, 같은 커맨드를 저널(D-04)에 기록한다.
@@ -266,8 +268,9 @@ src/
       grid.js                    가상 그리드 컨트롤러(뷰포트 계산, 행·열 풀, 스크롤)
       cells.js                   셀 렌더러(타입별 표시, 미리보기, 배지)
       cache.js                   블록 캐시(D-06): 200행 블록 LRU 50개, 테이블 단위 무효화
-      selection.js               셀·범위·행 선택 모델
-      clipboard.js               TSV 복사·붙여넣기
+      selection.js               셀·범위·행 선택 모델(순수 상태, DOM 없음)
+      clipboard.js               TSV 직렬화·파싱(순수 함수)과 복사·붙여넣기 계획
+      editing.js                 편집 컨트롤러: 그리드 선택·편집기·클립보드·데이터 커맨드·히스토리를 잇는다
     editor/
       inline.js                  인라인 편집기(input, 타입별 검증, IME 처리)
       longtext.js                사이드 패널 장문 편집기
@@ -308,7 +311,7 @@ src/
     format.js                    숫자·날짜 표시
     bytes.js                     base64, 크기 계산
   styles/
-    app.css grid.css dialogs.css
+    app.css grid.css editor.css dialogs.css
   types/
     build-constants.d.ts         빌드가 define으로 치환하는 컴파일 타임 상수(__JDR_TEST__, __JDR_VERSION__) 선언
 
@@ -640,15 +643,15 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 셀을 편집하고, 행을 넣고 지우고, 범위를 복사·붙여넣기하며, 모든 변경을 되돌릴 수 있다.
 
-**산출물**: `ui/editor/inline.js`, `ui/editor/longtext.js`, `ui/grid/selection.js`, `ui/grid/clipboard.js`, `app/history.js`, `app/commands.js`(데이터 커맨드), `app/shortcuts.js`
+**산출물**: `ui/editor/inline.js`, `ui/editor/longtext.js`, `ui/grid/selection.js`, `ui/grid/clipboard.js`, `ui/grid/editing.js`, `app/history.js`, `app/commands.js`(데이터 커맨드), `app/shortcuts.js`, `styles/editor.css`, `db/query.js`(`query.rows`·`query.stats`)
 
 **주요 함수**
-- `inline.open(cell, { initialText })`, `inline.commit()`, `inline.cancel()`
-- `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정)
-- `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`
-- `clipboard.copy(range)` → TSV, `clipboard.paste(text, anchor)` → 복합 커맨드. Worker는 이를 `runBatch`로 실행한다
-- `commands.editCell({ tableId, rowId, colId, oldValue, newValue })`, `commands.insertRows({ tableId, count, at })`, `commands.deleteRows({ tableId, rowIds, snapshot })`, `commands.bulkEdit({ tableId, edits })`
-- `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`
+- `inline.open(cell, { initialText })`, `inline.commit()`, `inline.cancel()`. `cell`은 그리드가 넘기는 `{ row, col, column, rect }`이고 편집기는 스크롤 영역 안에 그 좌표로 놓인다. 확정은 `values.validate`를 거쳐 실패하면 편집기를 닫지 않고 오류를 표시한다. 미리보기가 잘린 텍스트 셀은 `query.row`로 전문을 읽은 뒤 연다
+- `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정). 그리드 오른쪽의 사이드 패널
+- `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`. DOM 없는 순수 상태이며 그리드가 렌더 때 읽는다
+- `clipboard.copy(range)` → TSV(`serializeTsv`), `clipboard.paste(text, anchor)` → `parseTsv` 후 복합 커맨드. 복사는 `navigator.clipboard.writeText`(범위의 전문은 `query.rows`로 읽는다), 붙여넣기는 그리드가 받는 `paste` 이벤트의 `clipboardData`다. Worker는 이를 `runBatch`로 실행한다
+- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08)
+- `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`. `history.apply(cmd)`는 `command.apply` → 스토어 기록 → `push`를 한 번에 한다. 스키마 op가 만든 커맨드는 스토어의 `onCommand` 알림으로 히스토리에 들어온다
 - Worker: `applyCommand(cmd)`(`BEGIN` ... `COMMIT`, 실패 시 `ROLLBACK`), `_updated_at` 갱신 트리거 대신 커맨드가 명시적으로 갱신
 
 **예외 처리**
@@ -656,11 +659,13 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - 편집 확정값 검증 실패(타입 불일치): 편집기를 닫지 않고 오류를 표시한다.
 - 편집 중 다른 곳 클릭: 확정 시도 → 실패하면 원래 값으로 되돌리고 토스트.
 - 붙여넣기 범위가 그리드 경계를 넘는 경우: 행은 자동 추가, 열은 넘치는 만큼 무시하고 안내.
+- 붙여넣기 값이 열 타입에 맞지 않으면(정수 열에 문자 등) 붙여넣기 전체를 `E_VALUE_INVALID`로 거부하고 첫 번째 위치(행·열)를 알린다. 일부만 적용하면 사용자가 무엇이 들어갔는지 알 수 없다.
 - 붙여넣기 셀 수 상한 100만 셀. 초과 시 거부(`E_PASTE_TOO_LARGE`)하고 CSV 가져오기를 안내.
-- 되돌리기 스냅샷 상한 10,000행(D-08). 초과 삭제는 확인 후 히스토리 비움.
+- 되돌리기 스냅샷 상한 10,000행(D-08). 초과 삭제·붙여넣기는 확인 후 `undo`가 빈 `irreversible` 커맨드로 적용하고 히스토리를 비운다. 그때의 삭제는 `DELETE ... WHERE id IN (SELECT id ... ORDER BY id LIMIT ? OFFSET ?)` 한 문장이다.
 - 커맨드 실행 중 Worker 오류: 히스토리에서 제거, 캐시 무효화 후 재조회, 오류 토스트. 앱 상태와 DB 상태의 불일치를 남기지 않는다.
 - 장문 편집기 열림 상태에서 그리드 행이 삭제됨: 편집기를 닫고 안내.
 - 크기 예산: 장문 편집기 입력값이 5 MB를 넘으면 경고(저장은 허용).
+- 읽기 전용 상태(다른 탭, 새 schema_version, 외부 테이블)에서는 편집기를 열지 않고 `file.readOnlyBlocked`를 알린다.
 
 **완료 기준**
 - 단위: 커맨드 do/undo 대칭성(모든 커맨드 타입에 대해 적용 → 되돌리기 → DB 덤프 동일).
@@ -865,7 +870,9 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `schema.create` / `schema.rename` / `schema.drop` / `schema.addColumn` / `schema.renameColumn` / `schema.reorderColumns` / `schema.softDeleteColumn` / `schema.restoreColumn` / `schema.changeColumnType` | 3장 `tables` 함수와 1:1 | `{ cmd, ... }`. 적용된 D-08 커맨드를 돌려주어 메인이 히스토리·저널에 넣는다 | 타입 변경만 가능 |
 | `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, columnIds, seq, elapsedMs }`. `rows[i] = { id, cells, lengths }`이고 `cells[j]`는 `columnIds[j]` 열의 값(text·longtext는 `substr(1, 256)` 미리보기), `lengths[j]`는 미리보기가 잘렸을 때만 전체 문자 수, 아니면 null. `columnIds`는 소프트 삭제·숨김을 뺀 살아 있는 열의 표시 순서. `limit`은 1만 이하. `elapsedMs`는 Worker 측 질의 시간(8장 측정용) | 불가(짧음) |
 | `query.count` | `{ tableId, viewSpec }` | `{ count }` | |
-| `query.row` | `{ tableId, rowId, colIds }` | `{ row }`. `row = { id, cells }`(`cells`는 열 id → 전문 값)이고 없는 행이면 `row: null`. `colIds`를 비우면 살아 있는 열 전부 | |
+| `query.row` | `{ tableId, rowId, colIds }` | `{ row }`. `row = { id, cells, createdAt, updatedAt }`(`cells`는 열 id → 전문 값, `createdAt`·`updatedAt`은 시스템 열)이고 없는 행이면 `row: null`. `colIds`를 비우면 살아 있는 열 전부 | |
+| `query.rows` | `{ tableId, viewSpec, offset, limit, colIds? }` | `{ rows }`. 뷰 순서로 `offset`부터 `limit`개(1만 이하)의 전문 행(`query.row`와 같은 형태). `colIds`를 비우면 소프트 삭제된 열까지 물리 열 전부(행 삭제의 되돌리기 스냅샷용). 붙여넣기·다중 편집·행 삭제가 커맨드를 만들기 전에 옛 값을 읽는 데 쓴다 | 불가(짧음) |
+| `query.stats` | `{ tableId }` | `{ count, minId, maxId }`. 빈 테이블이면 `minId`·`maxId`는 null. 행 추가 커맨드가 새 `id`를 정하는 데 쓴다 | |
 | `command.apply` | `{ cmd, direction? }` | `{ affected, nulled? }`. `direction`은 `'do'`(기본) 또는 `'undo'`. `nulled`는 변환 단계가 NULL로 만든 값의 수. 저널 재생과 되돌리기가 쓴다 | 변환 단계가 있을 때만 |
 | `search.enable` | `{ tableId }` | | 가능 |
 | `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
