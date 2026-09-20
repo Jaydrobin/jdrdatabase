@@ -23,6 +23,7 @@ import { createDispatcher } from './worker.js';
  * @property {'worker' | 'inline'} kind
  * @property {(message: RpcInbound, transfer?: Transferable[]) => void} post
  * @property {(handler: (message: RpcOutbound) => void) => void} onMessage
+ * @property {(handler: (err: AppError) => void) => void} onFatal 전송 계층이 더 이상 응답을 못 주는 상태. 마지막 등록만 유효하다
  * @property {() => void} close
  */
 
@@ -51,14 +52,28 @@ export const HANDSHAKE_TIMEOUT_MS = 10_000;
 function wrapWorker(worker, blobUrl) {
   /** @type {((message: RpcOutbound) => void) | null} */
   let handler = null;
+  /** @type {((err: AppError) => void) | null} */
+  let fatal = null;
   worker.onmessage = (ev) => {
     handler?.(/** @type {RpcOutbound} */ (ev.data));
+  };
+  // 핸드셰이크 이후에도 계속 듣는다. Worker가 죽은 뒤 이 알림이 없으면 RPC에 타임아웃이 없으므로
+  // 대기 중인 호출이 영원히 settle되지 않는다.
+  worker.onerror = (ev) => {
+    const message = typeof ev === 'object' && 'message' in ev ? ev.message : '';
+    fatal?.(new AppError('E_ENV_NO_WORKER', message || 'worker error', { detail: { message } }));
+  };
+  worker.onmessageerror = () => {
+    fatal?.(new AppError('E_UNKNOWN', 'worker message could not be deserialized'));
   };
   return {
     kind: 'worker',
     post: (message, transfer) => worker.postMessage(message, transfer ?? []),
     onMessage: (h) => {
       handler = h;
+    },
+    onFatal: (h) => {
+      fatal = h;
     },
     close: () => {
       worker.terminate();
@@ -106,6 +121,8 @@ export function createInlineTransport() {
     onMessage: (h) => {
       handler = h;
     },
+    // 같은 스레드라 전송 계층이 따로 죽을 일이 없다. 디스패처의 오류는 응답으로 돌아온다.
+    onFatal: () => {},
     close: () => {
       handler = null;
     },
@@ -153,14 +170,10 @@ export async function createTransport(options = {}) {
     const timer = setTimeout(() => {
       resolve(new AppError('E_ENV_NO_WORKER', `worker did not start within ${timeoutMs} ms`));
     }, timeoutMs);
-    created.worker.onerror = (ev) => {
+    created.transport.onFatal((err) => {
       clearTimeout(timer);
-      resolve(
-        new AppError('E_ENV_NO_WORKER', ev.message || 'worker error', {
-          detail: { message: ev.message },
-        }),
-      );
-    };
+      resolve(err);
+    });
     created.transport.onMessage((message) => {
       if ('ready' in message && message.ready === true) {
         clearTimeout(timer);
@@ -173,7 +186,8 @@ export async function createTransport(options = {}) {
     created.transport.close();
     return { transport: createInlineTransport(), fallbackError };
   }
-  created.worker.onerror = null;
+  // 핸드셰이크용 구독을 해제한다. 이후의 치명적 오류는 createClient가 받아 대기 중인 호출을 거부한다.
+  created.transport.onFatal(() => {});
   return { transport: created.transport, fallbackError: null };
 }
 
@@ -198,6 +212,13 @@ export function createClient(options) {
     pending.delete(message.id);
     if (message.ok) entry.resolve(message.result);
     else entry.reject(deserializeError(message.error));
+  });
+
+  // 전송 계층이 죽으면 그 호출들은 응답을 받을 수 없다. 조용히 매달아 두지 않고 거부한다(CLAUDE.md 5.6).
+  transport.onFatal((err) => {
+    const waiting = [...pending.values()];
+    pending.clear();
+    for (const entry of waiting) entry.reject(err);
   });
 
   return {

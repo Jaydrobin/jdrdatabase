@@ -157,7 +157,13 @@ test('client: signal이 이미 abort된 호출은 보내지 않고 E_IMPORT_CANC
 
 test('client.close: 대기 중인 호출을 거부한다', async () => {
   /** @type {import('../../../src/db/client.js').Transport} */
-  const silent = { kind: 'inline', post: () => {}, onMessage: () => {}, close: () => {} };
+  const silent = {
+    kind: 'inline',
+    post: () => {},
+    onMessage: () => {},
+    onFatal: () => {},
+    close: () => {},
+  };
   const client = createClient({ transport: silent });
   const pending = client.call('engine.exec', { sql: 'SELECT 1' });
   client.close();
@@ -165,6 +171,28 @@ test('client.close: 대기 중인 호출을 거부한다', async () => {
     pending,
     (err) => err instanceof AppError && /client closed/.test(err.message),
   );
+});
+
+test('client: 부팅 후 Worker가 죽으면 대기 중인 호출이 거부된다', async () => {
+  // RPC에는 타임아웃이 없으므로, 전송 계층이 치명적 오류를 알리지 않으면 호출이 영원히 멈춘다.
+  /** @type {((err: AppError) => void)[]} */
+  const fatals = [];
+  /** @type {import('../../../src/db/client.js').Transport} */
+  const silent = {
+    kind: 'worker',
+    post: () => {},
+    onMessage: () => {},
+    onFatal: (h) => {
+      fatals.push(h);
+    },
+    close: () => {},
+  };
+  const client = createClient({ transport: silent });
+  const pending = client.call('engine.exec', { sql: 'SELECT 1' });
+  const fatal = fatals.at(-1);
+  assert.ok(fatal, 'client가 전송 계층의 치명적 오류를 구독해야 한다');
+  fatal(new AppError('E_ENV_NO_WORKER', 'worker terminated'));
+  await assert.rejects(pending, (err) => err instanceof AppError && err.code === 'E_ENV_NO_WORKER');
 });
 
 test('createProgressReporter: 250 ms 간격, 단계 변경·완료는 즉시', () => {
@@ -219,6 +247,7 @@ test('createTransport: 준비 신호가 오면 Worker 전송, 시간 안에 오�
         handler = h;
         if (ready) queueMicrotask(() => handler?.({ ready: true }));
       },
+      onFatal: () => {},
       close: () => {},
     };
     return { transport, worker };
