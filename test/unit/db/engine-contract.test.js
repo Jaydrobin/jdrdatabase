@@ -107,6 +107,36 @@ export function defineEngineContract(label, open) {
       await engine.close();
     });
 
+    test('exec: 결과 열이 없는 문장(DDL·대입형 PRAGMA)은 빈 결과를 돌려준다', async () => {
+      const engine = await open();
+      // 결과 열이 0개인 문장에서 열 이름을 먼저 읽으면 엔진이 이를 SQL 오류로 잘못 보고했다.
+      const created = await engine.transaction(() =>
+        engine.exec("CREATE VIRTUAL TABLE f USING fts5(body, tokenize = 'trigram')"),
+      );
+      assert.deepEqual(created, { columns: [], rows: [] });
+      await engine.transaction(() => {
+        assert.deepEqual(engine.exec('PRAGMA user_version = 7'), { columns: [], rows: [] });
+      });
+      assert.deepEqual(engine.exec('PRAGMA user_version').rows, [[7]]);
+      await engine.close();
+    });
+
+    test('exec: 트랜잭션 밖의 쓰기는 run과 마찬가지로 거부된다', async () => {
+      const engine = await open();
+      await engine.transaction(() => {
+        engine.run('CREATE TABLE t (a INTEGER) STRICT');
+      });
+      const err = await expectAppError(() => engine.exec('INSERT INTO t VALUES (1)'), 'E_DB_QUERY');
+      assert.match(err.message, /outside transaction/);
+      assert.deepEqual(engine.exec('SELECT count(*) FROM t').rows, [[0]]);
+      // 읽기와 DB 파일을 바꾸지 않는 문장은 트랜잭션 밖에서도 그대로 허용된다.
+      assert.deepEqual(engine.exec('PRAGMA foreign_keys'), {
+        columns: ['foreign_keys'],
+        rows: [[1]],
+      });
+      await engine.close();
+    });
+
     test('run: 트랜잭션 밖의 쓰기는 거부, 안에서는 changes·lastId', async () => {
       const engine = await open();
       await expectAppError(() => engine.run('CREATE TABLE t (a)'), 'E_DB_QUERY');

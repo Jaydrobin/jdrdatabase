@@ -312,8 +312,17 @@ export function createWasmEngine(options) {
       const stmt = acquire(sql);
       const sqlText = typeof sql === 'string' ? sql : sql.sql;
       try {
+        // `run()`과 같은 규칙(CLAUDE.md 5.3): DB 파일을 바꾸는 문장은 트랜잭션 안에서만.
+        // sqlite3_stmt_readonly는 SELECT·읽기 PRAGMA·트랜잭션 제어에는 참, DDL·DML·대입형 PRAGMA에는 거짓이다.
+        if (txDepth === 0 && requireSqlite3().capi.sqlite3_stmt_readonly(stmt) === 0) {
+          throw new AppError('E_DB_QUERY', 'write outside transaction', {
+            detail: { sql: sqlText.slice(0, 200) },
+          });
+        }
         bind(stmt, params);
-        const columns = stmt.getColumnNames();
+        // 결과 열이 없는 문장(DDL, 대입형 PRAGMA)에서 getColumnNames()는 "Column index 0 is out of
+        // range"로 던진다. 열 개수를 먼저 보고 빈 결과로 돌려준다.
+        const columns = stmt.columnCount > 0 ? stmt.getColumnNames() : [];
         /** @type {SqlValue[][]} */
         const rows = [];
         while (stmt.step()) {
