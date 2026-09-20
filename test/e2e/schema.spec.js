@@ -190,9 +190,10 @@ test('스키마 변경은 저널에 남아 탭을 다시 열면 복구된다', a
   await expect(dialog.locator('.jdr-dialog__message').first()).toContainText('변경 2건');
   await dialog.getByRole('button', { name: '복구' }).click();
   await expect.poll(async () => (await state(page))?.meta.db_id).toBe(dbId);
-  expect(schemaOf(await state(page))).toEqual([
-    { name: '메모', strict: true, columns: [['본문', 'longtext', true]] },
-  ]);
+  // db_id는 빈 DB를 만든 직후 서고, 테이블 목록은 저널 재생이 끝난 뒤에야 채워진다. 끝날 때까지 기다린다.
+  await expect
+    .poll(async () => schemaOf(await state(page)))
+    .toEqual([{ name: '메모', strict: true, columns: [['본문', 'longtext', true]] }]);
   await expect(page.locator('.jdr-sidebar__table-name')).toHaveText('메모');
   expect((await state(page))?.dirty).toBe(true);
 });
