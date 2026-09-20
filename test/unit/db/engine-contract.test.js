@@ -280,6 +280,37 @@ export function defineEngineContract(label, open) {
       await engine.close();
     });
 
+    test('interrupt: 배치가 시작되기 전에 온 취소도 첫 행 전에 멈춘다', async () => {
+      const engine = await open();
+      await engine.transaction(() => {
+        engine.run('CREATE TABLE t (a INTEGER) STRICT');
+      });
+      // 취소 결정과 배치 시작 사이에 들어온 interrupt()가 배치 진입 시 지워지면 안 된다.
+      engine.interrupt();
+      const err = await expectAppError(
+        engine.runBatch('INSERT INTO t VALUES (?)', [[1], [2], [3]]),
+        'E_DB_QUERY',
+      );
+      assert.equal(/** @type {{ reason: string }} */ (err.detail).reason, 'interrupted');
+      assert.deepEqual(engine.exec('SELECT count(*) FROM t').rows, [[0]]);
+      // 표식은 소비되었으므로 다음 배치는 정상이다.
+      await engine.runBatch('INSERT INTO t VALUES (?)', [[1], [2], [3]]);
+      assert.deepEqual(engine.exec('SELECT count(*) FROM t').rows, [[3]]);
+      await engine.close();
+    });
+
+    test('interrupt: 빈 배치는 표식을 소비하지 않고 다음 배치가 멈춘다', async () => {
+      const engine = await open();
+      await engine.transaction(() => {
+        engine.run('CREATE TABLE t (a INTEGER) STRICT');
+      });
+      engine.interrupt();
+      await expectAppError(engine.runBatch('INSERT INTO t VALUES (?)', []), 'E_DB_QUERY');
+      await engine.runBatch('INSERT INTO t VALUES (?)', [[1]]);
+      assert.deepEqual(engine.exec('SELECT count(*) FROM t').rows, [[1]]);
+      await engine.close();
+    });
+
     test('FTS5 trigram: 한글 부분 일치', async () => {
       const engine = await open();
       await engine.transaction(() => {

@@ -368,13 +368,21 @@ export function createWasmEngine(options) {
     async runBatch(sql, paramsList, options = {}) {
       const database = requireDb();
       const sqlText = typeof sql === 'string' ? sql : sql.sql;
-      interrupted = false;
+      // 취소 표식은 배치가 소비할 때만 지운다. 배치 진입 시 지우면 취소 결정과 배치 시작 사이에
+      // 들어온 interrupt()가 사라진다.
+      if (interrupted) {
+        interrupted = false;
+        throw new AppError('E_DB_QUERY', 'runBatch interrupted', {
+          detail: { index: 0, reason: 'interrupted' },
+        });
+      }
       const before = database.changes(true);
       await engine.transaction(() => {
         const stmt = acquire(sql);
         try {
           for (let i = 0; i < paramsList.length; i += 1) {
             if (interrupted) {
+              interrupted = false;
               throw new AppError('E_DB_QUERY', 'runBatch interrupted', {
                 detail: { index: i, reason: 'interrupted' },
               });
