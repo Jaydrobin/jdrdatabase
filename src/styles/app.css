@@ -9,6 +9,10 @@
   --jdr-bg-muted: #f6f8fa;
   --jdr-border: #d0d7de;
   --jdr-danger: #cf222e;
+  --jdr-danger-bg: #ffebe9;
+  --jdr-warning-bg: #fff8c5;
+  --jdr-accent: #0969da;
+  --jdr-accent-hover: #0860ca;
   --jdr-statusbar-height: 28px;
 }
 
@@ -90,4 +94,196 @@ body {
 
 .jdr-statusbar__item--note {
   margin-left: auto;
+}
+
+/* 도구 모음 */
+.jdr-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jdr-border);
+  background: var(--jdr-bg-muted);
+}
+
+.jdr-toolbar__button,
+.jdr-dialog__button {
+  padding: 4px 10px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 6px;
+  background: var(--jdr-bg);
+  color: var(--jdr-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.jdr-toolbar__button:hover,
+.jdr-dialog__button:hover {
+  background: var(--jdr-bg-muted);
+}
+
+.jdr-toolbar__button:disabled,
+.jdr-dialog__button:disabled {
+  color: var(--jdr-fg-muted);
+  cursor: default;
+}
+
+.jdr-toolbar__button:focus-visible,
+.jdr-dialog__button:focus-visible,
+.jdr-dialog__input:focus-visible,
+.jdr-toast__close:focus-visible {
+  outline: 2px solid var(--jdr-accent);
+  outline-offset: 1px;
+}
+
+.jdr-toolbar__file {
+  margin-left: 8px;
+  font-weight: 600;
+}
+
+.jdr-toolbar__dirty {
+  color: var(--jdr-danger);
+}
+
+.jdr-toolbar__readonly {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--jdr-warning-bg);
+  color: var(--jdr-fg);
+  font-size: 12px;
+}
+
+.jdr-toolbar__readonly:empty {
+  display: none;
+}
+
+.jdr-toolbar__banner {
+  flex-basis: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--jdr-danger);
+  border-radius: 6px;
+  background: var(--jdr-danger-bg);
+  color: var(--jdr-danger);
+}
+
+/* 대화상자 */
+.jdr-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(31, 35, 40, 0.45);
+}
+
+.jdr-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: 10px;
+  background: var(--jdr-bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.jdr-dialog__title {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.jdr-dialog__message {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.jdr-dialog__label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.jdr-dialog__input {
+  padding: 6px 8px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.jdr-dialog__error {
+  margin: 8px 0 0;
+  color: var(--jdr-danger);
+  font-size: 13px;
+}
+
+.jdr-dialog__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.jdr-dialog__button--primary {
+  border-color: var(--jdr-accent);
+  background: var(--jdr-accent);
+  color: #fff;
+}
+
+.jdr-dialog__button--primary:hover {
+  background: var(--jdr-accent-hover);
+}
+
+.jdr-dialog__button--danger {
+  border-color: var(--jdr-danger);
+  color: var(--jdr-danger);
+}
+
+.jdr-dialog__button--primary.jdr-dialog__button--danger {
+  background: var(--jdr-danger);
+  color: #fff;
+}
+
+/* 토스트 */
+.jdr-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--jdr-statusbar-height) + 12px);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.jdr-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 8px;
+  background: var(--jdr-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.jdr-toast--error {
+  border-color: var(--jdr-danger);
+  background: var(--jdr-danger-bg);
+}
+
+.jdr-toast__message {
+  flex: 1 1 auto;
+  word-break: break-word;
+}
+
+.jdr-toast__close {
+  border: 0;
+  background: transparent;
+  color: var(--jdr-fg-muted);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
 }

@@ -4,10 +4,20 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createClient, createInlineTransport, createTransport } from '../../../src/db/client.js';
-import { createDispatcher, createProgressReporter, EXCLUSIVE_OPS } from '../../../src/db/worker.js';
+import {
+  createDispatcher,
+  createProgressReporter,
+  EXCLUSIVE_OPS,
+  isExclusiveOp,
+} from '../../../src/db/worker.js';
 import { AppError } from '../../../src/util/errors.js';
 import { loadWasmBinary } from './helpers.js';
+
+const FIXTURES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../fixtures');
 
 /** @typedef {import('../../../src/db/worker.js').RpcOutbound} RpcOutbound */
 
@@ -71,10 +81,114 @@ test('db.snapshot: 바이트가 transfer로 넘어오고 새 세션에서 열린
   assert.deepEqual(transfer, [bytes.buffer]);
 
   const opened = await client.call('db.open', { bytes });
-  assert.deepEqual(opened, { meta: {}, tables: [] });
+  assert.equal(opened.meta.revision, '0');
+  assert.match(opened.meta.db_id ?? '', /^[0-9a-f-]{36}$/);
+  assert.deepEqual(opened.tables, []);
   assert.deepEqual(
-    (await client.call('engine.exec', { sql: 'SELECT count(*) FROM sqlite_master' })).rows,
+    (await client.call('engine.exec', { sql: 'SELECT count(*) FROM _jdr_meta' })).rows,
+    [[5]],
+  );
+  client.close();
+});
+
+test('db.open: 빈 DB에 메타를 만들고, dbId를 주면 그 값으로', async () => {
+  const { client } = await readyClient();
+  const opened = await client.call('db.open', { dbId: '00000000-0000-4000-8000-000000000001' });
+  assert.equal(opened.meta.db_id, '00000000-0000-4000-8000-000000000001');
+  assert.equal(opened.meta.app_version, '0.0.0', 'engine.init에 appVersion이 없으면 기본값');
+  client.close();
+});
+
+test('db.snapshot: bumpRevision이면 revision·saved_at·saved_by를 기록하고 meta를 함께 돌려준다', async () => {
+  const { client } = await readyClient();
+  const plain = await client.call('db.snapshot', {});
+  assert.equal(plain.meta.revision, '0');
+  const bumped = await client.call('db.snapshot', { bumpRevision: true, savedBy: 'PC-1' });
+  assert.equal(bumped.meta.revision, '1');
+  assert.equal(bumped.meta.saved_by, 'PC-1');
+  assert.ok(bumped.meta.saved_at);
+  const reopened = await client.call('db.open', { bytes: bumped.bytes });
+  assert.equal(reopened.meta.revision, '1');
+  client.close();
+});
+
+test('db.open: 메타 없는 외부 파일은 unmanaged로 열리고 schema.adopt가 등록한다', async () => {
+  const { client } = await readyClient();
+  await client.call('db.open', {});
+  await client.call('engine.exec', { sql: 'CREATE TABLE ext (a TEXT)' });
+  // 메타를 지워 "다른 도구가 만든 파일"을 만든다.
+  for (const t of ['_jdr_columns', '_jdr_views', '_jdr_tables', '_jdr_meta']) {
+    await client.call('engine.exec', { sql: `DROP TABLE ${t}` });
+  }
+  const { bytes } = await client.call('db.snapshot', {}).catch(() => ({ bytes: null }));
+  assert.ok(bytes, 'db.snapshot은 메타가 없어도 동작해야 한다');
+  const opened = await client.call('db.open', { bytes });
+  assert.equal(opened.unmanaged, true);
+  assert.deepEqual(opened.meta, {});
+  const adopted = await client.call('schema.adopt');
+  assert.equal(adopted.unmanaged, undefined);
+  assert.ok(adopted.meta.db_id);
+  assert.deepEqual(
+    (await client.call('engine.exec', { sql: 'SELECT id, strict FROM _jdr_tables' })).rows,
+    [['ext', 0]],
+  );
+  // adoptExternal 인자를 주면 한 번에 등록한다.
+  const direct = await client.call('db.open', {
+    bytes: (await client.call('db.snapshot', {})).bytes,
+  });
+  assert.equal(direct.unmanaged, undefined, '이미 메타가 있으니 관리 대상');
+  client.close();
+});
+
+test('db.open: 헤더 불일치는 E_FILE_NOT_SQLITE, 손상은 E_FILE_CORRUPT이며 이후 새 DB를 열 수 있다', async () => {
+  const { client } = await readyClient();
+  const junk = new TextEncoder().encode('x'.repeat(200));
+  await assert.rejects(
+    client.call('db.open', { bytes: junk }),
+    (err) => err instanceof AppError && err.code === 'E_FILE_NOT_SQLITE',
+  );
+  const corrupt = new Uint8Array(await readFile(path.join(FIXTURES, 'corrupt.db')));
+  await assert.rejects(
+    client.call('db.open', { bytes: corrupt }),
+    (err) => err instanceof AppError && err.code === 'E_FILE_CORRUPT',
+  );
+  await assert.rejects(
+    client.call('engine.exec', { sql: 'SELECT 1' }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+    '손상 파일은 열린 채로 두지 않는다',
+  );
+  const fresh = await client.call('db.open', {});
+  assert.equal(fresh.meta.revision, '0');
+  client.close();
+});
+
+test('command.apply: do/undo 방향, 잘못된 형태는 E_DB_QUERY', async () => {
+  const { client } = await readyClient();
+  /** @type {import('../../../src/db/command.js').Command} */
+  const cmd = {
+    type: 'table.create',
+    tableId: null,
+    do: [
+      { sql: 'CREATE TABLE t (a INTEGER) STRICT' },
+      { sql: 'INSERT INTO t VALUES (?)', params: [1] },
+    ],
+    undo: [{ sql: 'DROP TABLE t' }],
+    summary: 'create t',
+  };
+  assert.deepEqual(await client.call('command.apply', { cmd }), { affected: 1 });
+  assert.deepEqual((await client.call('engine.exec', { sql: 'SELECT a FROM t' })).rows, [[1]]);
+  await client.call('command.apply', { cmd, direction: 'undo' });
+  assert.deepEqual(
+    (
+      await client.call('engine.exec', {
+        sql: "SELECT count(*) FROM sqlite_master WHERE name = 't'",
+      })
+    ).rows,
     [[0]],
+  );
+  await assert.rejects(
+    client.call('command.apply', { cmd: /** @type {never} */ ({ type: 'x' }) }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
   );
   client.close();
 });
@@ -92,6 +206,9 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
           gate.release = () => resolve(undefined);
         }),
       exec: () => ({ columns: [], rows: [] }),
+      run: () => ({ changes: 0, lastId: 0 }),
+      prepareCached: (/** @type {string} */ sql) => ({ sql }),
+      transaction: (/** @type {() => unknown} */ fn) => Promise.resolve(fn()),
       close: async () => {},
       snapshot: () => new Uint8Array(0),
     })
@@ -111,6 +228,9 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
   const opened = out.find((m) => 'id' in m && m.id === 2);
   assert.ok(opened && 'ok' in opened && opened.ok === true);
   assert.deepEqual([...EXCLUSIVE_OPS].sort(), ['command.apply', 'import.run', 'search.enable']);
+  assert.equal(isExclusiveOp('schema.create'), true);
+  assert.equal(isExclusiveOp('schema.list'), false);
+  assert.equal(isExclusiveOp('query.window'), false);
 });
 
 test('취소 메시지는 진행 중 요청의 signal을 abort한다', async () => {
@@ -122,6 +242,10 @@ test('취소 메시지는 진행 중 요청의 signal을 abort한다', async () 
       init: async () => ({ sqliteVersion: '3.99.0', compileOptions: [] }),
       capabilities: () => ({ mode: 'wasm' }),
       open: async () => {},
+      exec: () => ({ columns: [], rows: [] }),
+      run: () => ({ changes: 0, lastId: 0 }),
+      prepareCached: (/** @type {string} */ sql) => ({ sql }),
+      transaction: (/** @type {() => unknown} */ fn) => Promise.resolve(fn()),
       close: async () => {},
     })
   );

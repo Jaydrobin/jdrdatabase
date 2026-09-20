@@ -1,25 +1,42 @@
 // @ts-check
 /**
- * 부트스트랩(3.1): 기능 감지, 모드 판정, Worker 기동, 초기 화면.
+ * 부트스트랩(3.1): 기능 감지, 모드 판정, Worker 기동, IndexedDB·스토어·UI 마운트, 초기 화면.
  *
  * 모드 문자열('wasm' | 'native') 판정은 이 파일에서만 한다(D-15). 다른 모듈은 `capabilities()`를 읽는다.
  * 데스크톱 모드는 Step 11에서 채워지며, 그 전까지는 `E_UNSUPPORTED`로 잠긴다(wasm 폴백 없음, D-15).
  */
+import { createStore } from './app/store.js';
 import { createClient, createTransport } from './db/client.js';
 import { t } from './i18n/index.js';
+import { createAutosave } from './io/autosave.js';
+import * as filesystem from './io/filesystem.js';
+import { openIdb } from './io/idb.js';
+import { createTabLock } from './io/tablock.js';
+import { createPrompts } from './ui/dialogs/conflict.js';
 import { mountStatusbar } from './ui/statusbar.js';
+import { mountToasts } from './ui/toast.js';
+import { mountToolbar } from './ui/toolbar.js';
 import { base64ToBytes } from './util/bytes.js';
 import { AppError, toAppError } from './util/errors.js';
 
 /** @typedef {import('./db/client.js').Client} Client */
 /** @typedef {import('./db/engine.js').EngineMode} EngineMode */
+/** @typedef {import('./db/engine.js').EngineCapabilities} EngineCapabilities */
 /** @typedef {import('./i18n/index.js').MessageKey} MessageKey */
 /** @typedef {import('./ui/statusbar.js').Statusbar} Statusbar */
+/** @typedef {import('./ui/toast.js').Toasts} Toasts */
+/** @typedef {import('./app/store.js').Store} Store */
+/** @typedef {import('./io/idb.js').Idb} Idb */
+
+/** IDB `settings`에서 이 기기 이름(`saved_by`)을 두는 키. */
+const DEVICE_NAME_KEY = 'device_name';
 
 /**
  * @typedef {object} Shell
+ * @property {HTMLElement} toolbarHost
  * @property {HTMLElement} main
  * @property {Statusbar} statusbar
+ * @property {Toasts} toasts
  */
 
 /**
@@ -29,6 +46,9 @@ import { AppError, toAppError } from './util/errors.js';
  */
 function mount(root) {
   root.textContent = '';
+
+  const toolbarHost = document.createElement('div');
+  toolbarHost.className = 'jdr-app__toolbar';
 
   const main = document.createElement('main');
   main.className = 'jdr-app__main';
@@ -42,10 +62,11 @@ function mount(root) {
   subtitle.textContent = t('app.subtitle');
 
   main.append(title, subtitle);
-  root.append(main);
+  root.append(toolbarHost, main);
 
   const statusbar = mountStatusbar(root, { version: __JDR_VERSION__ });
-  return { main, statusbar };
+  const toasts = mountToasts(root);
+  return { toolbarHost, main, statusbar, toasts };
 }
 
 /**
@@ -110,11 +131,12 @@ function readEmbedded(id) {
  * @property {'worker' | 'inline'} transportKind
  * @property {AppError | null} fallbackError
  * @property {string} sqliteVersion
+ * @property {EngineCapabilities} capabilities
  */
 
 /**
- * 전송 계층을 만들고 엔진을 초기화한 뒤 빈 메모리 DB를 연다.
- * @param {{ mode: EngineMode, transport: 'auto' | 'inline', workerSource: string, wasmB64: string }} opts
+ * 전송 계층을 만들고 엔진을 초기화한다. `openEmpty`면 빈 메모리 DB까지 연다(진단 세션용).
+ * @param {{ mode: EngineMode, transport: 'auto' | 'inline', workerSource: string, wasmB64: string, openEmpty: boolean }} opts
  * @returns {Promise<EngineSession>}
  */
 async function startEngine(opts) {
@@ -126,15 +148,41 @@ async function startEngine(opts) {
   try {
     const info = await client.call(
       'engine.init',
-      { mode: opts.mode, wasmBinary },
+      { mode: opts.mode, wasmBinary, appVersion: __JDR_VERSION__ },
       { transfer: [wasmBinary] },
     );
-    await client.call('db.open', {});
-    return { client, transportKind: transport.kind, fallbackError, sqliteVersion: info.version };
+    if (opts.openEmpty) await client.call('db.open', {});
+    return {
+      client,
+      transportKind: transport.kind,
+      fallbackError,
+      sqliteVersion: info.version,
+      capabilities: info.capabilities,
+    };
   } catch (err) {
     client.close();
     throw toAppError(err);
   }
+}
+
+/**
+ * 이 기기 이름(`_jdr_meta.saved_by`). IDB 설정에 있으면 그것, 없으면 만들어 저장한다(D-10).
+ * @param {Idb | null} idb
+ * @returns {Promise<string>}
+ */
+async function loadDeviceName(idb) {
+  const generated = t('device.defaultName', {
+    id: Math.random().toString(36).slice(2, 6).toUpperCase(),
+  });
+  if (!idb) return generated;
+  try {
+    const stored = await idb.get('settings', DEVICE_NAME_KEY);
+    if (typeof stored === 'string' && stored) return stored;
+    await idb.put('settings', DEVICE_NAME_KEY, generated);
+  } catch (err) {
+    console.warn(toAppError(err));
+  }
+  return generated;
 }
 
 /**
@@ -147,7 +195,15 @@ async function start(shell) {
   const wasmB64 = readEmbedded('jdr-wasm-b64');
 
   /** @type {Promise<EngineSession>} */
-  const ready = startEngine({ mode, transport: 'auto', workerSource, wasmB64 });
+  const ready = startEngine({ mode, transport: 'auto', workerSource, wasmB64, openEmpty: false });
+
+  /** @type {Store | null} */
+  let store = null;
+  /** @type {Idb | null} */
+  let idb = null;
+  let tabLockAvailable = false;
+  /** @type {import('./io/autosave.js').Autosave | null} */
+  let journal = null;
 
   if (__JDR_TEST__) {
     /** @type {Promise<{ transportKind: string, sqliteVersion: string }>} */
@@ -171,7 +227,13 @@ async function start(shell) {
          */
         async exec(transport, sql) {
           const statements = Array.isArray(sql) ? sql : [sql];
-          const session = await startEngine({ mode, transport, workerSource, wasmB64 });
+          const session = await startEngine({
+            mode,
+            transport,
+            workerSource,
+            wasmB64,
+            openEmpty: true,
+          });
           try {
             /** @type {import('./db/engine.js').ExecResult} */
             let result = { columns: [], rows: [] };
@@ -184,6 +246,44 @@ async function start(shell) {
             session.client.close();
           }
         },
+        /** 스토어 상태 스냅샷(구조화 복제 가능한 부분만). */
+        state() {
+          if (!store) return null;
+          const s = store.getState();
+          return {
+            file: { name: s.file.name, hasHandle: s.file.handle !== null, size: s.file.size },
+            meta: s.meta,
+            tables: s.tables,
+            dirty: s.dirty,
+            readOnly: s.readOnly,
+            journalFull: s.journalFull,
+          };
+        },
+        /** IndexedDB를 실제로 열 수 있었는가(지원 매트릭스 실측용). */
+        idbAvailable: () => idb !== null,
+        /** BroadcastChannel을 쓸 수 있는가(지원 매트릭스 실측용). */
+        tabLockAvailable: () => tabLockAvailable,
+        /** 저널에 남은 기록 요약(없으면 null). E2E가 비움이 끝났는지 확인한다. */
+        journalPending: () => (journal ? journal.pending() : Promise.resolve(null)),
+        /**
+         * 메인 세션에 커맨드를 적용하고 저널·dirty에 반영한다(Step 3 전에 저널 복구 E2E가 쓴다).
+         * @param {import('./db/command.js').Command} cmd
+         */
+        async apply(cmd) {
+          const s = await ready;
+          if (!store) throw new AppError('E_UNKNOWN', 'store is not ready');
+          const result = await s.client.call('command.apply', { cmd });
+          await store.recordCommand(cmd);
+          return result;
+        },
+        /**
+         * 메인 세션의 DB에 진단 질의를 보낸다.
+         * @param {string} sql
+         */
+        async query(sql) {
+          const s = await ready;
+          return s.client.call('engine.exec', { sql });
+        },
       }),
       configurable: false,
       writable: false,
@@ -191,14 +291,58 @@ async function start(shell) {
   }
 
   const session = await ready;
+  const opened = await openIdb();
+  idb = opened.idb;
+  if (opened.error) console.warn(`${opened.error.code}: ${opened.error.message}`);
+
+  const deviceName = await loadDeviceName(idb);
+  const tablock = createTabLock();
+  tabLockAvailable = tablock.available;
+  const autosave = createAutosave({ idb });
+  journal = autosave;
+  store = createStore({
+    client: session.client,
+    caps: session.capabilities,
+    fs: filesystem,
+    idb,
+    autosave,
+    tablock,
+    prompts: createPrompts(),
+    notify: { error: (err) => shell.toasts.error(err), info: (k, p) => shell.toasts.info(k, p) },
+    deviceName,
+    defaultFileName: t('file.defaultName'),
+  });
+  const active = store;
+
+  mountToolbar(shell.toolbarHost, active);
+
+  /** @param {BeforeUnloadEvent} ev */
+  const onBeforeUnload = (ev) => {
+    if (!active.getState().dirty) return;
+    ev.preventDefault();
+    // 문구는 브라우저가 정하지만 옛 브라우저 호환을 위해 값을 둔다.
+    ev.returnValue = t('unload.dirty');
+  };
+  window.addEventListener('beforeunload', onBeforeUnload);
+
+  active.on('state:changed', () => {
+    const s = active.getState();
+    shell.statusbar.setNote(
+      s.readOnly !== 'none' ? 'status.readOnly' : idb ? null : 'status.noIdb',
+    );
+  });
+
+  await active.newDatabase({ force: true });
   shell.statusbar.setStatus('status.ready');
   shell.statusbar.setMode(
     session.transportKind === 'worker' ? 'status.mode.worker' : 'status.mode.inline',
   );
   shell.statusbar.setEngine(session.sqliteVersion);
+  shell.statusbar.setNote(idb ? null : 'status.noIdb');
   if (session.fallbackError) {
     console.warn(`${session.fallbackError.code}: ${session.fallbackError.message}`);
   }
+  await active.recoverPending();
 }
 
 async function boot() {
@@ -207,7 +351,7 @@ async function boot() {
   document.title = t('app.title');
   const shell = mount(root);
   // 셸을 띄운 뒤의 실패는 모두 잠금 화면으로 간다. 기능 감지·임베드 블록 읽기처럼
-  // 엔진 기동 전에 던지는 것도 포함된다(이전에는 try 밖이라 화면이 "시작 중…"에 멈췄다).
+  // 엔진 기동 전에 던지는 것도 포함된다.
   try {
     await start(shell);
   } catch (err) {

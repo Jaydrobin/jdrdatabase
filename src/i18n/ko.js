@@ -16,6 +16,63 @@ export const ko = Object.freeze({
   'lock.supportedBrowsers':
     '지원 브라우저: Chrome·Edge 최신 2개 버전(권장), Firefox·Safari 최신 버전. WebAssembly가 켜져 있어야 합니다.',
   'lock.cause': '원인: {message}',
+  'status.readOnly': '읽기 전용',
+  'status.noIdb': 'IndexedDB 없음: 저널·백업·최근 파일 꺼짐',
+  'device.defaultName': '기기-{id}',
+  'dialog.ok': '확인',
+  'dialog.cancel': '취소',
+  'dialog.close': '닫기',
+  'toolbar.label': '파일',
+  'toolbar.new': '새로 만들기',
+  'toolbar.open': '열기…',
+  'toolbar.recent': '최근 파일: {name}',
+  'toolbar.save': '저장',
+  'toolbar.saveAs': '다른 이름으로 저장…',
+  'toolbar.journalFull':
+    '변경 기록이 50 MB 한도를 넘어 더 기록하지 않습니다. 지금 저장하세요. 탭이 닫히면 이후 변경은 복구되지 않습니다.',
+  'file.untitled': '새 데이터베이스',
+  'file.defaultName': 'database.db',
+  'file.dirtyMark': '●',
+  'file.dirtyLabel': '저장되지 않은 변경 있음',
+  'file.saved': '{name}에 저장했습니다.',
+  'file.downloaded':
+    '{name}을(를) 다운로드했습니다. 브라우저의 다운로드 폴더에서 파일을 확인하세요.',
+  'file.readOnlyTab': '다른 탭이 이 데이터베이스를 편집 중이어서 읽기 전용으로 열었습니다.',
+  'file.readOnlyBlocked': '읽기 전용으로 열린 데이터베이스는 변경하거나 저장할 수 없습니다.',
+  'file.journalPendingFor':
+    '{name}의 저장되지 않은 변경 기록이 남아 있습니다. 그 파일을 열면 복구할 수 있습니다.',
+  'file.recovered': '저장되지 않은 변경 {count}건을 복구했습니다. 파일에 저장하세요.',
+  'file.backupSkipped': '파일이 200 MB를 넘어 저장 전 백업을 건너뛰었습니다.',
+  'file.backupFailed': '저장 전 백업을 만들지 못했습니다({code}). 저장은 계속합니다.',
+  'unload.dirty': '저장하지 않은 변경 사항이 있습니다.',
+  'confirm.discard.title': '저장되지 않은 변경',
+  'confirm.discard.message': '저장하지 않은 변경 사항이 있습니다. 버리고 계속하시겠습니까?',
+  'confirm.discard.ok': '버리고 계속',
+  'confirm.adopt.title': '다른 도구가 만든 SQLite 파일',
+  'confirm.adopt.message':
+    '이 파일은 다른 도구가 만든 SQLite 파일입니다. 메타 정보를 추가하여 이 앱에서 관리하시겠습니까?\n기존 테이블은 읽기 전용으로 등록되고, 파일은 저장할 때까지 변경되지 않습니다.',
+  'confirm.adopt.ok': '메타 정보 추가',
+  'confirm.largeFile.title': '큰 파일',
+  'confirm.largeFile.message':
+    '파일 크기({size})가 이 실행 환경의 권장 상한({limit})을 넘습니다. 메모리가 부족하면 열기나 저장이 실패할 수 있습니다. 계속하시겠습니까?',
+  'confirm.largeFile.ok': '계속',
+  'confirm.revisionBehind.title': '오래된 파일일 수 있습니다',
+  'confirm.revisionBehind.message':
+    '이 기기에서 이 데이터베이스의 revision {known}을(를) 저장한 적이 있는데, 파일은 revision {file}입니다. 클라우드 동기화가 끝나지 않은 파일일 수 있습니다.',
+  'confirm.revisionBehind.ok': '그대로 열기',
+  'confirm.journal.title': '저장되지 않은 변경 복구',
+  'confirm.journal.message':
+    '이 데이터베이스에 저장되지 않은 변경 {count}건의 기록이 있습니다. 복구하시겠습니까?',
+  'confirm.newJournal.message':
+    '저장한 적 없는 새 데이터베이스의 변경 {count}건이 남아 있습니다. 복구하시겠습니까?',
+  'confirm.journal.truncated': '기록이 한도를 넘어 뒤쪽 변경 일부는 남지 않았습니다.',
+  'confirm.journal.recover': '복구',
+  'confirm.journal.discard': '버리기',
+  'confirm.journalMismatch.title': '다른 버전 위의 변경 기록',
+  'confirm.journalMismatch.message':
+    '저장되지 않은 변경 {count}건이 revision {base} 위에서 기록되었지만 파일은 revision {file}입니다. 이 기록은 이 파일에 적용할 수 없습니다.',
+  'confirm.journalMismatch.export': '별도 파일로 내보내기',
+  'confirm.journalMismatch.discard': '버리기',
   'error.E_ENV_NO_WASM': 'WebAssembly를 사용할 수 없어 데이터베이스 엔진을 시작하지 못했습니다.',
   'error.E_ENV_NO_WORKER':
     'Worker를 만들 수 없어 단일 스레드 모드로 실행합니다. 큰 작업 중에는 화면이 잠시 멈출 수 있습니다.',
@@ -45,7 +102,7 @@ export const ko = Object.freeze({
   'error.E_UNDO_LIMIT':
     '이 작업은 되돌리기 한도를 넘어 되돌릴 수 없습니다. 계속하면 되돌리기 기록이 비워집니다.',
   'error.E_IMPORT_ENCODING': '깨진 문자가 너무 많습니다. 인코딩을 다시 선택하세요.',
-  'error.E_IMPORT_CANCELLED': '가져오기를 취소했습니다. 변경 사항은 모두 되돌렸습니다.',
+  'error.E_IMPORT_CANCELLED': '작업을 취소했습니다. 변경 사항은 모두 되돌렸습니다.',
   'error.E_XLSX_ENCRYPTED': '암호가 걸린 XLSX 파일은 열 수 없습니다.',
   'error.E_XLSX_CORRUPT': 'XLSX 파일을 읽을 수 없습니다.',
   'error.E_GZIP_UNSUPPORTED': '이 브라우저는 압축 저장을 지원하지 않습니다. 비압축으로 저장하세요.',

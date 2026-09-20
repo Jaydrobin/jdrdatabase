@@ -13,8 +13,10 @@
 | SQLite Wasm 3.53.4 기동, FTS5 trigram 질의 | ✓ (세션 A, E2E `engine.spec.js`가 Worker 안에서 `CREATE VIRTUAL TABLE … tokenize='trigram'` 후 한글 부분 일치 질의까지 실행) | 미확인 | 미확인 | 미확인 |
 | Worker 없이 메인 스레드에서 엔진 실행(인라인 전송) | ✓ (세션 A, E2E 인라인 모드) | 미확인 | 미확인 | 미확인 |
 | 런타임 네트워크 요청 0건 | ✓ (세션 A, 문서와 Worker Blob URL 외 요청 없음) | 미확인 | 미확인 | 미확인 |
-| IndexedDB | 미확인 (세션 B) | 미확인 | 미확인 | 미확인 |
-| File System Access API (`showOpenFilePicker`, `createWritable`) | 해당 없음(헤드리스 자동화 불가). 폴백 경로로 검사 (세션 B) | 미확인 | 미지원(폴백) | 미지원(폴백) |
+| IndexedDB (`file://` 오리진에서 열기, journal·known_revisions·backups·settings 스토어) | ✓ (세션 B, E2E `file.spec.js`가 `openIdb()` 성공과 저널 기록 → 재시작 → 복구 대화상자까지 확인) | 미확인 | 미확인 | 미확인 |
+| File System Access API (`showOpenFilePicker`, `createWritable`) | 해당 없음(헤드리스에서 선택기 자동화 불가). `addInitScript`로 API를 감춰 폴백 경로(`<input type="file">` + `<a download>`)만 검사 (세션 B) | 미확인 | 미지원(폴백) | 미지원(폴백) |
+| `<a download>` 저장 → 내려받은 파일을 `<input type="file">`로 다시 열기 | ✓ (세션 B, E2E `file.spec.js`: revision·db_id 왕복). Playwright 주의: `setInputFiles`에 비ASCII 경로를 주면 Chromium이 change 없이 무시하고, filechooser 가로채기는 change 대신 cancel을 내는 경우가 있어 둘 다 피했다 | 미확인 | 미확인 | 미확인 |
+| BroadcastChannel (같은 db_id를 연 다른 탭 감지) | ✓ 생성 가능 (세션 B, E2E `file.spec.js`). 두 탭 동시 열기 시나리오는 미확인 | 미확인 | 미확인 | 미확인 |
 | `CompressionStream` (gzip 저장) | 미확인 (세션 G) | 미확인 | 미확인 | 미확인 |
 
 ## 데스크톱 모드 (타우리 WebView)

@@ -58,7 +58,7 @@ export const MAX_BATCH_BYTES = 64 * MB;
  * @property {(sql: SqlSource, paramsList: SqlParams[], options?: BatchOptions) => Promise<BatchResult>} runBatch 같은 문장을 파라미터 목록만큼 반복. 하나의 트랜잭션(중첩 시 SAVEPOINT)
  * @property {<T>(fn: () => Promise<T> | T) => Promise<T>} transaction BEGIN / COMMIT / ROLLBACK. 중첩은 SAVEPOINT
  * @property {(sql: string) => StatementHandle} prepareCached wasm 전용 최적화. native는 no-op 핸들
- * @property {() => Uint8Array} snapshot wasm: DB 바이트(statement 캐시 무효화·PRAGMA 재적용 포함) / native: `E_UNSUPPORTED`
+ * @property {() => Uint8Array<ArrayBuffer>} snapshot wasm: DB 바이트(statement 캐시 무효화·PRAGMA 재적용 포함) / native: `E_UNSUPPORTED`
  * @property {(originalPath: string, expected: { mtime: number, size: number }) => Promise<void>} saveTo native 전용. wasm은 `E_UNSUPPORTED`
  * @property {() => void} interrupt 진행 중 문장 중단
  * @property {() => void} applyPragmas 새 PRAGMA는 이곳에만 추가한다(export 후 재적용되는 유일한 장소)

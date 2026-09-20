@@ -7,7 +7,17 @@
  * Worker는 "열린 DB 하나"만 상태로 가진다.
  */
 import { AppError, serializeError } from '../util/errors.js';
+import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
+import {
+  adoptExternal,
+  bumpRevision,
+  hasMeta,
+  integrityCheck,
+  migrate,
+  readMeta,
+  validateHeader,
+} from './schema.js';
 
 /** @typedef {import('./engine.js').Engine} Engine */
 /** @typedef {import('./engine.js').EngineMode} EngineMode */
@@ -15,6 +25,18 @@ import { selectEngine } from './engine.js';
 /** @typedef {import('./engine.js').ExecResult} ExecResult */
 /** @typedef {import('./engine.js').SqlParams} SqlParams */
 /** @typedef {import('../util/errors.js').SerializedError} SerializedError */
+/** @typedef {import('./command.js').Command} Command */
+/** @typedef {import('./command.js').Direction} Direction */
+/** @typedef {import('./schema.js').Meta} Meta */
+
+/**
+ * `db.open`·`schema.adopt`의 결과. `tables`는 Step 3의 `tables.list()`가 채운다.
+ * @typedef {object} OpenResult
+ * @property {Meta} meta
+ * @property {unknown[]} tables
+ * @property {boolean} [unmanaged] `_jdr_meta`가 없는 파일을 등록 없이 연 상태
+ * @property {boolean} [readOnly] 앱보다 새로운 `schema_version`
+ */
 
 /** @typedef {{ phase: string, done: number, total: number }} RpcProgress */
 /** @typedef {{ id: number, op: string, args?: unknown }} RpcRequest */
@@ -29,11 +51,13 @@ import { selectEngine } from './engine.js';
 /**
  * RPC op 표(DESIGN.md 6장). 새 op는 여기와 `handlers`, 6장 표, 단위 테스트를 함께 갱신한다.
  * @typedef {{
- *   'engine.init': { args: { mode: EngineMode, wasmBinary?: ArrayBuffer }, result: { version: string, compileOptions: string[], capabilities: EngineCapabilities } },
+ *   'engine.init': { args: { mode: EngineMode, wasmBinary?: ArrayBuffer, appVersion?: string }, result: { version: string, compileOptions: string[], capabilities: EngineCapabilities } },
  *   'engine.exec': { args: { sql: string, params?: SqlParams }, result: ExecResult },
- *   'db.open': { args: { bytes?: Uint8Array | ArrayBuffer }, result: { meta: Record<string, string>, tables: unknown[] } },
- *   'db.snapshot': { args: { bumpRevision?: boolean, savedBy?: string }, result: { bytes: Uint8Array } },
+ *   'db.open': { args: { bytes?: Uint8Array | ArrayBuffer, dbId?: string, adoptExternal?: boolean }, result: OpenResult },
+ *   'db.snapshot': { args: { bumpRevision?: boolean, savedBy?: string }, result: { bytes: Uint8Array<ArrayBuffer>, meta: Meta } },
  *   'db.close': { args: undefined, result: null },
+ *   'schema.adopt': { args: undefined, result: OpenResult },
+ *   'command.apply': { args: { cmd: Command, direction?: Direction }, result: { affected: number } },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -61,8 +85,17 @@ import { selectEngine } from './engine.js';
 /** 진행 이벤트 최소 간격(ms). CLAUDE.md 5.4. */
 export const PROGRESS_INTERVAL_MS = 250;
 
-/** 서로 배타적인 op. 동시에 오면 `E_DB_BUSY`. `db.open`은 모든 op와 배타적이다. */
+/** 서로 배타적인 쓰기 op. 동시에 오면 `E_DB_BUSY`. `db.open`은 모든 op와 배타적이다. */
 export const EXCLUSIVE_OPS = new Set(['command.apply', 'import.run', 'search.enable']);
+
+/**
+ * 6장 규칙의 배타 여부. `schema.*`는 `schema.list`를 뺀 전부가 쓰기다.
+ * @param {string} op
+ * @returns {boolean}
+ */
+export function isExclusiveOp(op) {
+  return EXCLUSIVE_OPS.has(op) || (op.startsWith('schema.') && op !== 'schema.list');
+}
 
 /**
  * 진행 이벤트를 최소 간격으로 묶는다. 단계가 바뀌거나 완료(done === total)면 즉시 보낸다.
@@ -99,6 +132,16 @@ export function createProgressReporter(emit, now = () => Date.now()) {
  */
 
 /**
+ * 테이블 목록. Step 3의 `tables.list()`가 채우며 그 전까지는 빈 목록이다.
+ * @param {Engine} engine
+ * @returns {Promise<unknown[]>}
+ */
+async function listTables(engine) {
+  void engine;
+  return [];
+}
+
+/**
  * @param {DispatcherOptions} options
  * @returns {Dispatcher}
  */
@@ -108,6 +151,8 @@ export function createDispatcher(options) {
 
   /** @type {Engine | null} */
   let engine = null;
+  /** `_jdr_meta.app_version`에 기록할 앱 버전. `engine.init`이 넘긴다. */
+  let appVersion = '0.0.0';
   /** @type {Map<number, { op: string, controller: AbortController }>} */
   const inflight = new Map();
 
@@ -127,6 +172,7 @@ export function createDispatcher(options) {
       const next = select(args.mode);
       const info = await next.init({ wasmBinary: args.wasmBinary });
       engine = next;
+      if (typeof args.appVersion === 'string' && args.appVersion) appVersion = args.appVersion;
       return {
         version: info.sqliteVersion,
         compileOptions: info.compileOptions,
@@ -144,17 +190,63 @@ export function createDispatcher(options) {
     },
 
     'db.open': async (args) => {
+      const active = requireEngine();
       const raw = args?.bytes;
       const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw;
-      await requireEngine().open(bytes);
-      // meta·tables는 Step 2(schema.readMeta)·Step 3(tables.list)에서 채운다.
-      return { meta: {}, tables: [] };
+      // 헤더는 deserialize 전에 본다. 틀린 파일을 엔진에 넣으면 첫 읽기에서야 SQLITE_NOTADB가 나고
+      // 그 사이에 이전 DB가 닫힌다.
+      if (bytes) validateHeader(bytes);
+      await active.open(bytes);
+      if (bytes) {
+        try {
+          integrityCheck(active);
+        } catch (err) {
+          // 손상 파일은 열지 않는다. Worker는 "열린 DB 없음" 상태가 되고 메인이 새 DB를 연다.
+          await active.close();
+          throw err;
+        }
+      }
+      if (bytes && !hasMeta(active) && !args?.adoptExternal) {
+        return { meta: {}, tables: [], unmanaged: true };
+      }
+      if (bytes && !hasMeta(active)) {
+        const meta = await adoptExternal(active, { appVersion });
+        return { meta, tables: await listTables(active) };
+      }
+      const migrated = await migrate(active, { appVersion, dbId: args?.dbId });
+      return {
+        meta: migrated.meta,
+        tables: await listTables(active),
+        ...(migrated.readOnly ? { readOnly: true } : {}),
+      };
     },
 
-    'db.snapshot': async () => {
-      // bumpRevision·savedBy에 따른 _jdr_meta 갱신은 Step 2에서 snapshot 직전에 추가한다.
-      const bytes = requireEngine().snapshot();
-      return { result: { bytes }, transfer: [bytes.buffer] };
+    'db.snapshot': async (args) => {
+      const active = requireEngine();
+      // 등록하지 않은 외부 파일(unmanaged)은 메타가 없다. revision을 올려야 하면 그때 메타를 만든다.
+      if (!hasMeta(active) && args?.bumpRevision) await migrate(active, { appVersion });
+      const meta = args?.bumpRevision
+        ? await bumpRevision(active, { savedBy: args.savedBy ?? '' })
+        : hasMeta(active)
+          ? readMeta(active)
+          : {};
+      const bytes = active.snapshot();
+      return { result: { bytes, meta }, transfer: [bytes.buffer] };
+    },
+
+    'schema.adopt': async () => {
+      const active = requireEngine();
+      const meta = await adoptExternal(active, { appVersion });
+      return { meta, tables: await listTables(active) };
+    },
+
+    'command.apply': async (args, ctx) => {
+      const cmd = assertCommand(args?.cmd);
+      const direction = args?.direction === 'undo' ? 'undo' : 'do';
+      return applyCommand(requireEngine(), cmd, direction, {
+        signal: ctx.signal,
+        progress: ctx.progress,
+      });
     },
 
     'db.close': async () => {
@@ -183,7 +275,7 @@ export function createDispatcher(options) {
           detail: { running: running.op, requested: op },
         });
       }
-      if (EXCLUSIVE_OPS.has(op) && EXCLUSIVE_OPS.has(running.op)) {
+      if (isExclusiveOp(op) && isExclusiveOp(running.op)) {
         throw new AppError('E_DB_BUSY', `${running.op} is in progress`, {
           detail: { running: running.op, requested: op },
         });

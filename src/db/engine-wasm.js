@@ -361,10 +361,12 @@ export function createWasmEngine(options) {
       const sqlText = typeof sql === 'string' ? sql : sql.sql;
       try {
         bind(stmt, params);
+        // sqlite3_changes()는 DDL 뒤에 직전 DML의 값을 그대로 돌려주므로 총 변경 수의 차이로 센다.
+        const before = database.changes(true);
         stmt.step();
         const lib = requireSqlite3();
         return {
-          changes: database.changes(),
+          changes: database.changes(true) - before,
           lastId: Number(lib.capi.sqlite3_last_insert_rowid(database)),
         };
       } catch (err) {
@@ -453,7 +455,7 @@ export function createWasmEngine(options) {
         throw new AppError('E_DB_QUERY', 'snapshot inside transaction');
       }
       clearStatementCache();
-      /** @type {Uint8Array} */
+      /** @type {Uint8Array<ArrayBuffer>} */
       let bytes;
       try {
         bytes = lib.capi.sqlite3_js_db_export(database);
