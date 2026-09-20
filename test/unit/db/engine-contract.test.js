@@ -81,6 +81,19 @@ export function defineEngineContract(label, open) {
       await engine.close();
     });
 
+    test('exec/run: 빈 파라미터는 배열이든 객체든 바인딩을 건너뛴다', async () => {
+      const engine = await open();
+      // 호출자가 파라미터를 조건부로 모으면 빈 객체가 나온다. 빈 배열만 걸러내면 여기서 던진다.
+      assert.deepEqual(engine.exec('SELECT 1 AS a', {}), { columns: ['a'], rows: [[1]] });
+      assert.deepEqual(engine.exec('SELECT 1 AS a', []), { columns: ['a'], rows: [[1]] });
+      await engine.transaction(() => {
+        engine.run('CREATE TABLE t (a INTEGER) STRICT', {});
+        engine.run('INSERT INTO t VALUES (1)', []);
+      });
+      assert.deepEqual(engine.exec('SELECT count(*) FROM t', {}).rows, [[1]]);
+      await engine.close();
+    });
+
     test('exec: 결과 1만 행 초과는 E_RESULT_TOO_LARGE, 1만 행은 허용', async () => {
       const engine = await open();
       const limit = engine.exec(

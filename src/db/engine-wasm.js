@@ -204,7 +204,10 @@ export function createWasmEngine(options) {
    */
   function bind(stmt, params) {
     if (params === undefined) return;
-    if (Array.isArray(params) && params.length === 0) return;
+    // 빈 목록은 바인딩할 것이 없다. oo1의 bind()는 빈 값을 받으면 던지므로 여기서 걸러낸다.
+    // 호출자가 파라미터를 조건부로 모으면 빈 배열뿐 아니라 빈 객체도 나온다.
+    const empty = Array.isArray(params) ? params.length === 0 : Object.keys(params).length === 0;
+    if (empty) return;
     stmt.bind(normalizeParams(params));
   }
 
