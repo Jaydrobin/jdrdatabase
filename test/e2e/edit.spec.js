@@ -414,3 +414,23 @@ test('붙여넣기는 선택 범위의 왼쪽 위에서 시작한다(복사한 �
   await expect(cell(page, 0, 0)).toHaveText('이름1');
   await expect(cell(page, 1, 0)).toHaveText('이름2');
 });
+
+test('접근성: 선택한 범위의 칸이 aria-selected로 드러난다', async ({ page }) => {
+  await seed(page);
+  const grid = page.locator('[role="grid"]');
+  await expect(grid).toHaveAttribute('aria-multiselectable', 'true');
+
+  await cell(page, 0, 0).click();
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(1);
+
+  // 2행 × 2열로 넓히면 네 칸 모두 선택된 것으로 노출된다(활성 셀 포함).
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(4);
+  await expect(cell(page, 1, 1)).toHaveAttribute('aria-selected', 'true');
+  await expect(cell(page, 2, 0)).not.toHaveAttribute('aria-selected', 'true');
+
+  // 범위를 셀 하나로 줄이면 다시 하나만 남는다.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(1);
+});

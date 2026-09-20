@@ -304,6 +304,8 @@ export function createGrid(deps) {
   const scroller = div('jdr-grid__scroller', 'grid');
   scroller.tabIndex = 0;
   scroller.setAttribute('aria-label', t('grid.label'));
+  // 범위 선택(Shift+화살표, 끌기, Ctrl+A)이 있으므로 칸 여럿이 동시에 선택될 수 있다.
+  scroller.setAttribute('aria-multiselectable', 'true');
   const header = div('jdr-grid__header', 'row');
   header.setAttribute('aria-rowindex', '1');
   const canvas = div('jdr-grid__canvas', 'rowgroup');
@@ -505,6 +507,15 @@ export function createGrid(deps) {
     if (!cell) return;
     slot.cellSelected[k] = on;
     cell.classList.toggle('jdr-grid__cell--selected', on);
+    // 범위 선택도 선택이다. 클래스만 붙이면 보조 기술에는 활성 셀 하나만 선택된 것으로 보인다.
+    // 활성 셀과 범위는 겹치지 않고(`renderRow`의 `!isCursor`), 칸을 그릴 때 활성 여부를 먼저
+    // 쓰므로 두 표시가 같은 속성을 두고 다투지 않는다.
+    //
+    // 행 번호 칸(k === 0, `rowheader`)은 뺀다. 그 칸은 범위가 지나는 행을 눈으로 짚어 주는 것이라
+    // 셀 하나만 골라도 켜지는데, `aria-selected`까지 붙이면 행 전체를 고른 것처럼 읽힌다.
+    if (k === 0) return;
+    if (on) cell.setAttribute('aria-selected', 'true');
+    else cell.removeAttribute('aria-selected');
   }
 
   /**
