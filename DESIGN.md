@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.4 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정) |
+| 문서 버전 | 0.5 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -145,7 +145,8 @@
 
 ### D-06. 데이터는 "창(window)" 단위로 가져오고 블록 캐시를 둔다
 
-- 그리드는 `[첫 가시 행 - 버퍼, 마지막 가시 행 + 버퍼]` 범위를 `SELECT ... ORDER BY <사용자 정렬>, id LIMIT n OFFSET m`으로 요청한다. 30만 행 규모의 OFFSET은 인덱스가 없어도 수십 ms 안에 끝난다.
+- 그리드는 `[첫 가시 행 - 버퍼, 마지막 가시 행 + 버퍼]` 범위를 `SELECT ... ORDER BY <사용자 정렬>, id LIMIT n OFFSET m`으로 요청한다.
+- `OFFSET m`은 rowid b-tree의 잎 셀을 m개 걸어야 하므로 비용이 m에 비례한다. 세션 C 실측(30만 행, 장문 2열, 약 300 MB): OFFSET 0에서 10 ms, 15만에서 28 ms, 29만 9,800에서 50~60 ms로 8장 예산(50 ms)을 끝부분에서 넘는다. 그래서 정렬·필터가 없는 기본 뷰에서는 id가 빈틈없이 연속일 때(`max(id) - min(id) + 1 = count`, 가져오기·추가만 겪은 테이블) `WHERE id >= min + m ORDER BY id LIMIT n`으로 O(log n) 탐색을 쓴다(실측 7~12 ms). 행 삭제로 연속이 깨지면 OFFSET으로 돌아가며, 그 경우의 끝부분 지연은 R6의 대응(정렬 열 인덱스, keyset 페이징)으로 남긴다. 연속 판정에 쓰는 행 수는 Worker가 쓰기 op 일련번호와 함께 캐시한다(`count(*)`는 30만 행에서 35 ms). `min`·`max`는 따로 묻는다(한 문장에 둘을 넣으면 SQLite가 전체 스캔을 한다).
 - 블록 크기 200행의 LRU 캐시(최대 50블록)를 두고, 편집·정렬·필터·가져오기 후에는 해당 테이블 캐시를 전부 무효화한다.
 - 총 행 수는 필터 조건을 포함한 `count(*)`로 필터 변경 시 1회만 계산한다.
 - 정렬은 항상 `id`를 보조 키로 붙여 안정적으로 만든다.
@@ -264,6 +265,7 @@ src/
     grid/
       grid.js                    가상 그리드 컨트롤러(뷰포트 계산, 행·열 풀, 스크롤)
       cells.js                   셀 렌더러(타입별 표시, 미리보기, 배지)
+      cache.js                   블록 캐시(D-06): 200행 블록 LRU 50개, 테이블 단위 무효화
       selection.js               셀·범위·행 선택 모델
       clipboard.js               TSV 복사·붙여넣기
     editor/
@@ -335,9 +337,10 @@ src-tauri/
 test/
   unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드)
   e2e/                           Playwright(브라우저), 같은 시나리오를 tauri-driver로 재사용
-  fixtures/                      CSV·XLSX·DB 표본
+  perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. CI 밖에서 실행
+  fixtures/                      CSV·XLSX·DB 표본. generated/는 gen-fixture 산출물(커밋하지 않음)
 scripts/
-  gen-fixture.mjs                벤치마크용 대용량 CSV 생성
+  gen-fixture.mjs                벤치마크용 대용량 CSV·DB 생성(`--db`는 wasm 엔진으로 표준 SQLite 파일을 만든다)
 ```
 
 ### 3.2 실행 시 구조
@@ -609,7 +612,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 30만 행 테이블을 60 fps로 스크롤하고, 열 너비 조절·열 고정·행 번호가 동작한다.
 
-**산출물**: `ui/grid/grid.js`, `ui/grid/cells.js`, `db/query.js`(창 질의), `app/store.js`(뷰 상태)
+**산출물**: `ui/grid/grid.js`, `ui/grid/cells.js`, `ui/grid/cache.js`, `db/query.js`(창 질의), `app/store.js`(뷰 상태), `util/format.js`, `styles/grid.css`, `scripts/gen-fixture.mjs`(`--db`)
 
 **주요 함수**
 - `grid.mount(container, { tableId, viewSpec })`, `grid.setRowCount(n)`, `grid.computeRange(scrollTop, viewportHeight)` → `{ start, end }`, `grid.render(range)`, `grid.invalidate()`, `grid.scrollToRow(i)`, `grid.scrollToCell(row, col)`
@@ -617,16 +620,19 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `cells.render(el, column, value, meta)`(타입별), `cells.preview(text, length)`
 - `query.buildWindowSQL(table, columns, viewSpec, { offset, limit })`, `query.count(table, viewSpec)`, `query.fetchRow(table, id)`(편집용 전문 로드)
 - 블록 캐시: `cache.get(tableId, block)`, `cache.put()`, `cache.invalidate(tableId)`
+- 뷰 상태(`app/store.js`): 테이블별 `{ widths, frozenColumns }`를 메모리에 둔다. 열 너비의 초기값은 `_jdr_columns.width`이고, 변경분을 파일에 남기는 것은 Step 6의 뷰 저장이 맡는다(Step 4에는 너비를 쓰는 RPC op가 없다).
+- 창 질의 결과 형식은 6장 `query.window` 행을 따른다. 정렬은 항상 `id`를 보조 키로 붙이며(D-06), 사용자 정렬·필터는 Step 6의 `buildOrderBy`·`buildWhere`가 같은 빌더에 더한다. Step 4의 `viewSpec`은 `{ hidden }`만 해석한다.
+- `query.denseFromId(engine, table, stats, offset)`: id가 연속이면 `OFFSET` 대신 쓸 시작 id(D-06). Worker의 `query.window` 핸들러가 행 수 캐시(쓰기 일련번호 기준)와 함께 부른다.
 
 **예외 처리**
-- 스크롤 중 도착한 응답이 이미 지나간 범위이면 버린다(요청에 순번 부여, 최신 순번만 렌더).
+- 스크롤 중 도착한 응답이 이미 지나간 범위이면 버린다(요청에 순번 부여, 최신 순번만 렌더). 구현: 테이블 전환·무효화마다 세대 번호를 올리고, 이전 세대의 응답은 캐시에 넣지 않는다. 같은 세대의 응답은 블록 캐시에 넣고 현재 가시 범위만 다시 그린다(가시 범위 밖 블록은 캐시에만 남는다).
 - 창 질의 실패(테이블이 삭제됨 등): 빈 상태로 그리고 사이드바로 복귀.
 - 행 수 × 행 높이가 1,000만 px를 넘으면 스크롤 스케일링 활성화(D-05).
 - 셀 값이 미리보기 길이를 넘는 경우 말줄임과 길이 배지. `length()`가 큰 값(100만 자 이상)도 그리드는 256자만 받는다.
 - 열이 모두 소프트 삭제된 테이블: "열이 없습니다" 빈 상태.
 
 **완료 기준**
-- `scripts/gen-fixture.mjs`로 만든 30만 행 × 20열(그중 2열은 평균 5 KB, 1%는 100 KB 이상 텍스트) DB에서 스크롤 프레임당 렌더 16 ms 이하, 창 질의 50 ms 이하(Playwright 성능 트레이스로 측정).
+- `scripts/gen-fixture.mjs --db`로 만든 30만 행 × 20열(그중 2열은 장문: 평균 약 200자, 0.1%는 100 KB 이상 텍스트) DB에서 스크롤 프레임당 렌더 16 ms 이하, 창 질의 50 ms 이하. 측정은 `npm run test:perf`(Playwright가 테스트 빌드를 `file://`로 열고 `performance.measure`의 `jdr:grid.render` 항목과 `query.window`의 `elapsedMs`를 읽는다). 픽스처 규격은 8장의 측정 환경(약 300 MB DB)에 맞춘 것이다. 2열 × 평균 5 KB × 30만 행은 약 3 GB로 wasm 엔진의 `maxFileBytes`(1.5 GB)를 넘어 브라우저 모드에서 열 수 없으므로, 장문 열의 평균은 수백 자로 두고 100 KB 이상 셀은 0.1%로 둔다(장문 셀의 미리보기·배지 경로는 이 0.1%로 충분히 검사된다).
 - 단위: `computeRange` 경계(첫 행, 마지막 행, 뷰포트보다 적은 행 수).
 
 ### Step 5. 편집: 인라인·장문 편집기, 행 추가·삭제, 붙여넣기, 되돌리기
@@ -856,9 +862,9 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `schema.list` | | `{ tables }`(3장 `tables.list`) | |
 | `schema.adopt` | | `{ meta, tables }`. `unmanaged`로 열린 파일에 메타를 만들고 기존 테이블을 등록 | 불가 |
 | `schema.create` / `schema.rename` / `schema.drop` / `schema.addColumn` / `schema.renameColumn` / `schema.reorderColumns` / `schema.softDeleteColumn` / `schema.restoreColumn` / `schema.changeColumnType` | 3장 `tables` 함수와 1:1 | `{ cmd, ... }`. 적용된 D-08 커맨드를 돌려주어 메인이 히스토리·저널에 넣는다 | 타입 변경만 가능 |
-| `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, seq }` | 불가(짧음) |
+| `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, columnIds, seq, elapsedMs }`. `rows[i] = { id, cells, lengths }`이고 `cells[j]`는 `columnIds[j]` 열의 값(text·longtext는 `substr(1, 256)` 미리보기), `lengths[j]`는 미리보기가 잘렸을 때만 전체 문자 수, 아니면 null. `columnIds`는 소프트 삭제·숨김을 뺀 살아 있는 열의 표시 순서. `limit`은 1만 이하. `elapsedMs`는 Worker 측 질의 시간(8장 측정용) | 불가(짧음) |
 | `query.count` | `{ tableId, viewSpec }` | `{ count }` | |
-| `query.row` | `{ tableId, rowId, colIds }` | `{ row }` (전문) | |
+| `query.row` | `{ tableId, rowId, colIds }` | `{ row }`. `row = { id, cells }`(`cells`는 열 id → 전문 값)이고 없는 행이면 `row: null`. `colIds`를 비우면 살아 있는 열 전부 | |
 | `command.apply` | `{ cmd, direction? }` | `{ affected, nulled? }`. `direction`은 `'do'`(기본) 또는 `'undo'`. `nulled`는 변환 단계가 NULL로 만든 값의 수. 저널 재생과 되돌리기가 쓴다 | 변환 단계가 있을 때만 |
 | `search.enable` | `{ tableId }` | | 가능 |
 | `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
@@ -960,7 +966,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | R3 | SheetJS CE 유지보수·배포 방식 변경 | XLSX 기능 의존성 | `vendor/`에 고정 버전 커밋, fflate + 자체 파서로 교체 가능한 어댑터 경계 유지 |
 | R4 | 클라우드 충돌 사본으로 인한 사용자 혼란 | 편집 유실 | revision 경고, 백업 1세대, 사용 안내 문서 |
 | R5 | 한글 로케일 정렬·대소문자 무시 요구 | 정렬 결과 기대 불일치 | v1은 코드 포인트 정렬로 한정하고 문서화. v1.1에서 `create_function` 기반 정렬 키 검토 |
-| R6 | 브라우저 모드: 100만 행 근처에서 OFFSET 지연. 데스크톱 모드: 수백만~수천만 행에서 OFFSET·`count(*)`·FTS 인덱스 생성이 초 단위 이상 | 스크롤 끝부분과 필터 변경이 느림, 검색 인덱스 생성이 오래 걸림 | 정렬 열 인덱스 자동 생성(사용자 옵션), keyset 페이징, `count(*)`는 비동기로 표시하고 완료 전에는 근사값, FTS 생성은 진행률과 취소 |
+| R6 | 브라우저 모드: 30만 행 끝부분에서 OFFSET 창 질의가 50~60 ms(세션 C 실측, id가 연속이면 id 탐색으로 회피, D-06), 100만 행 근처에서는 더 늘어남. 데스크톱 모드: 수백만~수천만 행에서 OFFSET·`count(*)`·FTS 인덱스 생성이 초 단위 이상 | 스크롤 끝부분과 필터 변경이 느림(행 삭제 뒤 id가 성기면 Step 4의 빠른 경로가 꺼짐), 검색 인덱스 생성이 오래 걸림 | 정렬 열 인덱스 자동 생성(사용자 옵션), keyset 페이징, `count(*)`는 비동기로 표시하고 완료 전에는 근사값, FTS 생성은 진행률과 취소 |
 | R7 | STRICT 테이블이 아닌 외부 SQLite 파일 편집 | 타입 혼재 | "관리 대상 등록" 시 읽기 전용 기본, 변환 마법사는 v1.1 |
 | R8 | WebView별 차이(WKWebView의 IndexedDB·CompressionStream, WebKitGTK 버전)와 tauri-driver의 macOS 미지원 | 데스크톱 기능 일부가 플랫폼별로 다르고 macOS E2E 자동화 불가 | 기능 감지, 지원 매트릭스에 데스크톱 열 추가, macOS는 수동 점검 목록 |
 | R9 | rusqlite `bundled` 빌드의 컴파일 플래그(FTS5, `VACUUM INTO` 지원 버전)와 JS 쪽 SQLite 버전 불일치 | 같은 SQL이 한 모드에서만 실패 | 두 엔진의 `sqlite_version()`·`compile_options`를 테스트로 고정하고 차이를 문서화 |

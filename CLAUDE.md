@@ -26,7 +26,8 @@ npm test             # node:test, test/unit/**/*.test.js (scripts/run-unit-tests
 npm run build        # dist/jdrdatabase.html 생성
 npm run verify       # 산출물 검증: 외부 참조 0건, 크기 예산, CSP
 npm run test:e2e     # playwright (dist를 file://로 열어 검사)
-npm run fixture -- --rows 300000   # 벤치마크용 CSV 생성
+npm run fixture -- --rows 300000   # 벤치마크용 CSV 생성 (--db를 주면 SQLite DB 생성)
+npm run test:perf    # 성능 측정: 30만 행 DB 픽스처를 만들고 Playwright로 렌더·질의 시간 측정 (CI 밖에서 실행)
 npm run tauri:dev    # 데스크톱 개발 실행 (Step 11 이후)
 npm run tauri:build  # 데스크톱 설치본 빌드 (Step 11 이후)
 cargo test --manifest-path src-tauri/Cargo.toml   # 러스트 단위 테스트 (Step 11 이후)

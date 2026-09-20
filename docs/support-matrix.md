@@ -18,6 +18,8 @@
 | `<a download>` 저장 → 내려받은 파일을 `<input type="file">`로 다시 열기 | ✓ (세션 B, E2E `file.spec.js`: revision·db_id 왕복). Playwright 주의: `setInputFiles`에 비ASCII 경로를 주면 Chromium이 change 없이 무시하고, filechooser 가로채기는 change 대신 cancel을 내는 경우가 있어 둘 다 피했다 | 미확인 | 미확인 | 미확인 |
 | BroadcastChannel (같은 db_id를 연 다른 탭 감지) | ✓ 생성 가능 (세션 B, E2E `file.spec.js`). 두 탭 동시 열기 시나리오는 미확인 | 미확인 | 미확인 | 미확인 |
 | `CompressionStream` (gzip 저장) | 미확인 (세션 G) | 미확인 | 미확인 | 미확인 |
+| 그리드가 쓰는 `ResizeObserver`, Pointer Events(`setPointerCapture`로 열 너비 끌기), `performance.mark/measure`(테스트 빌드의 렌더 시간) | ✓ (세션 C, E2E `grid.spec.js`·`test/perf/grid.perf.spec.js`) | 미확인 | 미확인 | 미확인 |
+| 300 MB DB(30만 행)를 `<input type="file">`로 열기 | ✓ (세션 C, `test:perf`: 읽기 → transfer → deserialize → integrity_check까지 약 2~3초) | 미확인 | 미확인 | 미확인 |
 
 ## 데스크톱 모드 (타우리 WebView)
 
