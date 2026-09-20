@@ -285,6 +285,47 @@ test('빈 상태: 열을 모두 삭제하면 "열이 없습니다", 테이블을
   await expect(page.locator('.jdr-app__title')).toBeVisible();
 });
 
+test('그리드를 닫았다 다시 열어도 고정·너비·클릭·키보드가 살아 있다', async ({ page }) => {
+  await seed(page);
+
+  // 열이 없는 테이블을 고르면 호스트가 그리드를 언마운트하고, 되돌아오면 다시 마운트한다.
+  await page.click('[data-action="table-create"]');
+  await page.locator('.jdr-dialog input').fill('빈표');
+  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
+  await expect(page.locator('.jdr-grid')).toHaveCount(0);
+  await page.locator('.jdr-sidebar__table-name', { hasText: '고객' }).click();
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText(
+    `행 ${ROWS.toLocaleString('ko-KR')}개`,
+  );
+
+  // 열 고정 선택 상자.
+  await page.locator('.jdr-grid__frozen-select').selectOption('1');
+  await expect(page.locator('.jdr-grid__hcell[data-col="0"]')).toHaveClass(
+    /jdr-grid__hcell--frozen/,
+  );
+
+  // 셀 클릭.
+  await page.locator('.jdr-grid__row[data-row="2"] .jdr-grid__cell[data-col="1"]').click();
+  const activeCell = page.locator('.jdr-grid__cell--active');
+  await expect(activeCell).toHaveText('9');
+
+  // 키보드 이동.
+  await page.locator('.jdr-grid').press('ArrowDown');
+  await expect(activeCell).toHaveText('12');
+
+  // 머리글 손잡이 끌기.
+  const header = page.locator('.jdr-grid__hcell[data-col="1"]');
+  const before = await header.boundingBox();
+  if (!before) throw new Error('header box missing');
+  await page.mouse.move(before.x + before.width - 2, before.y + before.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width + 60, before.y + before.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => Math.round((await header.boundingBox())?.width ?? 0))
+    .toBeGreaterThan(Math.round(before.width) + 40);
+});
+
 test('테이블을 오가도 활성 셀은 하나뿐이다', async ({ page }) => {
   await seed(page);
   const active = page.locator('.jdr-grid__cell--active');

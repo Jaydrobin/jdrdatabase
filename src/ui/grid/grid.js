@@ -679,7 +679,6 @@ export function createGrid(deps) {
     if (!table) return;
     store.setFrozenColumns(table.id, Number(frozenSelect.value));
   };
-  frozenSelect.addEventListener('change', onFrozenChange);
 
   /** @type {{ col: number, startX: number, startWidth: number, pointerId: number, target: HTMLElement } | null} */
   let resizing = null;
@@ -729,10 +728,6 @@ export function createGrid(deps) {
     const column = columns[col];
     if (table && column) store.setColumnWidth(table.id, column.id, widths[col] ?? column.width);
   };
-  header.addEventListener('pointerdown', onHeaderPointerDown);
-  header.addEventListener('pointermove', onHeaderPointerMove);
-  header.addEventListener('pointerup', onHeaderPointerUp);
-  header.addEventListener('pointercancel', onHeaderPointerUp);
 
   /** @param {MouseEvent} ev */
   const onCanvasClick = (ev) => {
@@ -745,7 +740,6 @@ export function createGrid(deps) {
     if (row < 0 || col < 0) return;
     moveCursor(row, col);
   };
-  canvas.addEventListener('click', onCanvasClick);
 
   /**
    * @param {number} row
@@ -796,7 +790,32 @@ export function createGrid(deps) {
     }
     if (handled) ev.preventDefault();
   };
-  el.addEventListener('keydown', onKeydown);
+
+  /**
+   * 리스너는 마운트에서 한 번에 걸고 언마운트에서 한 번에 뗀다(CLAUDE.md 5.5). 등록을 `createGrid`에
+   * 두면 `unmount()` → `mount()`를 거친 그리드에서 스크롤 외의 상호작용이 모두 죽는다.
+   */
+  function addListeners() {
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    frozenSelect.addEventListener('change', onFrozenChange);
+    header.addEventListener('pointerdown', onHeaderPointerDown);
+    header.addEventListener('pointermove', onHeaderPointerMove);
+    header.addEventListener('pointerup', onHeaderPointerUp);
+    header.addEventListener('pointercancel', onHeaderPointerUp);
+    canvas.addEventListener('click', onCanvasClick);
+    el.addEventListener('keydown', onKeydown);
+  }
+
+  function removeListeners() {
+    scroller.removeEventListener('scroll', onScroll);
+    frozenSelect.removeEventListener('change', onFrozenChange);
+    header.removeEventListener('pointerdown', onHeaderPointerDown);
+    header.removeEventListener('pointermove', onHeaderPointerMove);
+    header.removeEventListener('pointerup', onHeaderPointerUp);
+    header.removeEventListener('pointercancel', onHeaderPointerUp);
+    canvas.removeEventListener('click', onCanvasClick);
+    el.removeEventListener('keydown', onKeydown);
+  }
 
   function clearRows() {
     for (const slot of active.values()) releaseRow(slot);
@@ -810,7 +829,7 @@ export function createGrid(deps) {
     mount(container, options) {
       if (!mounted) {
         container.append(el);
-        scroller.addEventListener('scroll', onScroll, { passive: true });
+        addListeners();
         resizeObserver?.observe(scroller);
         mounted = true;
       }
@@ -906,15 +925,8 @@ export function createGrid(deps) {
       if (!mounted) return;
       if (rafId !== 0) cancelAnimationFrame(rafId);
       rafId = 0;
-      scroller.removeEventListener('scroll', onScroll);
+      removeListeners();
       resizeObserver?.disconnect();
-      frozenSelect.removeEventListener('change', onFrozenChange);
-      header.removeEventListener('pointerdown', onHeaderPointerDown);
-      header.removeEventListener('pointermove', onHeaderPointerMove);
-      header.removeEventListener('pointerup', onHeaderPointerUp);
-      header.removeEventListener('pointercancel', onHeaderPointerUp);
-      canvas.removeEventListener('click', onCanvasClick);
-      el.removeEventListener('keydown', onKeydown);
       generation += 1;
       inflight.clear();
       cache.invalidate();
