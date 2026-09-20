@@ -277,6 +277,39 @@ test('changeColumnType: text → integer(null 정책), 되돌리기로 완전 �
   await engine.close();
 });
 
+test('changeColumnType: id가 0 이하인 행도 빠짐없이 변환된다', async () => {
+  // 변환 복사는 "id > 마지막 id"로 청크를 넘긴다. 시작값을 0으로 두면 rowid를 명시해 넣은
+  // 0·음수 행이 통째로 건너뛰어지고, 옛 열은 소프트 삭제되므로 값이 조용히 사라진다.
+  const engine = await freshDb();
+  const { tableId } = await tables.create(engine, { name: '수입' });
+  const { columnId } = await tables.addColumn(engine, tableId, { name: '금액', type: 'text' });
+  await engine.transaction(() => {
+    const stmt = engine.prepareCached(
+      `INSERT INTO "${tableId}" ("id", "${columnId}") VALUES (?, ?)`,
+    );
+    for (const [id, value] of [
+      [-2, '11'],
+      [0, '22'],
+      [1, '33'],
+    ]) {
+      engine.run(stmt, [id, value]);
+    }
+  });
+
+  const changed = await tables.changeColumnType(engine, tableId, columnId, { type: 'integer' });
+  assert.deepEqual(
+    engine.exec(`SELECT "id", "${changed.columnId}" FROM "${tableId}" ORDER BY "id"`).rows,
+    [
+      [-2, 11],
+      [0, 22],
+      [1, 33],
+    ],
+  );
+  assert.equal(changed.result.affected, 5, '변환 3행 + 메타 문장 2건');
+  assert.equal(changed.result.nulled, 0);
+  await engine.close();
+});
+
 test('changeColumnType: abort 정책은 변환 실패 값에서 E_VALUE_INVALID로 롤백(원상복구)', async () => {
   const engine = await freshDb();
   const { tableId, ageId } = await sampleTable(engine);

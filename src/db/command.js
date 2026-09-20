@@ -131,11 +131,20 @@ export async function runConvert(engine, step, ctx) {
   const from = quoteIdent(step.from);
   const to = quoteIdent(step.to);
   const total = Number(engine.exec(`SELECT count(*) FROM ${table}`).rows[0]?.[0] ?? 0);
-  const select = engine.prepareCached(
+  // 커서(`id > ?`)에는 "아직 아무것도 읽지 않음"을 뜻하는 값이 없다. rowid는 음수일 수 있으므로
+  // 0 같은 시작값을 두면 그 아래 행이 통째로 빠진다. 첫 청크만 커서 없는 문장으로 읽는다.
+  const selectFirst = engine.prepareCached(
+    `SELECT "id", ${from} FROM ${table} ORDER BY "id" LIMIT ${CONVERT_CHUNK_ROWS}`,
+  );
+  const selectNext = engine.prepareCached(
     `SELECT "id", ${from} FROM ${table} WHERE "id" > ? ORDER BY "id" LIMIT ${CONVERT_CHUNK_ROWS}`,
   );
   const update = engine.prepareCached(`UPDATE ${table} SET ${to} = ? WHERE "id" = ?`);
-  let lastId = 0;
+  /**
+   * 마지막으로 읽은 행의 id. 아직 아무것도 읽지 않았으면 null.
+   * @type {number | null}
+   */
+  let lastId = null;
   let rows = 0;
   let nulled = 0;
   ctx.progress?.({ phase: 'convert', done: 0, total });
@@ -145,7 +154,9 @@ export async function runConvert(engine, step, ctx) {
         detail: { table: step.table, done: rows, total },
       });
     }
-    const chunk = engine.exec(select, [lastId]).rows;
+    /** @type {SqlValue[][]} */
+    const chunk =
+      lastId === null ? engine.exec(selectFirst).rows : engine.exec(selectNext, [lastId]).rows;
     if (chunk.length === 0) break;
     /** @type {SqlValue[][]} */
     const params = [];
