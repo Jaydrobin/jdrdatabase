@@ -35,6 +35,20 @@ import { coerce, isLogicalType } from './values.js';
 export const CONVERT_CHUNK_ROWS = 5_000;
 
 /**
+ * 이벤트 루프의 태스크 큐로 한 번 돌아간다.
+ *
+ * Worker의 `postMessage`는 태스크 큐에 들어가므로, 실행 중인 태스크가 여기로 돌아오지 않으면
+ * 취소 메시지가 배달되지 않는다. 변환 루프의 await는 모두 마이크로태스크라서 이 양보가 없으면
+ * 변환이 끝난 뒤에야 취소가 도착한다(= 취소 버튼이 동작하지 않는다).
+ * @returns {Promise<void>}
+ */
+function yieldToEventLoop() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+/**
  * @typedef {object} Command
  * @property {string} type `<영역>.<동사>` (예: `table.create`)
  * @property {string | null} tableId 대상 테이블. 테이블 생성처럼 아직 없거나 전체에 걸치면 null
@@ -180,6 +194,9 @@ export async function runConvert(engine, step, ctx) {
     await engine.runBatch(update, params);
     rows += chunk.length;
     ctx.progress?.({ phase: 'convert', done: rows, total });
+    // 청크 하나당 태스크 한 번(수 ms). 10만 행이면 20회이므로 변환 시간에 견주면 무시할 수 있고,
+    // 이 양보가 있어야 취소 메시지와 UI 갱신이 청크 사이에 끼어들 수 있다.
+    await yieldToEventLoop();
   }
   return { rows, nulled };
 }

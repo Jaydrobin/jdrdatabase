@@ -418,3 +418,76 @@ test('schema.*: 테이블 생성·열 추가가 커맨드를 돌려주고 db.ope
   );
   client.close();
 });
+
+/**
+ * 진짜 Worker처럼 메시지를 "태스크"로 배달하는 전송. 인라인 전송은 `dispatch`를 동기로 부르므로
+ * 긴 작업 중에 뒤 메시지가 닿는지를 검사할 수 없다. Worker의 `postMessage`는 태스크 큐에 들어가고,
+ * 실행 중인 태스크가 이벤트 루프로 돌아와야만 배달된다.
+ * @returns {import('../../../src/db/client.js').Transport}
+ */
+function createTaskTransport() {
+  /** @type {((message: RpcOutbound) => void) | null} */
+  let handler = null;
+  const dispatcher = createDispatcher({
+    post: (message) => {
+      setTimeout(() => handler?.(message), 0);
+    },
+  });
+  return {
+    kind: 'worker',
+    post: (message) => {
+      setTimeout(() => void dispatcher.dispatch(message), 0);
+    },
+    onMessage: (h) => {
+      handler = h;
+    },
+    onFatal: () => {},
+    close: () => {
+      handler = null;
+    },
+  };
+}
+
+test('취소: 메시지가 태스크로 배달되는 Worker 모드에서도 변환 중에 닿는다', async () => {
+  // 변환 루프가 이벤트 루프로 돌아오지 않으면 취소 메시지는 변환이 끝난 뒤에야 배달되고,
+  // 사용자의 취소 버튼은 아무 일도 하지 않는다(Step 3 "대용량 진행률·취소").
+  const client = createClient({ transport: createTaskTransport() });
+  await client.call('engine.init', { mode: 'wasm', wasmBinary: await loadWasmBinary() });
+  await client.call('db.open', {});
+  const { tableId } = await client.call('schema.create', { name: '표' });
+  const { columnId } = await client.call('schema.addColumn', {
+    tableId,
+    name: '수',
+    type: 'text',
+  });
+  /** @type {import('../../../src/db/command.js').Statement[]} */
+  const inserts = [];
+  for (let i = 1; i <= 12_000; i += 1) {
+    inserts.push({
+      sql: `INSERT INTO "${tableId}" ("id", "${columnId}") VALUES (?, ?)`,
+      params: [i, String(i)],
+    });
+  }
+  await client.call('command.apply', {
+    cmd: { type: 'seed', tableId, summary: 'seed', do: inserts, undo: [] },
+  });
+
+  const controller = new AbortController();
+  const pending = client.call(
+    'schema.changeColumnType',
+    { tableId, columnId, type: 'integer' },
+    { signal: controller.signal, onProgress: () => controller.abort() },
+  );
+  await assert.rejects(
+    pending,
+    (err) => err instanceof AppError && err.code === 'E_IMPORT_CANCELLED',
+  );
+
+  // 롤백되었으므로 옛 열이 살아 있고 새 열은 없다.
+  const columns = (await client.call('schema.list')).tables[0]?.columns ?? [];
+  assert.deepEqual(
+    columns.filter((c) => c.deletedAt === null).map((c) => c.id),
+    [columnId],
+  );
+  client.close();
+});
