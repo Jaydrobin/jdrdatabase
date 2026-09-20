@@ -12,6 +12,7 @@ import { createClient, createInlineTransport } from '../../../src/db/client.js';
 import { createAutosave } from '../../../src/io/autosave.js';
 import { createMemoryIdb } from '../../../src/io/idb.js';
 import { createTabLock } from '../../../src/io/tablock.js';
+import { AppError } from '../../../src/util/errors.js';
 import { loadWasmBinary } from '../db/helpers.js';
 
 /** @typedef {import('../../../src/db/command.js').Command} Command */
@@ -254,5 +255,101 @@ test('읽기 전용이면 apply·undo를 하지 않고 안내한다', async () =
   assert.equal(notices.at(-1)?.value, 'file.readOnlyBlocked');
   assert.equal(await history.undo(), false);
   void snap;
+  client.close();
+});
+
+test('적용이 도는 중에 눌린 되돌리기는 차례를 기다리고, 히스토리를 잃지 않는다', async () => {
+  const { client, history, notices, tableId, name, cellOf } = await setup();
+  assert.ok(await history.apply(insertRows({ tableId, count: 1, firstId: 1, now: NOW })));
+  assert.ok(
+    await history.apply(
+      editCell({
+        tableId,
+        rowId: 1,
+        colId: name,
+        oldValue: null,
+        newValue: '하나',
+        oldUpdatedAt: NOW,
+        now: NOW,
+      }),
+    ),
+  );
+  assert.deepEqual(history.state(), { undo: 2, redo: 0, busy: false });
+
+  // 긴 붙여넣기가 도는 중의 Ctrl+Z. `command.apply`는 배타 op이므로 겹치면 Worker가
+  // `E_DB_BUSY`로 거절하는데, 그 거절은 DB를 건드리지 않았으므로 히스토리를 버릴 이유가 없다.
+  const applying = history.apply(insertRows({ tableId, count: 200, firstId: 100, now: NOW }));
+  const undone = await history.undo();
+  assert.ok(await applying, '붙여넣기는 그대로 적용된다');
+
+  assert.equal(undone, true, '되돌리기는 차례를 기다렸다가 실행된다');
+  assert.equal(
+    notices.some((n) => n.value === 'E_DB_BUSY'),
+    false,
+    '히스토리가 스스로 낸 호출끼리는 겹치지 않는다',
+  );
+  // 적용 3건 - 되돌리기 1건 = 2. 되돌린 것은 다시 실행 스택으로 간다.
+  assert.deepEqual(history.state(), { undo: 2, redo: 1, busy: false });
+  assert.equal(await cellOf(1), '하나', '되돌려진 것은 마지막에 적용된 행 추가다');
+  assert.equal(
+    (await client.call('query.stats', { tableId })).count,
+    1,
+    '나중에 온 되돌리기가 붙여넣은 200행을 지웠다',
+  );
+  client.close();
+});
+
+test('히스토리 밖의 배타 op와 겹쳐 난 E_DB_BUSY는 되돌리기 항목을 지우지 않는다', async () => {
+  const { client, store, history, notices, tableId, name, cellOf } = await setup();
+  history.dispose();
+  // 저장(`db.snapshot`)·스키마 op도 배타 op라 큐 밖에서 겹칠 수 있다. 그 거절은 커맨드가
+  // 엔진에 닿기 전이므로 DB는 그대로이고 히스토리도 그대로여야 한다. 타이밍에 기대지 않도록
+  // 되돌리기 호출 한 번만 `E_DB_BUSY`로 막는 전송을 끼운다.
+  let blocked = false;
+  /** @type {import('../../../src/db/client.js').Client} */
+  const flaky = {
+    ...client,
+    call: async (op, args, options) => {
+      const direction = /** @type {{ direction?: string }} */ (args)?.direction;
+      if (op === 'command.apply' && !blocked && direction === 'undo') {
+        blocked = true;
+        throw new AppError('E_DB_BUSY', 'db.snapshot is in progress', {
+          detail: { running: 'db.snapshot', requested: 'command.apply' },
+        });
+      }
+      return client.call(op, args, options);
+    },
+  };
+  const notify = {
+    /** @param {{ code: string }} err */
+    error: (err) => notices.push({ kind: 'error', value: err.code }),
+    /** @param {string} key */
+    info: (key) => notices.push({ kind: 'info', value: key }),
+  };
+  const guarded = createHistory({ client: flaky, store, notify });
+
+  assert.ok(await guarded.apply(insertRows({ tableId, count: 1, firstId: 1, now: NOW })));
+  assert.ok(
+    await guarded.apply(
+      editCell({
+        tableId,
+        rowId: 1,
+        colId: name,
+        oldValue: null,
+        newValue: '하나',
+        oldUpdatedAt: NOW,
+        now: NOW,
+      }),
+    ),
+  );
+  assert.equal(guarded.state().undo, 2);
+
+  assert.equal(await guarded.undo(), false);
+  assert.equal(notices.at(-1)?.value, 'E_DB_BUSY');
+  assert.equal(await cellOf(1), '하나', 'DB는 그대로다');
+  assert.equal(guarded.state().undo, 2, '적용된 적 없는 실패가 되돌리기 항목을 지우지 않는다');
+  assert.equal(await guarded.undo(), true, '다시 누르면 되돌아간다');
+  assert.equal(await cellOf(1), null);
+  guarded.dispose();
   client.close();
 });
