@@ -11,6 +11,7 @@ import {
   planPaste,
   serializeTsv,
 } from '../../../../src/ui/grid/clipboard.js';
+import { validate } from '../../../../src/db/values.js';
 import { AppError } from '../../../../src/util/errors.js';
 
 /** @type {import('../../../../src/db/tables.js').ColumnInfo} */
@@ -80,5 +81,28 @@ test('convertPastedCell: 타입 검증, 빈 문자열은 NULL, 실패는 위치�
   );
   assert.equal(cellToText(INT, null), '');
   assert.equal(cellToText({ ...INT, type: 'boolean' }, 1), 'true');
-  assert.equal(cellToText({ ...INT, type: 'real', options: { decimals: 2 } }, 1.5), '1.50');
+});
+
+test('cellToText: 편집·복사는 저장된 값 그대로를 쓴다(그리드 표시의 반올림을 따르지 않는다)', () => {
+  // `decimals`는 그리드에 몇 자리까지 보일지를 정하는 표시 설정이다. 편집기의 초기값과 복사한
+  // 텍스트에까지 적용하면, 그 텍스트가 `validate`를 거쳐 그대로 저장값이 되므로 셀을 열었다
+  // 확정하거나 복사해 붙여넣는 것만으로 값이 깎인다.
+  const real = /** @type {import('../../../../src/db/tables.js').ColumnInfo} */ ({
+    ...INT,
+    type: 'real',
+    options: { decimals: 2 },
+  });
+  assert.equal(cellToText(real, 3.14159), '3.14159');
+  assert.equal(cellToText(real, 1.5), '1.5');
+  assert.equal(cellToText({ ...real, options: { decimals: 0 } }, 0.1), '0.1');
+  // 왕복: 보여 준 텍스트를 그대로 확정하면 저장값이 그대로다.
+  const back = validate('real', cellToText(real, 3.14159));
+  assert.equal(back.ok && back.value, 3.14159);
+  // select의 choices처럼 값 자체를 정하는 옵션은 그대로 쓴다.
+  const sel = /** @type {import('../../../../src/db/tables.js').ColumnInfo} */ ({
+    ...INT,
+    type: 'select',
+    options: { choices: ['가', '나'] },
+  });
+  assert.equal(cellToText(sel, '나'), '나');
 });

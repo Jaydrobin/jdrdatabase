@@ -94,7 +94,12 @@ export function parseTsv(text) {
 }
 
 /**
- * 복사할 때 셀 값을 문자열로 바꾼다. NULL은 빈 문자열, boolean은 true/false, 나머지는 표시 문자열.
+ * 편집기의 초기값과 복사할 때 셀 값을 문자열로 바꾼다. NULL은 빈 문자열, boolean은 true/false.
+ *
+ * 그리드 표시(`cells.render`)와 달리 `real`의 `decimals`는 적용하지 않는다. `decimals`는 몇 자리까지
+ * 보일지를 정하는 표시 설정인데, 여기서 쓴 문자열은 `validate`를 거쳐 그대로 저장값이 되므로
+ * 적용하면 셀을 열었다 확정하거나 복사해 붙여넣는 것만으로 값이 깎인다(3.14159 → 3.14).
+ * `select`의 `choices`처럼 값 자체를 정하는 옵션은 그대로 넘긴다.
  * @param {ColumnInfo} column
  * @param {SqlValue} value
  * @returns {string}
@@ -102,11 +107,8 @@ export function parseTsv(text) {
 export function cellToText(column, value) {
   if (value === null || value === undefined) return '';
   if (value instanceof Uint8Array) return '';
-  return toDisplay(
-    column.type,
-    typeof value === 'bigint' ? String(value) : value,
-    column.options ?? undefined,
-  );
+  const options = column.type === 'real' ? undefined : (column.options ?? undefined);
+  return toDisplay(column.type, typeof value === 'bigint' ? String(value) : value, options);
 }
 
 /**
