@@ -212,16 +212,18 @@ test('열 고정: 고정 열은 가로 스크롤에도 왼쪽에 남고, 행 번
     el.scrollLeft = 300;
   });
   const scrollerBox = await scroller.boundingBox();
-  const rownum = await page.locator('.jdr-grid__hcell--rownum').boundingBox();
-  const frozen = await page.locator('.jdr-grid__hcell--frozen').first().boundingBox();
-  if (!scrollerBox || !rownum || !frozen) throw new Error('not laid out');
+  if (!scrollerBox) throw new Error('not laid out');
+  // 고정 칸의 위치는 스크롤 뒤 다음 프레임에서 갱신되므로 세 값 모두 기다린다.
   await expect
     .poll(async () => (await page.locator('.jdr-grid__hcell--rownum').boundingBox())?.x)
     .toBe(scrollerBox.x);
-  expect(frozen.x).toBe(scrollerBox.x + 64);
+  await expect
+    .poll(async () => (await page.locator('.jdr-grid__hcell--frozen').first().boundingBox())?.x)
+    .toBe(scrollerBox.x + 64);
   // 고정되지 않은 첫 열(2번)은 왼쪽으로 밀려났다.
-  const third = await page.locator('.jdr-grid__hcell[data-col="2"]').boundingBox();
-  expect(third?.x).toBe(scrollerBox.x + 64 + 320 - 300);
+  await expect
+    .poll(async () => (await page.locator('.jdr-grid__hcell[data-col="2"]').boundingBox())?.x)
+    .toBe(scrollerBox.x + 64 + 320 - 300);
   await page.selectOption('.jdr-grid__frozen-select', '0');
   await expect(page.locator('.jdr-grid__hcell--frozen')).toHaveCount(0);
 });
