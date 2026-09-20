@@ -294,6 +294,14 @@ test('붙여넣기: 기존 행 덮어쓰기 + 경계 밖 행 자동 추가 + 넘
   await expect(page.locator('.jdr-toast--info', { hasText: '2번째 행의 "나이" 열' })).toBeVisible();
   await expect(cell(page, 0, 1)).toHaveText('3');
   await expect(cell(page, 2, 1)).toHaveText('9');
+
+  // 앵커가 첫 행이 아니면 알리는 행 번호도 그리드의 행 번호여야 한다. 붙여넣기 데이터 안에서의
+  // 순번을 그대로 쓰면(2번째 행) 사용자가 그리드에서 그 행을 찾을 수 없다.
+  await cell(page, 5, 1).click();
+  await page.evaluate(() => navigator.clipboard.writeText('10\n둘\n30'));
+  await page.keyboard.press('Control+v');
+  await expect(page.locator('.jdr-toast--info', { hasText: '7번째 행의 "나이" 열' })).toBeVisible();
+  await expect(cell(page, 5, 1)).toHaveText('18');
 });
 
 test('행 추가·행 삭제·범위 지우기와 되돌리기', async ({ page }) => {

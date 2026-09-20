@@ -361,7 +361,12 @@ export function createEditingController(deps) {
       toasts.error(appErr);
       const detail = /** @type {{ row?: number, columnName?: string }} */ (appErr.detail ?? {});
       if (typeof detail.row === 'number') {
-        toasts.info('paste.invalidAt', { row: detail.row + 1, column: detail.columnName ?? '' });
+        // `detail.row`는 붙여넣기 데이터 안에서의 순번이다. 사용자가 찾아갈 수 있도록
+        // 앵커를 더해 그리드의 행 번호로 알린다.
+        toasts.info('paste.invalidAt', {
+          row: anchor.row + detail.row + 1,
+          column: detail.columnName ?? '',
+        });
       }
       return;
     }
