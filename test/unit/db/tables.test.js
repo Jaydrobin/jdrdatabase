@@ -407,9 +407,23 @@ test('외부 파일에서 등록한 테이블(strict = 0)은 스키마 변경을
       e.code === 'E_DB_QUERY' &&
       /** @type {{ reason: string }} */ (e.detail).reason === 'external_table',
   );
-  // 이름 변경과 삭제는 메타·물리 삭제이므로 허용된다.
+  // 표시 이름 변경은 메타만 바꾸고 되돌릴 수 있으므로 읽기 전용 테이블에도 허용된다.
   await tables.rename(engine, 'users', { name: '사용자' });
   assert.equal(tables.list(engine).find((t) => t.id === 'users')?.name, '사용자');
+  // 삭제는 되돌릴 수 없고 남의 파일의 데이터를 지운다. 읽기 전용 테이블에서는 막는다.
+  await assert.rejects(
+    tables.drop(engine, 'users'),
+    (e) =>
+      e instanceof AppError &&
+      e.code === 'E_DB_QUERY' &&
+      /** @type {{ reason: string }} */ (e.detail).reason === 'external_table',
+  );
+  assert.equal(
+    engine.exec("SELECT count(*) FROM sqlite_master WHERE name = 'users'").rows[0]?.[0],
+    1,
+    '물리 테이블이 남아 있다',
+  );
+  assert.equal(engine.exec('SELECT count(*) FROM "users"').rows[0]?.[0], 2, '행도 그대로다');
   await engine.close();
 });
 

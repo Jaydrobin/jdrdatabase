@@ -159,10 +159,11 @@ export function mountSidebar(parent, deps) {
       }
       li.append(select);
       if (writable) {
-        li.append(
-          makeButton(t('table.rename'), 'table-rename', { tableId: table.id }),
-          makeButton(t('table.drop'), 'table-drop', { tableId: table.id }),
-        );
+        li.append(makeButton(t('table.rename'), 'table-rename', { tableId: table.id }));
+        // 외부 파일에서 등록한 테이블은 읽기 전용이므로 되돌릴 수 없는 삭제를 내놓지 않는다.
+        if (table.strict) {
+          li.append(makeButton(t('table.drop'), 'table-drop', { tableId: table.id }));
+        }
       }
       tableList.append(li);
     }

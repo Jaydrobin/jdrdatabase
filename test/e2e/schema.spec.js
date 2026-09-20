@@ -197,7 +197,7 @@ test('스키마 변경은 저널에 남아 탭을 다시 열면 복구된다', a
   expect((await state(page))?.dirty).toBe(true);
 });
 
-test('외부 SQLite 파일의 테이블은 읽기 전용 배지가 붙고 열 추가가 막힌다', async ({ page }) => {
+test('외부 SQLite 파일의 테이블은 읽기 전용 배지가 붙고 변경·삭제가 막힌다', async ({ page }) => {
   await page
     .locator(`input.${FILE_INPUT_CLASS}`)
     .setInputFiles(path.resolve('test/fixtures/external.db'));
@@ -205,4 +205,7 @@ test('외부 SQLite 파일의 테이블은 읽기 전용 배지가 붙고 열 �
   await expect(page.locator('.jdr-sidebar__badge')).toHaveCount(2);
   await expect(page.locator('[data-action="column-add"]')).toBeDisabled();
   await expect(page.locator('[data-action="column-rename"]')).toHaveCount(0);
+  // 되돌릴 수 없는 삭제는 읽기 전용 테이블에 내놓지 않는다(표시 이름 변경은 남는다).
+  await expect(page.locator('[data-action="table-drop"]')).toHaveCount(0);
+  await expect(page.locator('[data-action="table-rename"]')).toHaveCount(2);
 });

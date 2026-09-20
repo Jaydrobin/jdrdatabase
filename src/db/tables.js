@@ -297,6 +297,8 @@ export async function rename(engine, tableId, input) {
  */
 export async function drop(engine, tableId) {
   const table = requireTable(engine, tableId);
+  // 되돌릴 수 없는 유일한 커맨드다. 읽기 전용으로 등록한 외부 파일의 테이블에는 쓰지 않는다.
+  requireStrict(table);
   /** @type {Command} */
   const cmd = {
     type: 'table.drop',
