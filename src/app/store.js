@@ -28,6 +28,8 @@ import { AppError, toAppError } from '../util/errors.js';
 export const BACKUP_MAX_BYTES = 200 * 1024 * 1024;
 /** IDB `handles` 스토어에서 최근 파일 핸들을 두는 키. */
 export const RECENT_HANDLE_KEY = 'recent';
+/** 열 너비 하한(px). 이보다 좁히면 내용도 크기 조절 손잡이도 보이지 않는다. */
+export const MIN_COLUMN_WIDTH = 40;
 
 /**
  * 파일 접근 함수 묶음. `io/filesystem.js`의 export와 같은 형태이며 테스트가 가짜를 넣는다.
@@ -67,6 +69,13 @@ export const RECENT_HANDLE_KEY = 'recent';
 /** @typedef {'none' | 'newerSchema' | 'otherTab'} ReadOnlyReason */
 
 /**
+ * 테이블별 뷰 상태(Step 4). 메모리에만 있고, 파일에 남기는 것은 Step 6의 뷰 저장이 맡는다.
+ * @typedef {object} TableViewState
+ * @property {Record<string, number>} widths 열 id → 너비(px). 없는 열은 `_jdr_columns.width`
+ * @property {number} frozenColumns 왼쪽에 고정하는 열 수
+ */
+
+/**
  * @typedef {object} StoreState
  * @property {FileState} file
  * @property {Meta} meta
@@ -77,7 +86,7 @@ export const RECENT_HANDLE_KEY = 'recent';
  * @property {boolean} journalFull
  */
 
-/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed'} StoreEvent */
+/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed'} StoreEvent */
 
 /**
  * 스키마 op 이름(`schema.*` 중 쓰기). 결과는 적용된 커맨드를 담는다.
@@ -115,6 +124,9 @@ export const RECENT_HANDLE_KEY = 'recent';
  * @property {(tableId: string | null) => void} selectTable
  * @property {<K extends SchemaOp>(op: K, args: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result'] | null>} runSchemaOp 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다. 실패는 알리고 null
  * @property {() => Promise<void>} refreshTables `schema.list`로 테이블 목록을 다시 읽는다
+ * @property {(tableId: string) => TableViewState} getViewState 테이블의 뷰 상태(복사본)
+ * @property {(tableId: string, columnId: string, width: number) => void} setColumnWidth
+ * @property {(tableId: string, count: number) => void} setFrozenColumns
  */
 
 /**
@@ -147,6 +159,21 @@ export function createStore(deps) {
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
   const listeners = new Map();
+  /** @type {Map<string, TableViewState>} */
+  const views = new Map();
+
+  /**
+   * @param {string} tableId
+   * @returns {TableViewState}
+   */
+  function viewOf(tableId) {
+    let view = views.get(tableId);
+    if (!view) {
+      view = { widths: {}, frozenColumns: 0 };
+      views.set(tableId, view);
+    }
+    return view;
+  }
 
   /** @param {StoreEvent} event */
   function emit(event) {
@@ -210,6 +237,7 @@ export function createStore(deps) {
     state.file = { name: next.name, handle: next.handle, size: next.size };
     state.meta = next.meta;
     state.currentTableId = null;
+    views.clear();
     setTables(next.tables);
     state.dirty = false;
     state.readOnly = next.readOnly;
@@ -577,6 +605,8 @@ export function createStore(deps) {
         emit('journal:full');
       }
       store.markDirty();
+      // 커맨드는 DB 내용을 바꿨다. 그리드는 블록 캐시를 버리고 다시 읽는다(D-06).
+      emit('data:changed');
     },
 
     async recoverPending() {
@@ -655,6 +685,27 @@ export function createStore(deps) {
       await store.recordCommand(result.cmd);
       await store.refreshTables();
       return result;
+    },
+
+    getViewState(tableId) {
+      const view = viewOf(tableId);
+      return { widths: { ...view.widths }, frozenColumns: view.frozenColumns };
+    },
+
+    setColumnWidth(tableId, columnId, width) {
+      const view = viewOf(tableId);
+      const next = Math.max(MIN_COLUMN_WIDTH, Math.round(width));
+      if (view.widths[columnId] === next) return;
+      view.widths[columnId] = next;
+      emit('view:changed');
+    },
+
+    setFrozenColumns(tableId, count) {
+      const view = viewOf(tableId);
+      const next = Math.max(0, Math.trunc(count));
+      if (view.frozenColumns === next) return;
+      view.frozenColumns = next;
+      emit('view:changed');
     },
 
     async openRecent() {

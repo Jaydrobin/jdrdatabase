@@ -16,6 +16,7 @@ const NODE_SIDE = [
   'scripts/**/*.mjs',
   'test/**/*.js',
   'playwright.config.js',
+  'playwright.perf.config.js',
   'eslint.config.js',
 ];
 
@@ -91,7 +92,7 @@ export default defineConfig([
     rules: { 'no-console': 'off' },
   },
   {
-    files: ['test/e2e/**/*.js'],
+    files: ['test/e2e/**/*.js', 'test/perf/**/*.js'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 ]);

@@ -25,7 +25,8 @@ export const DIST_DIR = path.join(ROOT, 'dist');
 
 export const MAIN_ENTRY = path.join(SRC_DIR, 'main.js');
 export const WORKER_ENTRY = path.join(SRC_DIR, 'db', 'worker.js');
-export const CSS_ENTRY = path.join(SRC_DIR, 'styles', 'app.css');
+/** 산출물에 넣는 CSS. 이 순서로 이어 붙인다(뒤 파일이 앞 파일의 규칙을 덮어쓸 수 있다). */
+export const CSS_FILES = ['app.css', 'grid.css'].map((name) => path.join(SRC_DIR, 'styles', name));
 export const WASM_FILE = path.join(VENDOR_DIR, 'sqlite3.wasm');
 export const TEMPLATE_FILE = path.join(ROOT, 'build', 'template.html');
 
@@ -277,7 +278,7 @@ export async function writeDist(options = {}) {
   const [mainJs, workerJs, css, wasmB64, template] = await Promise.all([
     inlineImports(mainGraph, { minify: options.minify, test }),
     inlineImports(workerGraph, { minify: options.minify, test }),
-    readFile(CSS_ENTRY, 'utf8'),
+    Promise.all(CSS_FILES.map((file) => readFile(file, 'utf8'))).then((parts) => parts.join('\n')),
     embedBase64(WASM_FILE),
     readFile(TEMPLATE_FILE, 'utf8'),
   ]);

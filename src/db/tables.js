@@ -126,7 +126,9 @@ function parseOptions(raw) {
  */
 function listColumns(engine, tableId) {
   const r = engine.exec(
-    'SELECT id, name, type, position, width, options, deleted_at FROM _jdr_columns WHERE table_id = ? ORDER BY position, id LIMIT 2000',
+    engine.prepareCached(
+      'SELECT id, name, type, position, width, options, deleted_at FROM _jdr_columns WHERE table_id = ? ORDER BY position, id LIMIT 2000',
+    ),
     [tableId],
   );
   return r.rows.map((row) => ({
@@ -164,12 +166,39 @@ export function list(engine) {
 }
 
 /**
+ * 테이블 하나(열 포함). 없으면 null. 창 질의처럼 자주 부르는 경로가 목록 전체를 읽지 않게 한다.
+ * @param {Engine} engine
+ * @param {string} tableId
+ * @returns {TableInfo | null}
+ */
+export function get(engine, tableId) {
+  const r = engine.exec(
+    engine.prepareCached(
+      'SELECT id, name, position, created_at, fts_enabled, strict FROM _jdr_tables WHERE id = ? LIMIT 1',
+    ),
+    [tableId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  const id = String(row[0]);
+  return {
+    id,
+    name: String(row[1]),
+    position: Number(row[2]),
+    createdAt: String(row[3]),
+    ftsEnabled: Number(row[4]) === 1,
+    strict: Number(row[5]) === 1,
+    columns: listColumns(engine, id),
+  };
+}
+
+/**
  * @param {Engine} engine
  * @param {string} tableId
  * @returns {TableInfo}
  */
-function requireTable(engine, tableId) {
-  const found = list(engine).find((t) => t.id === tableId);
+export function requireTable(engine, tableId) {
+  const found = get(engine, tableId);
   if (!found) {
     throw new AppError('E_DB_QUERY', 'table not found', { detail: { tableId } });
   }

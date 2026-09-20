@@ -14,6 +14,7 @@ import * as filesystem from './io/filesystem.js';
 import { openIdb } from './io/idb.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
+import { mountGridHost } from './ui/grid/grid.js';
 import { mountSidebar } from './ui/sidebar.js';
 import { mountStatusbar } from './ui/statusbar.js';
 import { mountToasts } from './ui/toast.js';
@@ -29,6 +30,7 @@ import { AppError, toAppError } from './util/errors.js';
 /** @typedef {import('./ui/toast.js').Toasts} Toasts */
 /** @typedef {import('./app/store.js').Store} Store */
 /** @typedef {import('./io/idb.js').Idb} Idb */
+/** @typedef {import('./ui/grid/grid.js').GridHost} GridHost */
 
 /** IDB `settings`에서 이 기기 이름(`saved_by`)을 두는 키. */
 const DEVICE_NAME_KEY = 'device_name';
@@ -38,6 +40,7 @@ const DEVICE_NAME_KEY = 'device_name';
  * @property {HTMLElement} toolbarHost
  * @property {HTMLElement} body 사이드바와 메인 영역을 담는 가로 배치 컨테이너
  * @property {HTMLElement} main
+ * @property {HTMLElement} welcome 테이블을 고르기 전에 보이는 제목·설명 블록
  * @property {Statusbar} statusbar
  * @property {Toasts} toasts
  */
@@ -64,7 +67,10 @@ function mount(root) {
   subtitle.className = 'jdr-app__subtitle';
   subtitle.textContent = t('app.subtitle');
 
-  main.append(title, subtitle);
+  const welcome = document.createElement('div');
+  welcome.className = 'jdr-app__welcome';
+  welcome.append(title, subtitle);
+  main.append(welcome);
   const body = document.createElement('div');
   body.className = 'jdr-app__body';
   body.append(main);
@@ -72,7 +78,7 @@ function mount(root) {
 
   const statusbar = mountStatusbar(root, { version: __JDR_VERSION__ });
   const toasts = mountToasts(root);
-  return { toolbarHost, body, main, statusbar, toasts };
+  return { toolbarHost, body, main, welcome, statusbar, toasts };
 }
 
 /**
@@ -210,6 +216,8 @@ async function start(shell) {
   let tabLockAvailable = false;
   /** @type {import('./io/autosave.js').Autosave | null} */
   let journal = null;
+  /** @type {GridHost | null} */
+  let gridHost = null;
 
   if (__JDR_TEST__) {
     /** @type {Promise<{ transportKind: string, sqliteVersion: string }>} */
@@ -290,6 +298,8 @@ async function start(shell) {
           const s = await ready;
           return s.client.call('engine.exec', { sql });
         },
+        /** 열린 그리드의 렌더·질의 통계(Step 4 성능 측정용). 그리드가 없으면 null. */
+        grid: () => (gridHost ? gridHost.stats() : null),
       }),
       configurable: false,
       writable: false,
@@ -327,6 +337,11 @@ async function start(shell) {
     toasts: shell.toasts,
   });
   shell.body.prepend(sidebar.el);
+  gridHost = mountGridHost(shell.main, {
+    store: active,
+    client: session.client,
+    toasts: shell.toasts,
+  });
 
   /** @param {BeforeUnloadEvent} ev */
   const onBeforeUnload = (ev) => {
@@ -342,6 +357,7 @@ async function start(shell) {
     shell.statusbar.setNote(
       s.readOnly !== 'none' ? 'status.readOnly' : idb ? null : 'status.noIdb',
     );
+    shell.welcome.hidden = s.currentTableId !== null;
   });
 
   await active.newDatabase({ force: true });

@@ -23,6 +23,7 @@
     "scripts/**/*.mjs",
     "test/**/*.js",
     "playwright.config.js",
+    "playwright.perf.config.js",
     "eslint.config.js"
   ],
   "exclude": ["node_modules", "dist", "vendor/*.mjs"]

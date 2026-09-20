@@ -536,3 +536,75 @@ test('db.snapshot: 쓰기 op가 도는 중의 저장은 E_DB_BUSY이고 DB를 �
   assert.equal(isExclusiveOp('db.close'), true);
   client.close();
 });
+
+test('query.window / query.count / query.row: 창 질의 op (Step 4)', async () => {
+  const { client } = await readyClient();
+  const { tableId } = await client.call('schema.create', { name: '고객' });
+  const name = (await client.call('schema.addColumn', { tableId, name: '이름', type: 'text' }))
+    .columnId;
+  const body = (await client.call('schema.addColumn', { tableId, name: '본문', type: 'longtext' }))
+    .columnId;
+  const long = '나'.repeat(300);
+  await client.call('command.apply', {
+    cmd: {
+      type: 'test.insert',
+      tableId,
+      do: [
+        {
+          sql: `INSERT INTO "${tableId}" ("${name}", "${body}") VALUES (?, ?)`,
+          params: ['하나', long],
+        },
+        {
+          sql: `INSERT INTO "${tableId}" ("${name}", "${body}") VALUES (?, ?)`,
+          params: ['둘', null],
+        },
+      ],
+      undo: [],
+      summary: 'insert',
+    },
+  });
+  const window = await client.call('query.window', {
+    tableId,
+    viewSpec: {},
+    offset: 0,
+    limit: 200,
+    seq: 7,
+  });
+  assert.equal(window.seq, 7, '요청 순번을 그대로 돌려준다');
+  assert.deepEqual(window.columnIds, [name, body]);
+  assert.equal(window.rows.length, 2);
+  assert.equal(window.rows[0]?.cells[1], long.slice(0, 256));
+  assert.deepEqual(window.rows[0]?.lengths, [null, 300]);
+  assert.ok(typeof window.elapsedMs === 'number' && window.elapsedMs >= 0);
+
+  assert.deepEqual(await client.call('query.count', { tableId, viewSpec: {} }), { count: 2 });
+
+  const full = await client.call('query.row', { tableId, rowId: 1, colIds: [body] });
+  assert.deepEqual(full, { row: { id: 1, cells: { [body]: long } } });
+  assert.deepEqual(await client.call('query.row', { tableId, rowId: 99 }), { row: null });
+
+  // 삭제된 테이블: E_DB_QUERY(그리드는 빈 상태로 그리고 사이드바로 복귀).
+  await client.call('schema.drop', { tableId });
+  await assert.rejects(
+    client.call('query.window', { tableId, viewSpec: {}, offset: 0, limit: 200, seq: 8 }),
+    (err) =>
+      err instanceof AppError && err.code === 'E_DB_QUERY' && /table not found/.test(err.message),
+  );
+  await assert.rejects(
+    client.call('query.window', {
+      tableId: 't_00000000',
+      viewSpec: {},
+      offset: 0,
+      limit: 20000,
+      seq: 1,
+    }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+  );
+  client.close();
+});
+
+test('query.*는 읽기라 배타 op가 아니고, 쓰기 op 도중에도 허용된다', () => {
+  assert.equal(isExclusiveOp('query.window'), false);
+  assert.equal(isExclusiveOp('query.count'), false);
+  assert.equal(isExclusiveOp('query.row'), false);
+});

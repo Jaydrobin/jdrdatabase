@@ -9,6 +9,7 @@
 import { AppError, serializeError } from '../util/errors.js';
 import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
+import * as query from './query.js';
 import * as tables from './tables.js';
 import {
   adoptExternal,
@@ -34,6 +35,9 @@ import {
 /** @typedef {import('./values.js').LogicalType} LogicalType */
 /** @typedef {import('./values.js').ColumnOptions} ColumnOptions */
 /** @typedef {import('./values.js').CoercePolicy} CoercePolicy */
+/** @typedef {import('./query.js').ViewSpec} ViewSpec */
+/** @typedef {import('./query.js').WindowRow} WindowRow */
+/** @typedef {import('./query.js').FullRow} FullRow */
 
 /**
  * `db.open`·`schema.adopt`의 결과.
@@ -74,6 +78,9 @@ import {
  *   'schema.restoreColumn': { args: { tableId: string, columnId: string }, result: { cmd: Command } },
  *   'schema.changeColumnType': { args: { tableId: string, columnId: string, type: LogicalType, policy?: CoercePolicy, options?: ColumnOptions | null }, result: { columnId: string, cmd: Command, result: ApplyResult } },
  *   'command.apply': { args: { cmd: Command, direction?: Direction }, result: ApplyResult },
+ *   'query.window': { args: { tableId: string, viewSpec: ViewSpec, offset: number, limit: number, seq: number }, result: { rows: WindowRow[], columnIds: string[], seq: number, elapsedMs: number } },
+ *   'query.count': { args: { tableId: string, viewSpec: ViewSpec }, result: { count: number } },
+ *   'query.row': { args: { tableId: string, rowId: number, colIds?: string[] }, result: { row: FullRow | null } },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -174,6 +181,28 @@ export function createDispatcher(options) {
   let appVersion = '0.0.0';
   /** @type {Map<number, { op: string, controller: AbortController }>} */
   const inflight = new Map();
+  /**
+   * 쓰기 op가 끝날 때마다 오르는 일련번호. `query.count`의 결과를 이 번호와 함께 캐시해, 쓰기가 없는
+   * 동안의 창 질의가 행 수를 다시 세지 않고(30만 행에서 35 ms) id 연속 여부를 판정할 수 있게 한다.
+   */
+  let writeSerial = 0;
+  /** @type {Map<string, { serial: number, count: number }>} */
+  const countCache = new Map();
+
+  /**
+   * 테이블의 행 수. 마지막 쓰기 뒤에 센 값이 있으면 그것을 쓴다.
+   * @param {Engine} active
+   * @param {TableInfo} table
+   * @param {ViewSpec} viewSpec
+   * @returns {number}
+   */
+  function countRows(active, table, viewSpec) {
+    const cached = countCache.get(table.id);
+    if (cached && cached.serial === writeSerial) return cached.count;
+    const count = query.count(active, table, viewSpec);
+    countCache.set(table.id, { serial: writeSerial, count });
+    return count;
+  }
 
   /** @returns {Engine} */
   function requireEngine() {
@@ -305,6 +334,38 @@ export function createDispatcher(options) {
       });
     },
 
+    'query.window': async (args) => {
+      const active = requireEngine();
+      const table = tables.requireTable(active, args.tableId);
+      const seq = typeof args.seq === 'number' ? args.seq : 0;
+      const viewSpec = args.viewSpec ?? {};
+      const result = query.fetchWindow(
+        active,
+        table,
+        viewSpec,
+        { offset: args.offset, limit: args.limit },
+        { count: countRows(active, table, viewSpec) },
+      );
+      return { ...result, seq };
+    },
+
+    'query.count': async (args) => {
+      const active = requireEngine();
+      const table = tables.requireTable(active, args.tableId);
+      return { count: countRows(active, table, args.viewSpec ?? {}) };
+    },
+
+    'query.row': async (args) => {
+      const active = requireEngine();
+      const table = tables.requireTable(active, args.tableId);
+      if (typeof args.rowId !== 'number' || !Number.isInteger(args.rowId)) {
+        throw new AppError('E_DB_QUERY', 'rowId must be an integer', {
+          detail: { rowId: args.rowId },
+        });
+      }
+      return { row: query.fetchRow(active, table, args.rowId, args.colIds ?? []) };
+    },
+
     'db.close': async () => {
       await requireEngine().close();
       return null;
@@ -318,6 +379,16 @@ export function createDispatcher(options) {
   function isOp(op) {
     return Object.prototype.hasOwnProperty.call(handlers, op);
   }
+
+  /** 행 수 캐시를 무효화하지 않아도 되는 op: 읽기와, 메타만 쓰는 `db.snapshot`. */
+  const READ_OPS = new Set([
+    'engine.init',
+    'schema.list',
+    'query.window',
+    'query.count',
+    'query.row',
+    'db.snapshot',
+  ]);
 
   /**
    * 6장 규칙: db.open 중에는 모든 요청이 E_DB_BUSY, 배타 op끼리는 E_DB_BUSY, query.*는 언제나 허용.
@@ -369,12 +440,15 @@ export function createDispatcher(options) {
         handlers[op]
       );
       const returned = await handler(request.args, { signal: controller.signal, progress });
+      // 쓰기 op 뒤에는 행 수 캐시가 낡는다. 실패한 쓰기도 롤백 전 상태를 단정할 수 없어 catch에서도 올린다.
+      if (!READ_OPS.has(op)) writeSerial += 1;
       if (hasTransfer(returned)) {
         post({ id, ok: true, result: returned.result }, returned.transfer);
       } else {
         post({ id, ok: true, result: returned });
       }
     } catch (err) {
+      if (typeof op === 'string' && !READ_OPS.has(op)) writeSerial += 1;
       post({ id, ok: false, error: serializeError(err) });
     } finally {
       inflight.delete(id);
