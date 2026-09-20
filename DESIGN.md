@@ -147,7 +147,7 @@
 
 - 그리드는 `[첫 가시 행 - 버퍼, 마지막 가시 행 + 버퍼]` 범위를 `SELECT ... ORDER BY <사용자 정렬>, id LIMIT n OFFSET m`으로 요청한다.
 - `OFFSET m`은 rowid b-tree의 잎 셀을 m개 걸어야 하므로 비용이 m에 비례한다. 세션 C 실측(30만 행, 장문 2열, 약 300 MB): OFFSET 0에서 10 ms, 15만에서 28 ms, 29만 9,800에서 50~60 ms로 8장 예산(50 ms)을 끝부분에서 넘는다. 그래서 정렬·필터가 없는 기본 뷰에서는 id가 빈틈없이 연속일 때(`max(id) - min(id) + 1 = count`, 가져오기·추가만 겪은 테이블) `WHERE id >= min + m ORDER BY id LIMIT n`으로 O(log n) 탐색을 쓴다(실측 7~12 ms). 행 삭제로 연속이 깨지면 OFFSET으로 돌아가며, 그 경우의 끝부분 지연은 R6의 대응(정렬 열 인덱스, keyset 페이징)으로 남긴다. 연속 판정에 쓰는 행 수는 Worker가 쓰기 op 일련번호와 함께 캐시한다(`count(*)`는 30만 행에서 35 ms). `min`·`max`는 따로 묻는다(한 문장에 둘을 넣으면 SQLite가 전체 스캔을 한다).
-- 블록 크기 200행의 LRU 캐시(최대 50블록)를 두고, 편집·정렬·필터·가져오기 후에는 해당 테이블 캐시를 전부 무효화한다. 같은 테이블의 데이터 변경(편집·되돌리기)에 따른 무효화는 블록을 버리지 않고 낡은 것으로 표시해 다시 요청하며, 새 응답이 올 때까지 옛 행을 그대로 그린다(셀이 비었다 채워지는 깜빡임 방지). 테이블 전환은 블록을 버린다.
+- 블록 크기 200행의 LRU 캐시(최대 50블록)를 두고, 편집·정렬·필터·가져오기 후에는 해당 테이블 캐시를 전부 무효화한다. 같은 테이블의 데이터 변경(편집·되돌리기)에 따른 무효화는 블록을 버리지 않고 낡은 것으로 표시해 다시 요청하며, 새 응답이 올 때까지 옛 행을 그대로 그린다(셀이 비었다 채워지는 깜빡임 방지). 테이블 전환은 블록을 버린다. 낡은 블록을 그리는 동안 화면의 값은 DB와 다를 수 있으므로, 그 값을 **읽어서 다시 쓰는** 경로(편집기 초기값)는 낡은 블록에서 열 때 `query.row`로 전문을 읽는다. 그리지만 하는 경로는 낡은 값을 그대로 쓴다.
 - 총 행 수는 필터 조건을 포함한 `count(*)`로 필터 변경 시 1회만 계산한다.
 - 정렬은 항상 `id`를 보조 키로 붙여 안정적으로 만든다.
 
@@ -646,7 +646,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 **산출물**: `ui/editor/inline.js`, `ui/editor/longtext.js`, `ui/grid/selection.js`, `ui/grid/clipboard.js`, `ui/grid/editing.js`, `app/history.js`, `app/commands.js`(데이터 커맨드), `app/shortcuts.js`, `styles/editor.css`, `db/query.js`(`query.rows`·`query.stats`)
 
 **주요 함수**
-- `inline.open(cell, { initialText })`, `inline.commit()`, `inline.cancel()`. `cell`은 그리드가 넘기는 `{ row, col, column, rect }`이고 편집기는 스크롤 영역 안에 그 좌표로 놓인다. 확정은 `values.validate`를 거쳐 실패하면 편집기를 닫지 않고 오류를 표시한다. 미리보기가 잘린 텍스트 셀은 `query.row`로 전문을 읽은 뒤 연다
+- `inline.open(cell, { initialText })`, `inline.commit()`, `inline.cancel()`. `cell`은 그리드가 넘기는 `{ row, col, column, rect }`이고 편집기는 스크롤 영역 안에 그 좌표로 놓인다. 확정은 `values.validate`를 거쳐 실패하면 편집기를 닫지 않고 오류를 표시한다. 미리보기가 잘린 텍스트 셀과 낡은 블록(`cache.markStale` 뒤 아직 다시 읽지 않은 블록)의 셀은 `query.row`로 전문을 읽은 뒤 연다. 캐시 값으로 열면 그 값이 확정 시 그대로 저장돼 방금 되돌린 값이 다시 적용될 수 있다(D-06). 블록이 최신이면 왕복 없이 캐시에서 연다
 - `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정). 그리드 오른쪽의 사이드 패널
 - `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`. DOM 없는 순수 상태이며 그리드가 렌더 때 읽는다
 - `clipboard.copy(range)` → TSV(`serializeTsv`), `clipboard.paste(text, anchor)` → `parseTsv` 후 복합 커맨드. 복사는 `navigator.clipboard.writeText`(범위의 전문은 `query.rows`로 읽는다), 붙여넣기는 그리드가 받는 `paste` 이벤트의 `clipboardData`다. Worker는 이를 `runBatch`로 실행한다

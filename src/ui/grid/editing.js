@@ -182,8 +182,12 @@ export function createEditingController(deps) {
       return;
     }
     let text = cellToText(column, info.value);
-    if (info.length !== null && initialText === null) {
-      // 미리보기가 잘린 텍스트 셀: 전문을 읽은 뒤 연다.
+    if ((info.length !== null || info.stale) && initialText === null) {
+      // 전문을 읽은 뒤 열어야 하는 두 경우.
+      // - 미리보기가 잘린 텍스트 셀: 캐시에 256자만 있다.
+      // - 낡은 블록의 셀(D-06): 화면은 옛 값을 그리고 있는데 DB는 이미 바뀌었을 수 있다. 그 값을
+      //   편집기에 실으면 아무것도 고치지 않고 확정하는 것만으로 되돌린 값이 다시 저장된다.
+      // 블록이 최신이면 왕복 없이 캐시에서 연다(실측: 왕복 2.2 ms, 쓰기가 도는 중이면 수백 ms).
       try {
         const old = await readOld(table.id, info.rowId, column.id);
         if (!old) {

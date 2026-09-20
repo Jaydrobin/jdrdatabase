@@ -8,6 +8,7 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { delayTransport } from './delay-transport.js';
 
 const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 
@@ -114,6 +115,7 @@ test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 720 });
+  await page.addInitScript(delayTransport);
   await page.goto(PAGE_URL);
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
 });
@@ -475,4 +477,43 @@ test('편집기는 고정 열에서도 셀을 따라간다(가로 스크롤·열
   await expect(cell(page, 0, 0)).toHaveText('고정편집');
   const rows = await hook(page).query(`SELECT count(*) FROM "${table.id}" WHERE "id" = 1`);
   expect(rows.rows[0][0]).toBe(1);
+});
+
+test('낡은 블록의 셀은 전문을 읽고 연다(되돌린 값이 다시 적용되지 않는다)', async ({ page }) => {
+  const { table, name } = await seed(page);
+  const cellValue = async () =>
+    (await hook(page).query(`SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`)).rows[0][0];
+
+  // 셀을 고친다. 단일 셀 편집은 캐시를 직접 고치므로(patchCell) 블록이 낡지 않는다.
+  await cell(page, 0, 0).click();
+  await page.keyboard.press('Enter');
+  await page.locator('.jdr-editor input').fill('바뀐값');
+  await page.keyboard.press('Enter');
+  await expect(cell(page, 0, 0)).toHaveText('바뀐값');
+  expect(await cellValue()).toBe('바뀐값');
+
+  // 되돌리기는 `markStale`로 블록을 낡게 만들고 다시 읽는다. 그 다시 읽기를 늦춰
+  // "DB는 이미 옛 값인데 화면은 아직 새 값"인 구간을 결정적으로 만든다.
+  await page.evaluate(() => {
+    /** @type {import('./delay-transport.js').DelayWindow} */ (
+      /** @type {unknown} */ (window)
+    ).__jdrDelayOp = { op: 'query.window', ms: 4000 };
+  });
+  await page.keyboard.press('Control+z');
+  await expect.poll(cellValue).toBe('이름1');
+  await expect(cell(page, 0, 0)).toHaveText('바뀐값', { timeout: 1000 });
+
+  // 이 구간에서 편집기를 열면 캐시의 '바뀐값'이 아니라 DB의 '이름1'이 실려야 한다.
+  await cell(page, 0, 0).click();
+  await page.keyboard.press('Enter');
+  const input = page.locator('.jdr-editor input');
+  await expect(input).toBeVisible();
+  await expect(input).toHaveValue('이름1');
+
+  // 아무것도 고치지 않고 확정하면 아무 일도 일어나지 않는다(되돌리기가 유지된다).
+  const before = await hook(page).history();
+  await page.keyboard.press('Enter');
+  await expect(input).toBeHidden();
+  expect(await cellValue()).toBe('이름1');
+  expect(await hook(page).history()).toEqual(before);
 });

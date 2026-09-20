@@ -231,6 +231,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {ColumnInfo} column
  * @property {SqlValue} value 미리보기(텍스트는 256자까지)
  * @property {number | null} length 미리보기가 잘렸으면 전체 문자 수
+ * @property {boolean} stale 이 행이 낡은 블록에서 왔는가(데이터가 바뀐 뒤 아직 다시 읽지 않음)
  */
 
 /**
@@ -343,6 +344,8 @@ export function createGrid(deps) {
   let dataVersion = 0;
   /** `rowAt()`이 돌려준 행의 블록 세대(할당 없이 넘기기 위한 모듈 변수). */
   let lastRowVersion = -1;
+  /** `rowAt()`이 돌려준 행이 낡은 블록에서 왔는가(같은 이유의 모듈 변수). */
+  let lastRowStale = false;
   let viewportWidth = 0;
   let viewportHeight = 0;
   let rafId = 0;
@@ -645,6 +648,7 @@ export function createGrid(deps) {
     const block = Math.floor(rowIndex / BLOCK_ROWS);
     const cached = cache.get(table.id, block);
     lastRowVersion = cached ? cached.version : -1;
+    lastRowStale = cached?.stale === true;
     return cached?.rows[rowIndex - block * BLOCK_ROWS] ?? null;
   }
 
@@ -1243,6 +1247,7 @@ export function createGrid(deps) {
         column,
         value: data.cells[col] ?? null,
         length: data.lengths[col] ?? null,
+        stale: lastRowStale,
       };
     },
 

@@ -7,6 +7,7 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { delayTransport } from './delay-transport.js';
 
 const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const ROWS = 5_000;
@@ -18,11 +19,7 @@ const ROWS = 5_000;
  * @property {() => { renders: number, lastRenderMs: number, queries: number, maxQueryMs: number, rowCount: number, domRows: number } | null} grid
  */
 
-/**
- * 전송 계층을 늦추는 검사용 창 속성. `beforeEach`가 거는 래퍼가 읽는다.
- * @typedef {object} DelayWindow
- * @property {{ op: string, ms: number }} [__jdrDelayOp]
- */
+/** @typedef {import('./delay-transport.js').DelayWindow} DelayWindow */
 
 /** @param {import('@playwright/test').Page} page */
 function hook(page) {
@@ -97,31 +94,7 @@ function visibleRows(page) {
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 720 });
-  // 특정 op의 도착을 늦출 수 있게 전송 계층을 감싼다. `window.__jdrDelayOp`를 세우는 검사에서만
-  // 동작하고, 세우지 않으면 아무 일도 하지 않는다.
-  await page.addInitScript(() => {
-    const w = /** @type {DelayWindow} */ (/** @type {unknown} */ (window));
-    const original =
-      /** @type {(this: Worker, message: unknown, transfer: Transferable[]) => void} */ (
-        /** @type {unknown} */ (Worker.prototype.postMessage)
-      );
-    /**
-     * @this {Worker}
-     * @param {{ op?: string }} message
-     * @param {Transferable[]} transfer
-     */
-    function patched(message, transfer) {
-      const delay = w.__jdrDelayOp;
-      if (delay && message && delay.op === message.op) {
-        setTimeout(() => original.call(this, message, transfer), delay.ms);
-        return;
-      }
-      original.call(this, message, transfer);
-    }
-    Worker.prototype.postMessage = /** @type {typeof Worker.prototype.postMessage} */ (
-      /** @type {unknown} */ (patched)
-    );
-  });
+  await page.addInitScript(delayTransport);
   await page.goto(PAGE_URL);
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
   await expect(page.locator('.jdr-grid__empty')).toHaveText(
