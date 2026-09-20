@@ -278,6 +278,41 @@ export function deleteRowRange(input) {
 }
 
 /**
+ * 스냅샷 상한을 넘는 범위를 되돌릴 수 없이 비운다(D-08). 뷰 순서(`id`)로 `offset`부터 `count`개 행의
+ * `colIds` 열을 NULL로 만든다. `deleteRowRange`와 같은 이유로 문장 하나다: 되돌릴 수 없으므로 옛 값이
+ * 필요 없고, 옛 값을 읽으려면 범위 전체를 메인 스레드로 가져와야 한다(30만 행이면 수 GB).
+ * 이미 모두 NULL인 행은 건드리지 않아 `_updated_at`이 헛돌지 않는다(되돌릴 수 있는 경로와 같다).
+ * UI가 "되돌릴 수 없는 작업"임을 확인받은 뒤에만 만든다.
+ * @param {{ tableId: string, colIds: string[], offset: number, count: number, now: string }} input
+ * @returns {Command}
+ */
+export function clearRowRange(input) {
+  if (input.colIds.length === 0) {
+    throw new AppError('E_DB_QUERY', 'clearRowRange needs at least one column', {
+      detail: { tableId: input.tableId },
+    });
+  }
+  const table = quoteIdent(input.tableId);
+  const sets = input.colIds.map((colId) => `${quoteIdent(colId)} = NULL`).join(', ');
+  const anyFilled = input.colIds.map((colId) => `${quoteIdent(colId)} IS NOT NULL`).join(' OR ');
+  return {
+    type: 'cell.clearRange',
+    tableId: input.tableId,
+    do: [
+      {
+        sql:
+          `UPDATE ${table} SET ${sets}, "_updated_at" = ? ` +
+          `WHERE "id" IN (SELECT "id" FROM ${table} ORDER BY "id" LIMIT ? OFFSET ?) AND (${anyFilled})`,
+        params: [input.now, input.count, input.offset],
+      },
+    ],
+    undo: [],
+    summary: `cell.clearRange ${input.tableId} ×${input.count}`,
+    irreversible: true,
+  };
+}
+
+/**
  * 다중 편집의 행 하나. `cells`는 바꿀 열과 옛·새 값.
  * @typedef {object} RowEdit
  * @property {number} rowId

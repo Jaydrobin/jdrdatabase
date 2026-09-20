@@ -8,11 +8,14 @@
  * - 되돌리기에 필요한 옛 값(`_updated_at` 포함)은 확정 시점에 `query.row`로 읽는다. 그리드 캐시의 값은
  *   미리보기일 수 있고, 다른 경로(되돌리기)가 그 사이 셀을 바꿨을 수도 있다.
  * - 범위 지우기·붙여넣기·행 삭제는 `query.rows`로 옛 값을 읽어 복합 커맨드 하나로 만든다(D-08).
- *   1만 행을 넘는 삭제·붙여넣기는 확인 뒤 되돌릴 수 없는 커맨드로 적용한다.
+ *   1만 행을 넘으면 확인을 받고 되돌릴 수 없는 커맨드로 적용하는데, 그때는 옛 값을 읽지 않는다.
+ *   지우기·삭제는 문장 하나(`clearRowRange`·`deleteRowRange`)이고, 붙여넣기만 덮어쓸 행의 id가
+ *   필요해 그 행들을 읽는다(붙여넣는 셀 수가 100만으로 묶여 있어 범위가 한정된다).
  * - 복사는 `navigator.clipboard.writeText`, 붙여넣기는 그리드가 받는 `paste` 이벤트다.
  */
 import {
   bulkEdit,
+  clearRowRange,
   deleteRowRange,
   deleteRows,
   editCell,
@@ -246,8 +249,22 @@ export function createEditingController(deps) {
     if (!table) return;
     const columns = grid.columns().slice(range.c0, range.c1 + 1);
     const count = range.r1 - range.r0 + 1;
-    const irreversible = count > UNDO_SNAPSHOT_MAX_ROWS;
-    if (irreversible && !(await deps.confirmIrreversible({ count }))) return;
+    if (columns.length === 0) return;
+    if (count > UNDO_SNAPSHOT_MAX_ROWS) {
+      // 되돌릴 수 없으므로 옛 값이 필요 없다. 읽으면 범위 전체가 메인 스레드로 올라온다
+      // (30만 행 × 20열이면 수 GB. 미리보기가 아니라 전문이다).
+      if (!(await deps.confirmIrreversible({ count }))) return;
+      await history.apply(
+        clearRowRange({
+          tableId: table.id,
+          colIds: columns.map((c) => c.id),
+          offset: range.r0,
+          count,
+          now: nowIso(),
+        }),
+      );
+      return;
+    }
     /** @type {RowEdit[]} */
     let edits;
     try {
@@ -271,7 +288,7 @@ export function createEditingController(deps) {
       return;
     }
     if (edits.length === 0) return;
-    await history.apply(bulkEdit({ tableId: table.id, edits, now: nowIso(), irreversible }));
+    await history.apply(bulkEdit({ tableId: table.id, edits, now: nowIso() }));
   }
 
   /** @param {CellRange} range */

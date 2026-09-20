@@ -650,7 +650,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정). 그리드 오른쪽의 사이드 패널
 - `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`. DOM 없는 순수 상태이며 그리드가 렌더 때 읽는다
 - `clipboard.copy(range)` → TSV(`serializeTsv`), `clipboard.paste(text, anchor)` → `parseTsv` 후 복합 커맨드. 복사는 `navigator.clipboard.writeText`(범위의 전문은 `query.rows`로 읽는다), 붙여넣기는 그리드가 받는 `paste` 이벤트의 `clipboardData`다. Worker는 이를 `runBatch`로 실행한다
-- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.deleteRowRange({ tableId, offset, count })`(스냅샷 상한을 넘는 삭제. `undo`가 비고 `irreversible`), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08). 배치 목록은 `commands.chunkParams`가 `runBatch` 상한 단위로 나눈다
+- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.deleteRowRange({ tableId, offset, count })`(스냅샷 상한을 넘는 삭제. `undo`가 비고 `irreversible`), `commands.clearRowRange({ tableId, colIds, offset, count, now })`(스냅샷 상한을 넘는 범위 지우기. 같은 이유로 문장 하나이며 이미 모두 NULL인 행은 건드리지 않는다), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08). 배치 목록은 `commands.chunkParams`가 `runBatch` 상한 단위로 나눈다
 - `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`. `history.apply(cmd)`는 `command.apply` → 스토어 기록 → `push`를 한 번에 한다. 스키마 op가 만든 커맨드는 스토어의 `onCommand` 알림으로 히스토리에 들어온다
 - Worker: `applyCommand(cmd)`(`BEGIN` ... `COMMIT`, 실패 시 `ROLLBACK`), `_updated_at` 갱신 트리거 대신 커맨드가 명시적으로 갱신
 
@@ -661,7 +661,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - 붙여넣기 범위가 그리드 경계를 넘는 경우: 행은 자동 추가, 열은 넘치는 만큼 무시하고 안내.
 - 붙여넣기 값이 열 타입에 맞지 않으면(정수 열에 문자 등) 붙여넣기 전체를 `E_VALUE_INVALID`로 거부하고 첫 번째 위치(행·열)를 알린다. 일부만 적용하면 사용자가 무엇이 들어갔는지 알 수 없다.
 - 붙여넣기 셀 수 상한 100만 셀. 초과 시 거부(`E_PASTE_TOO_LARGE`)하고 CSV 가져오기를 안내.
-- 되돌리기 스냅샷 상한 10,000행(D-08). 초과 삭제·붙여넣기는 확인 후 `undo`가 빈 `irreversible` 커맨드로 적용하고 히스토리를 비운다. 그때의 삭제는 `DELETE ... WHERE id IN (SELECT id ... ORDER BY id LIMIT ? OFFSET ?)` 한 문장이다.
+- 되돌리기 스냅샷 상한 10,000행(D-08). 초과 삭제·지우기·붙여넣기는 확인 후 `undo`가 빈 `irreversible` 커맨드로 적용하고 히스토리를 비운다. 그때의 삭제는 `DELETE ... WHERE id IN (SELECT id ... ORDER BY id LIMIT ? OFFSET ?)` 한 문장이고, 지우기도 같은 부분 질의를 쓰는 `UPDATE ... SET c = NULL` 한 문장이다. 되돌릴 수 없는 작업은 옛 값을 읽지 않는다 — 읽으면 범위 전체(미리보기가 아니라 전문)가 메인 스레드로 올라와 8장의 목표 규모에서 탭이 죽는다. 붙여넣기만 덮어쓸 행의 id가 필요해 그 행들을 읽으며, 붙여넣는 셀 수 상한(100만)이 그 범위를 묶는다.
 - 커맨드 실행 중 Worker 오류: 히스토리에서 제거, 캐시 무효화 후 재조회, 오류 토스트. 앱 상태와 DB 상태의 불일치를 남기지 않는다.
 - 장문 편집기 열림 상태에서 그리드 행이 삭제됨: 편집기를 닫고 안내.
 - 크기 예산: 장문 편집기 입력값이 5 MB를 넘으면 경고(저장은 허용).

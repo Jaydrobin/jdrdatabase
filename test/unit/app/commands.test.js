@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import {
   bulkEdit,
   chunkParams,
+  clearRowRange,
   deleteRowRange,
   deleteRows,
   editCell,
@@ -132,6 +133,50 @@ test('deleteRowRange: 되돌릴 수 없는 범위 삭제(스냅샷 상한 초과
   assert.throws(
     () => invert(cmd),
     (e) => e instanceof AppError && e.code === 'E_UNDO_LIMIT',
+  );
+  await engine.close();
+});
+
+test('clearRowRange: 되돌릴 수 없는 범위 지우기는 옛 값을 읽지 않고 문장 하나로 한다', async () => {
+  const { engine, table, tableId, name, age } = await setup();
+  const cmd = clearRowRange({ tableId, colIds: [name, age], offset: 0, count: 2, now: LATER });
+  assert.equal(cmd.irreversible, true);
+  assert.deepEqual(cmd.undo, []);
+  assert.equal(cmd.do.length, 1, '범위가 얼마나 크든 문장 하나다');
+  // 값은 전부 바인딩이고 SQL에는 식별자와 NULL만 들어간다.
+  const only = /** @type {{ sql: string, params: unknown[] }} */ (cmd.do[0]);
+  assert.deepEqual(only.params, [LATER, 2, 0]);
+  assert.equal(only.sql.includes('고객'), false);
+
+  await applyCommand(engine, cmd, 'do');
+  const rows = fetchRows(engine, table, {}, { offset: 0, limit: 10 });
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.cells[name] ?? null, r.cells[age] ?? null, r.updatedAt]),
+    [
+      [1, null, null, LATER],
+      // 행 2는 이름만 차 있었고 나이는 원래 NULL이었다.
+      [2, null, null, LATER],
+      // 범위 밖(행 3)은 그대로다.
+      [3, null, 30, null],
+    ],
+  );
+  await assert.rejects(
+    applyCommand(engine, cmd, 'undo'),
+    (e) => e instanceof AppError && e.code === 'E_UNDO_LIMIT',
+  );
+
+  // 이미 모두 NULL인 행은 건드리지 않아 `_updated_at`이 헛돌지 않는다.
+  const again = clearRowRange({ tableId, colIds: [name], offset: 0, count: 1, now: NOW });
+  await applyCommand(engine, again, 'do');
+  assert.equal(
+    fetchRows(engine, table, {}, { offset: 0, limit: 1 })[0]?.updatedAt,
+    LATER,
+    '비어 있던 행은 다시 쓰지 않는다',
+  );
+
+  assert.throws(
+    () => clearRowRange({ tableId, colIds: [], offset: 0, count: 1, now: NOW }),
+    (e) => e instanceof AppError && e.code === 'E_DB_QUERY',
   );
   await engine.close();
 });
