@@ -183,6 +183,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {HTMLElement} el
  * @property {(container: HTMLElement, options: { table: TableInfo, viewSpec: ViewSpec, view: TableViewState }) => void} mount 컨테이너에 붙이고 테이블을 연다. 이미 붙어 있으면 테이블만 바꾼다
  * @property {(view: TableViewState) => void} applyView 열 너비·고정 열 갱신
+ * @property {(table: TableInfo) => boolean} applyTable 보이는 열 구성이 그대로면 테이블 메타만 갈아 끼우고 데이터를 다시 읽는다(스크롤·커서·열 너비 유지). 구성이 달라 다시 마운트해야 하면 false
  * @property {(n: number) => void} setRowCount
  * @property {(scrollTop: number, viewportHeight: number) => RowRange} computeRange
  * @property {(range?: RowRange) => void} render
@@ -860,6 +861,21 @@ export function createGrid(deps) {
       scheduleRender();
     },
 
+    applyTable(next) {
+      if (!mounted || !table || next.id !== table.id) return false;
+      const nextColumns = visibleColumns(next, viewSpec);
+      if (nextColumns.length !== columns.length) return false;
+      for (let i = 0; i < nextColumns.length; i += 1) {
+        if (nextColumns[i]?.id !== columns[i]?.id) return false;
+      }
+      table = next;
+      columns = nextColumns;
+      buildHeader();
+      // 목록을 다시 읽은 이유(스키마 op, 저널 재생)가 행도 바꿨을 수 있으므로 데이터는 버린다.
+      grid.invalidate();
+      return true;
+    },
+
     setRowCount(n) {
       rowCount = Math.max(0, Math.trunc(n));
       stats.rowCount = rowCount;
@@ -1003,6 +1019,8 @@ export function mountGridHost(container, deps) {
       return;
     }
     showEmpty(null);
+    // 열 이름만 바뀐 경우까지 다시 마운트하면 스크롤 위치·활성 셀·열 너비가 처음으로 돌아간다.
+    if (gridMounted && openTableId === table.id && grid.applyTable(table)) return;
     grid.mount(el, { table, viewSpec: {}, view: store.getViewState(table.id) });
     gridMounted = true;
     openTableId = table.id;

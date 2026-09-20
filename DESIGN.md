@@ -616,6 +616,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **주요 함수**
 - `grid.mount(container, { tableId, viewSpec })`, `grid.setRowCount(n)`, `grid.computeRange(scrollTop, viewportHeight)` → `{ start, end }`, `grid.render(range)`, `grid.invalidate()`, `grid.scrollToRow(i)`, `grid.scrollToCell(row, col)`
+- `grid.applyTable(table)`: 테이블 목록을 다시 읽었을 때(`tables:changed`) 그리드 호스트가 먼저 부른다. 같은 테이블이고 보이는 열의 id 목록이 순서까지 같으면 메타만 갈아 끼우고 머리글을 다시 그린 뒤 `invalidate()`로 데이터만 버리고 `true`를 돌려준다(스크롤 위치·활성 셀·열 너비 유지). 열이 늘거나 줄거나 순서가 바뀌었으면 `false`이고 호스트가 `mount()`로 다시 연다. 이름 바꾸기·저널 재생처럼 열 구성이 그대로인 갱신에서 사용자가 보던 위치를 잃지 않게 하는 것이 목적이다
 - 행 풀: `acquireRow()`, `releaseRow()`, 열 풀 동일
 - `cells.render(el, column, value, meta)`(타입별), `cells.preview(text, length)`
 - `query.buildWindowSQL(table, columns, viewSpec, { offset, limit })`, `query.count(table, viewSpec)`, `query.fetchRow(table, id)`(편집용 전문 로드)

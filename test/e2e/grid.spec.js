@@ -343,3 +343,60 @@ test('테이블을 오가도 활성 셀은 하나뿐이다', async ({ page }) =>
   await expect(page.locator('.jdr-grid__cell[aria-selected="true"]')).toHaveCount(1);
   await expect(active).toHaveText('이름1');
 });
+
+test('열 구성이 그대로면 목록을 다시 읽어도 스크롤·활성 셀·열 너비가 남는다', async ({ page }) => {
+  await seed(page);
+  const scroller = page.locator('.jdr-grid__scroller');
+  const header = page.locator('.jdr-grid__hcell[data-col="0"]');
+
+  // 열 너비를 바꾸고, 활성 셀을 옮기고, 아래로 스크롤한다.
+  const box = await header.boundingBox();
+  if (!box) throw new Error('header box missing');
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + 50, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const widened = Math.round((await header.boundingBox())?.width ?? 0);
+  expect(widened).toBeGreaterThan(Math.round(box.width) + 30);
+
+  await page.locator('.jdr-grid__row[data-row="1"] .jdr-grid__cell[data-col="1"]').click();
+  await expect(page.locator('.jdr-grid__cell--active')).toHaveText('6');
+
+  await scroller.evaluate((e) => {
+    e.scrollTop = 40_000;
+  });
+  await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(40_000);
+
+  // 테이블 이름만 바꾸면 보이는 열 구성은 그대로다. 목록을 다시 읽어도 뷰는 유지된다.
+  await page.locator('[data-action="table-rename"]').click();
+  await page.locator('.jdr-dialog input').fill('고객목록');
+  await page.locator('.jdr-dialog').getByRole('button', { name: '확인' }).click();
+  await expect(page.locator('.jdr-sidebar__table-name', { hasText: '고객목록' })).toBeVisible();
+
+  await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(40_000);
+  await expect.poll(async () => Math.round((await header.boundingBox())?.width ?? 0)).toBe(widened);
+
+  // 활성 셀은 가상화되어 화면 밖에서는 DOM에 없지만, 돌아오면 그대로다.
+  await expect(page.locator('.jdr-grid__cell--active')).toHaveCount(0);
+  await scroller.evaluate((e) => {
+    e.scrollTop = 0;
+  });
+  await expect(page.locator('.jdr-grid__cell--active')).toHaveText('6');
+  await scroller.evaluate((e) => {
+    e.scrollTop = 40_000;
+  });
+  await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(40_000);
+
+  // 열 이름을 바꾸면 머리글은 새 이름으로 갱신되고, 스크롤은 그대로다.
+  await page.locator('.jdr-sidebar__column-name', { hasText: '이름' }).click();
+  await page.locator('[data-action="column-rename"]').first().click();
+  await page.locator('.jdr-dialog input').fill('성명');
+  await page.locator('.jdr-dialog').getByRole('button', { name: '확인' }).click();
+  await expect(header).toHaveText('성명');
+  await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(40_000);
+
+  // 열을 더하면 구성이 달라지므로 다시 마운트한다(스크롤은 처음으로 돌아간다).
+  await addColumn(page, '비고', '텍스트');
+  await expect(page.locator('.jdr-grid__hcell[data-col="5"]')).toHaveText('비고');
+  await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(0);
+});
