@@ -1,0 +1,62 @@
+/* 기본 레이아웃. 클래스 이름은 jdr-<블록>__<요소>--<변형> (CLAUDE.md 5.5). */
+:root {
+  --jdr-font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic',
+    'Noto Sans KR', sans-serif;
+  --jdr-fg: #1f2328;
+  --jdr-fg-muted: #656d76;
+  --jdr-bg: #ffffff;
+  --jdr-bg-muted: #f6f8fa;
+  --jdr-border: #d0d7de;
+  --jdr-danger: #cf222e;
+  --jdr-statusbar-height: 28px;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: var(--jdr-font);
+  font-size: 14px;
+  color: var(--jdr-fg);
+  background: var(--jdr-bg);
+}
+
+.jdr-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.jdr-app__main {
+  flex: 1 1 auto;
+  padding: 24px;
+  overflow: auto;
+}
+
+.jdr-app__title {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.jdr-app__subtitle {
+  margin: 0;
+  color: var(--jdr-fg-muted);
+}
+
+.jdr-statusbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  height: var(--jdr-statusbar-height);
+  padding: 0 12px;
+  border-top: 1px solid var(--jdr-border);
+  background: var(--jdr-bg-muted);
+  color: var(--jdr-fg-muted);
+  font-size: 12px;
+}
+
+.jdr-statusbar__item--danger {
+  color: var(--jdr-danger);
+}
