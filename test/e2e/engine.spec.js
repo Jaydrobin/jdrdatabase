@@ -78,3 +78,17 @@ test('FTS5 trigram 부분 일치가 Blob Worker 안에서 동작한다', async (
   expect(result.transportKind).toBe('worker');
   expect(result.rows).toEqual([['서울특별시 강남구']]);
 });
+
+test('엔진 기동 전에 실패해도 잠금 화면이 뜬다', async ({ page }) => {
+  // 임베드 블록 읽기는 엔진 기동보다 먼저 일어난다. 이 경로가 try 밖에 있으면 미처리 거부가 되어
+  // 화면이 "시작 중…"에 멈춘 채 아무 안내도 나오지 않는다.
+  await page.addInitScript(() => {
+    const original = document.getElementById.bind(document);
+    document.getElementById = (id) => (id === 'jdr-wasm-b64' ? null : original(id));
+  });
+  await page.goto(PAGE_URL);
+  await expect(page.locator('.jdr-lock')).toHaveAttribute('role', 'alert');
+  await expect(page.locator('.jdr-lock__title')).toHaveText('앱을 시작할 수 없습니다');
+  await expect(page.locator('.jdr-lock__detail')).toContainText('E_UNKNOWN');
+  await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('앱을 시작할 수 없습니다');
+});

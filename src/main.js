@@ -150,12 +150,11 @@ async function startEngine(opts) {
   }
 }
 
-async function boot() {
-  const root = document.getElementById('app');
-  if (!root) throw new Error('#app 루트 요소가 없습니다.');
-  document.title = t('app.title');
-  const shell = mount(root);
-
+/**
+ * 셸을 띄운 뒤의 모든 시작 작업. 여기서 던지는 오류는 `boot()`가 잠금 화면으로 바꾼다.
+ * @param {Shell} shell
+ */
+async function start(shell) {
   const mode = detectMode();
   const workerSource = readEmbedded('jdr-worker-src');
   const wasmB64 = readEmbedded('jdr-wasm-b64');
@@ -164,15 +163,19 @@ async function boot() {
   const ready = startEngine({ mode, transport: 'auto', workerSource, wasmB64 });
 
   if (__JDR_TEST__) {
+    /** @type {Promise<{ transportKind: string, sqliteVersion: string }>} */
+    const readyInfo = ready.then((s) => ({
+      transportKind: s.transportKind,
+      sqliteVersion: s.sqliteVersion,
+    }));
+    // 훅을 아무도 기다리지 않을 때의 미처리 거부를 막는다. 훅 사용자는 readyInfo를 그대로 받는다.
+    readyInfo.catch(() => {});
     // 테스트 빌드 전용 훅(CLAUDE.md 6장). 릴리스 빌드에서는 define으로 제거된다.
     Object.defineProperty(window, '__jdrTest', {
       value: Object.freeze({
         version: __JDR_VERSION__,
         mode,
-        ready: ready.then((s) => ({
-          transportKind: s.transportKind,
-          sqliteVersion: s.sqliteVersion,
-        })),
+        ready: readyInfo,
         /**
          * 지정한 전송 계층으로 별도 세션을 띄워 SQL을 실행하고 마지막 문장의 결과를 돌려준다.
          * 문장 목록을 주면 같은 세션에서 차례로 실행한다(E2E의 FTS5 준비처럼 DDL → INSERT → SELECT).
@@ -200,16 +203,26 @@ async function boot() {
     });
   }
 
+  const session = await ready;
+  shell.status.textContent = t('status.ready');
+  shell.mode.textContent = t(
+    session.transportKind === 'worker' ? 'status.mode.worker' : 'status.mode.inline',
+  );
+  shell.engine.textContent = t('status.engine', { version: session.sqliteVersion });
+  if (session.fallbackError) {
+    console.warn(`${session.fallbackError.code}: ${session.fallbackError.message}`);
+  }
+}
+
+async function boot() {
+  const root = document.getElementById('app');
+  if (!root) throw new AppError('E_UNKNOWN', 'root element #app is missing');
+  document.title = t('app.title');
+  const shell = mount(root);
+  // 셸을 띄운 뒤의 실패는 모두 잠금 화면으로 간다. 기능 감지·임베드 블록 읽기처럼
+  // 엔진 기동 전에 던지는 것도 포함된다(이전에는 try 밖이라 화면이 "시작 중…"에 멈췄다).
   try {
-    const session = await ready;
-    shell.status.textContent = t('status.ready');
-    shell.mode.textContent = t(
-      session.transportKind === 'worker' ? 'status.mode.worker' : 'status.mode.inline',
-    );
-    shell.engine.textContent = t('status.engine', { version: session.sqliteVersion });
-    if (session.fallbackError) {
-      console.warn(`${session.fallbackError.code}: ${session.fallbackError.message}`);
-    }
+    await start(shell);
   } catch (err) {
     const appErr = toAppError(err);
     console.error(appErr);
@@ -217,4 +230,7 @@ async function boot() {
   }
 }
 
-void boot();
+// 잠금 화면조차 띄울 수 없는 경우(#app 없음, mount 실패)를 미처리 거부로 남기지 않는다.
+void boot().catch((err) => {
+  console.error(toAppError(err));
+});
