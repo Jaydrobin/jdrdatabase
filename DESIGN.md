@@ -867,7 +867,9 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다.
 
-규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `import.run`, `search.enable`)는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`와 `schema.list`는 언제나 허용된다(읽기).
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `import.run`, `search.enable`)와 `db.snapshot`·`db.close`는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`와 `schema.list`는 언제나 허용된다(읽기).
+
+`db.snapshot`·`db.close`가 배타인 이유: 둘 다 트랜잭션 상태를 전제로 한다(스냅샷은 트랜잭션 밖에서만 뜰 수 있고, 닫기는 연결을 없앤다). 쓰기 op는 청크 사이에서 이벤트 루프로 돌아오므로 그 틈에 저장 요청이 끼어들 수 있고, 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨진다. 파일에는 아무것도 쓰이지 않았는데 `revision`·`saved_by`만 올라간 DB가 남는 것이 최악이다. 긴 작업 중의 저장은 큐에 넣지 않고 거절하며, UI가 "작업이 끝난 뒤 다시 저장하세요"로 안내한다.
 
 ---
 

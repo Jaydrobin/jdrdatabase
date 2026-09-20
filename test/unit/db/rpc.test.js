@@ -227,7 +227,13 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
   await opening;
   const opened = out.find((m) => 'id' in m && m.id === 2);
   assert.ok(opened && 'ok' in opened && opened.ok === true);
-  assert.deepEqual([...EXCLUSIVE_OPS].sort(), ['command.apply', 'import.run', 'search.enable']);
+  assert.deepEqual([...EXCLUSIVE_OPS].sort(), [
+    'command.apply',
+    'db.close',
+    'db.snapshot',
+    'import.run',
+    'search.enable',
+  ]);
   assert.equal(isExclusiveOp('schema.create'), true);
   assert.equal(isExclusiveOp('schema.list'), false);
   assert.equal(isExclusiveOp('query.window'), false);
@@ -489,5 +495,44 @@ test('취소: 메시지가 태스크로 배달되는 Worker 모드에서도 변�
     columns.filter((c) => c.deletedAt === null).map((c) => c.id),
     [columnId],
   );
+  client.close();
+});
+
+test('db.snapshot: 쓰기 op가 도는 중의 저장은 E_DB_BUSY이고 DB를 건드리지 않는다', async () => {
+  // 저장이 배타가 아니면 진행 중인 쓰기의 트랜잭션 안으로 끼어든다. 중첩 SAVEPOINT 이름이
+  // 겹쳐 롤백이 깨지고(`E_DB_QUERY: rollback failed after error`), 파일에 아무것도 쓰이지 않았는데
+  // revision·saved_by만 올라간 DB가 남는다.
+  const { client } = await readyClient();
+  const { tableId } = await client.call('schema.create', { name: '표' });
+  const { columnId } = await client.call('schema.addColumn', {
+    tableId,
+    name: '수',
+    type: 'text',
+  });
+  /** @type {import('../../../src/db/command.js').Statement[]} */
+  const inserts = [];
+  for (let i = 1; i <= 12_000; i += 1) {
+    inserts.push({
+      sql: `INSERT INTO "${tableId}" ("id", "${columnId}") VALUES (?, ?)`,
+      params: [i, String(i)],
+    });
+  }
+  await client.call('command.apply', {
+    cmd: { type: 'seed', tableId, summary: 'seed', do: inserts, undo: [] },
+  });
+  const before = (await client.call('db.snapshot', {})).meta;
+
+  const converting = client.call('schema.changeColumnType', { tableId, columnId, type: 'integer' });
+  await assert.rejects(
+    client.call('db.snapshot', { bumpRevision: true, savedBy: '기기' }),
+    (err) => err instanceof AppError && err.code === 'E_DB_BUSY',
+  );
+  await converting;
+
+  const after = (await client.call('db.snapshot', {})).meta;
+  assert.equal(after.revision, before.revision, '저장하지 않았으므로 revision은 그대로');
+  assert.equal(after.saved_by, undefined);
+  assert.equal(isExclusiveOp('db.snapshot'), true);
+  assert.equal(isExclusiveOp('db.close'), true);
   client.close();
 });

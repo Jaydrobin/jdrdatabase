@@ -101,8 +101,21 @@ import {
 /** 진행 이벤트 최소 간격(ms). CLAUDE.md 5.4. */
 export const PROGRESS_INTERVAL_MS = 250;
 
-/** 서로 배타적인 쓰기 op. 동시에 오면 `E_DB_BUSY`. `db.open`은 모든 op와 배타적이다. */
-export const EXCLUSIVE_OPS = new Set(['command.apply', 'import.run', 'search.enable']);
+/**
+ * 서로 배타적인 op. 동시에 오면 `E_DB_BUSY`. `db.open`은 모든 op와 배타적이다.
+ *
+ * `db.snapshot`·`db.close`는 쓰기는 아니지만 여기 있어야 한다. 둘 다 트랜잭션 상태를 전제로
+ * 하는데(스냅샷은 트랜잭션 밖에서만, 닫기는 연결을 없앤다), 쓰기 op가 청크 사이에서 이벤트
+ * 루프로 돌아오므로 그 틈에 끼어들 수 있다. 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨지고,
+ * 파일에는 아무것도 쓰이지 않았는데 revision만 오른 DB가 남는다.
+ */
+export const EXCLUSIVE_OPS = new Set([
+  'command.apply',
+  'import.run',
+  'search.enable',
+  'db.snapshot',
+  'db.close',
+]);
 
 /**
  * 6장 규칙의 배타 여부. `schema.*`는 `schema.list`를 뺀 전부가 쓰기다.
