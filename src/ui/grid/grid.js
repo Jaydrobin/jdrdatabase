@@ -558,6 +558,20 @@ export function createGrid(deps) {
   }
 
   /**
+   * 응답의 열 목록이 지금 그리는 열 목록과 같은지. 값은 열 이름이 아니라 위치로 맞추므로(`cells[j]`를
+   * `columns[j]`에 꽂는다) 순서까지 같아야 한다.
+   * @param {string[]} ids
+   * @returns {boolean}
+   */
+  function sameColumns(ids) {
+    if (!Array.isArray(ids) || ids.length !== columns.length) return false;
+    for (let i = 0; i < columns.length; i += 1) {
+      if (ids[i] !== columns[i]?.id) return false;
+    }
+    return true;
+  }
+
+  /**
    * 범위가 걸친 블록 중 캐시에 없고 요청 중도 아닌 블록을 요청한다.
    * @param {RowRange} range
    */
@@ -593,6 +607,10 @@ export function createGrid(deps) {
       stats.maxQueryMs = Math.max(stats.maxQueryMs, result.elapsedMs);
       // 테이블이 바뀌었거나 무효화된 뒤의 응답은 버린다.
       if (gen !== generation || result.seq !== mySeq) return;
+      // Worker는 질의 시점의 메타로 열을 다시 고른다. 스키마가 바뀐 뒤 그리드가 다시 마운트되기 전에
+      // 도착한 응답은 다른 열 목록으로 만들어졌을 수 있고, 그대로 그리면 값이 남의 열 밑에 들어간다.
+      // 버린 블록은 캐시에 없으므로 목록이 맞춰진 뒤의 렌더가 다시 요청한다.
+      if (!sameColumns(result.columnIds)) return;
       cache.put(tableId, { block, rows: result.rows, columnIds: result.columnIds });
       scheduleRender();
     } catch (err) {

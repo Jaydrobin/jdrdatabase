@@ -18,6 +18,12 @@ const ROWS = 5_000;
  * @property {() => { renders: number, lastRenderMs: number, queries: number, maxQueryMs: number, rowCount: number, domRows: number } | null} grid
  */
 
+/**
+ * 전송 계층을 늦추는 검사용 창 속성. `beforeEach`가 거는 래퍼가 읽는다.
+ * @typedef {object} DelayWindow
+ * @property {{ op: string, ms: number }} [__jdrDelayOp]
+ */
+
 /** @param {import('@playwright/test').Page} page */
 function hook(page) {
   return {
@@ -91,6 +97,31 @@ function visibleRows(page) {
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 720 });
+  // 특정 op의 도착을 늦출 수 있게 전송 계층을 감싼다. `window.__jdrDelayOp`를 세우는 검사에서만
+  // 동작하고, 세우지 않으면 아무 일도 하지 않는다.
+  await page.addInitScript(() => {
+    const w = /** @type {DelayWindow} */ (/** @type {unknown} */ (window));
+    const original =
+      /** @type {(this: Worker, message: unknown, transfer: Transferable[]) => void} */ (
+        /** @type {unknown} */ (Worker.prototype.postMessage)
+      );
+    /**
+     * @this {Worker}
+     * @param {{ op?: string }} message
+     * @param {Transferable[]} transfer
+     */
+    function patched(message, transfer) {
+      const delay = w.__jdrDelayOp;
+      if (delay && message && delay.op === message.op) {
+        setTimeout(() => original.call(this, message, transfer), delay.ms);
+        return;
+      }
+      original.call(this, message, transfer);
+    }
+    Worker.prototype.postMessage = /** @type {typeof Worker.prototype.postMessage} */ (
+      /** @type {unknown} */ (patched)
+    );
+  });
   await page.goto(PAGE_URL);
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
   await expect(page.locator('.jdr-grid__empty')).toHaveText(
@@ -426,4 +457,63 @@ test('접근성: role="grid"가 행·행 그룹을 직접 소유하고 다른 �
   await expect
     .poll(async () => page.evaluate(() => document.activeElement?.getAttribute('role')))
     .toBe('grid');
+});
+
+test('스키마가 바뀐 뒤 다시 마운트되기 전에 온 창 질의 응답은 버린다', async ({ page }) => {
+  await page.click('[data-action="table-create"]');
+  await page.locator('.jdr-dialog input').fill('고객');
+  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
+  await addColumn(page, '이름', '텍스트');
+  await addColumn(page, '나이', '정수');
+  await addColumn(page, '비고', '텍스트');
+
+  const state = await hook(page).state();
+  const table = state?.tables[0];
+  if (!table) throw new Error('table missing');
+  const [nameCol, ageCol, noteCol] = table.columns.map((c) => c.id);
+  await page.evaluate(
+    (sql) =>
+      /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window)).__jdrTest.apply({
+        type: 'test.insert',
+        tableId: null,
+        do: [{ sql: sql }],
+        undo: [],
+        summary: 'seed',
+      }),
+    `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50) INSERT INTO "${table.id}" ("${nameCol}", "${ageCol}", "${noteCol}") SELECT '이름' || i, i * 3, '비고' || i FROM n`,
+  );
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 50개');
+
+  const cell = (/** @type {number} */ row, /** @type {number} */ col) =>
+    page.locator(`.jdr-grid__row[data-row="${row}"] .jdr-grid__cell[data-col="${col}"]`);
+  await expect(cell(0, 1)).toHaveText('3');
+  await expect(cell(0, 2)).toHaveText('비고1');
+
+  // 목록 재조회만 늦춘다. 그 사이 Worker의 메타는 이미 [이름, 비고]지만 그리드는 아직 열 셋을 그린다.
+  const before = (await hook(page).grid())?.queries ?? 0;
+  await page.evaluate(() => {
+    /** @type {DelayWindow} */ (/** @type {unknown} */ (window)).__jdrDelayOp = {
+      op: 'schema.list',
+      ms: 3000,
+    };
+  });
+  await page.locator('.jdr-sidebar__column-name', { hasText: '나이' }).click();
+  await page.locator(`button[data-action="column-delete"][data-column-id="${ageCol}"]`).click();
+  await page.locator('.jdr-dialog').getByRole('button', { name: '삭제' }).click();
+
+  // 창 질의 응답이 한 번 처리될 때까지 기다린다(버려진 응답도 이 수를 올린다).
+  await expect
+    .poll(async () => (await hook(page).grid())?.queries ?? 0, { timeout: 5_000 })
+    .toBeGreaterThan(before);
+
+  // 아직 옛 머리글이면 경주가 열려 있는 구간이다. 여기서 값이 한 칸 밀리면 안 된다.
+  await expect(page.locator('.jdr-grid__hcell[data-col="1"]')).toHaveText('나이');
+  await expect(cell(0, 1)).toHaveText('');
+  await expect(cell(0, 2)).toHaveText('');
+
+  // 목록이 도착하면 다시 마운트되어 남은 두 열이 제 값으로 채워진다.
+  await expect(page.locator('.jdr-grid__hcell[data-col="1"]')).toHaveText('비고');
+  await expect(cell(0, 0)).toHaveText('이름1');
+  await expect(cell(0, 1)).toHaveText('비고1');
+  void noteCol;
 });
