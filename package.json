@@ -12,7 +12,7 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test \"test/unit/**/*.test.js\"",
+    "test": "node scripts/run-unit-tests.mjs",
     "build": "node build/build.mjs",
     "verify": "node build/verify.mjs",
     "test:e2e": "node build/build.mjs --test && playwright test",

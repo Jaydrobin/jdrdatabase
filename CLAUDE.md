@@ -22,7 +22,7 @@ Step 0 완료 후 아래 스크립트가 `package.json`에 존재해야 하며, 
 npm run check        # lint + typecheck + unit 테스트 (PR 전 필수)
 npm run lint         # eslint
 npm run typecheck    # tsc --checkJs --noEmit
-npm test             # node --test test/unit
+npm test             # node:test, test/unit/**/*.test.js (scripts/run-unit-tests.mjs)
 npm run build        # dist/jdrdatabase.html 생성
 npm run verify       # 산출물 검증: 외부 참조 0건, 크기 예산, CSP
 npm run test:e2e     # playwright (dist를 file://로 열어 검사)
