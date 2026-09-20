@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.2 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20) |
+| 문서 버전 | 0.3 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -17,7 +17,7 @@
 
 **가능하다. 단, 아래 조건과 상한을 전제로 한다.**
 
-- 브라우저 모드의 저장·질의 엔진은 SQLite를 WebAssembly로 컴파일한 **sql.js**를 사용한다. wasm 바이너리를 base64로 HTML에 인라인하므로 외부 파일이나 네트워크가 필요 없다. 데이터베이스 전체는 브라우저 메모리에 상주하고, 모든 질의는 Web Worker에서 실행되어 UI가 멈추지 않는다.
+- 브라우저 모드의 저장·질의 엔진은 SQLite 프로젝트가 배포하는 **공식 SQLite Wasm**(`@sqlite.org/sqlite-wasm`)을 사용한다. wasm 바이너리를 base64로 HTML에 인라인하므로 외부 파일이나 네트워크가 필요 없다. 데이터베이스 전체는 브라우저 메모리에 상주하고, 모든 질의는 Web Worker에서 실행되어 UI가 멈추지 않는다.
 - 화면은 **가상 스크롤 그리드**로 구현한다. 수십만 행 중 화면에 보이는 수십 행만 DOM으로 만들고, 스크롤할 때 `LIMIT/OFFSET` 창 질의로 필요한 행만 가져온다.
 - 장문 셀은 그리드에서 앞부분 256자만 `substr()`로 가져와 미리보기로 표시하고, 전문은 사용자가 편집기를 열 때만 로드한다. 따라서 셀 하나가 수십만 자라도 스크롤 성능에 영향을 주지 않는다.
 - SQLite 자체의 문자열 상한은 기본 10억 바이트(`SQLITE_MAX_LENGTH`)이므로 수십만 자(UTF-8 한글 기준 수백 KB) 셀은 문제없이 저장된다.
@@ -33,14 +33,14 @@
 
 즉 "수십만 자를 담을 수 있는 셀"이 수십만 건 있는 것(대부분 짧고 일부만 긴 실제 데이터)은 지원 대상이고, "모든 셀이 수십만 자"인 데이터는 브라우저 모드의 지원 대상이 아니다. 상한 값은 엔진이 `capabilities()`로 보고하고, 앱은 파일을 열 때 그 값과 비교하여 경고·거부한다.
 
-**데스크톱 모드에서는 이 상한이 사라진다.** 위 상한은 DB 전체가 WebView 메모리 안의 sql.js에 상주하기 때문에 생긴다. 타우리 데스크톱 빌드(D-15)에서는 러스트 쪽 네이티브 SQLite가 디스크의 파일을 직접 열어 페이지 캐시만 메모리에 올리므로, 파일 크기 상한은 디스크 용량이 되고 남는 상한은 UI 쪽 것(수백만 행에서의 OFFSET·count 지연, FTS 인덱스 생성 시간)뿐이다. 타우리로 감싸기만 하고 sql.js를 그대로 쓰면 WebView(WebView2, WKWebView, WebKitGTK)도 같은 wasm32 메모리 한계를 가지므로 상한은 그대로 남는다. 상한을 없애는 것은 셸이 아니라 엔진 교체이며, 그래서 엔진 원시 계층을 두 구현으로 나눈다.
+**데스크톱 모드에서는 이 상한이 사라진다.** 위 상한은 DB 전체가 WebView 메모리 안의 wasm 엔진에 상주하기 때문에 생긴다. 타우리 데스크톱 빌드(D-15)에서는 러스트 쪽 네이티브 SQLite가 디스크의 파일을 직접 열어 페이지 캐시만 메모리에 올리므로, 파일 크기 상한은 디스크 용량이 되고 남는 상한은 UI 쪽 것(수백만 행에서의 OFFSET·count 지연, FTS 인덱스 생성 시간)뿐이다. 타우리로 감싸기만 하고 wasm 엔진을 그대로 쓰면 WebView(WebView2, WKWebView, WebKitGTK)도 같은 wasm32 메모리 한계를 가지므로 상한은 그대로 남는다. 상한을 없애는 것은 셸이 아니라 엔진 교체이며, 그래서 엔진 원시 계층을 두 구현으로 나눈다.
 
 ### Q2. 데이터베이스를 단일 바이너리 파일로 두고 구글 드라이브로 여러 PC를 오가며 관리할 수 있는가?
 
 **가능하다. 아래 방식으로 설계하면 안전하다.**
 
 - 저장 형식은 **표준 SQLite 파일** 하나(예: `my-database.db`)이다. `sqlite3` CLI나 DB Browser for SQLite로도 열린다.
-- 브라우저 모드에서 앱은 파일을 통째로 메모리에 읽고, 저장할 때 통째로 다시 쓴다. sql.js가 메모리 내 DB이므로 WAL이나 journal 같은 부속 파일이 생기지 않는다. 클라우드 동기화가 부속 파일을 누락하여 DB가 깨지는 전형적인 문제가 원천적으로 없다.
+- 브라우저 모드에서 앱은 파일을 통째로 메모리에 읽고, 저장할 때 통째로 다시 쓴다. wasm 엔진이 메모리 내 DB이므로 WAL이나 journal 같은 부속 파일이 생기지 않는다. 클라우드 동기화가 부속 파일을 누락하여 DB가 깨지는 전형적인 문제가 원천적으로 없다.
 - 저장은 File System Access API의 `createWritable()`로 수행한다. 이 API는 임시 파일에 쓴 뒤 `close()` 시점에 교체하므로 저장 도중 전원이 꺼져도 원본이 반쯤 덮어써지는 일이 없다.
 - 데스크톱 모드에서는 네이티브 SQLite가 원본을 직접 쓰지 않고 앱 데이터 폴더의 작업 사본을 연다. 저장 시 `VACUUM INTO`로 만든 임시 파일을 원본 자리에 이름 교체하므로, 저널·WAL 부속 파일이 클라우드 폴더에 생기지 않고 저장의 원자성도 브라우저 모드와 같다(D-15).
 
@@ -92,22 +92,24 @@
 ### D-01. 배포는 단일 HTML, 소스는 모듈로 분리하고 빌드로 인라인한다
 
 - 소스는 `src/`의 ES 모듈로 작성하고 `build/build.mjs`가 JS·CSS·wasm(base64)·Worker 소스를 `dist/jdrdatabase.html` 하나로 합친다.
-- 런타임 네트워크 요청은 0건이다. `<meta http-equiv="Content-Security-Policy">`로 `default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data:`를 선언하여 외부 자원 참조가 섞이면 실행 단계에서 드러나게 한다.
+- 런타임 네트워크 요청은 0건이다. `<meta http-equiv="Content-Security-Policy">`로 `default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data:`를 선언하여 외부 자원 참조가 섞이면 실행 단계에서 드러나게 한다. `'wasm-unsafe-eval'`은 필수다. Chromium은 `script-src`가 선언된 문서에서 이 소스(또는 `'unsafe-eval'`) 없이는 `WebAssembly.instantiate`를 거부한다(세션 A 실측).
 - 사유: 개발·테스트 편의와 단일 파일 배포를 양립시키기 위함이다. 소스를 직접 단일 파일로 쓰면 테스트와 코드 리뷰가 불가능해진다.
 - 빌드는 같은 소스에서 두 변형을 만든다. `dist/jdrdatabase.html`(브라우저용, 메타 CSP 포함)과 `dist/tauri/index.html`(타우리용, 메타 CSP 없음). 타우리는 IPC를 위해 자체 CSP를 `tauri.conf.json`에서 주입하므로 메타 CSP와 충돌한다. 두 변형은 CSP 태그 유무만 다르고 나머지 바이트는 같아야 하며 `verify.mjs`가 이를 검사한다.
 
-### D-02. 브라우저 모드의 저장 엔진은 sql.js(SQLite WASM)이며 Web Worker에서 실행한다
+### D-02. 브라우저 모드의 저장 엔진은 공식 SQLite Wasm(`@sqlite.org/sqlite-wasm`)이며 Web Worker에서 실행한다
 
 | 대안 | 탈락 사유 |
 |---|---|
 | 순수 JS 배열 + JSON 파일 | 수십만 건 정렬·검색·부분 로드가 비효율적이고 파일 포맷을 자작해야 한다 |
 | IndexedDB 직접 사용 | 단일 파일 내보내기가 어렵고 질의 능력이 부족하다 |
-| 공식 sqlite-wasm + OPFS | `file://` 오리진에서는 OPFS를 쓸 수 없고, ESM·Worker 파일 분리를 요구하여 단일 파일화가 복잡하다 |
+| sql.js | 배포 빌드에 FTS5가 없다. 1.14.2의 `PRAGMA compile_options`에는 `ENABLE_FTS3`만 있고 `ENABLE_FTS5`가 없으며 `CREATE VIRTUAL TABLE ... USING fts5`가 `no such module: fts5`로 실패한다(세션 A 실측). D-07의 trigram 검색이 불가능하고 `sqlite3_interrupt`도 노출하지 않는다. FTS5를 넣으려면 emscripten 자체 빌드가 필요해 `vendor/`의 "상류 배포본 + 체크섬" 규칙과 맞지 않는다 |
+| 공식 sqlite-wasm의 OPFS 영속화 | `file://` 오리진과 비격리 오리진에서는 OPFS VFS가 설치되지 않는다. 그래서 OPFS는 쓰지 않고 메모리 DB만 쓴다(아래) |
 
-- sql.js는 FTS5, JSON1이 포함된 빌드이다. 실제 사용 버전의 `PRAGMA compile_options` 결과를 Step 1 테스트로 고정한다.
-- wasm은 `initSqlJs({ wasmBinary })`로 전달한다. base64를 디코딩한 ArrayBuffer를 넘기므로 `locateFile`이나 별도 파일이 필요 없다.
+- 공식 배포본 `sqlite3.mjs` + `sqlite3.wasm`(SQLite 3.53.4)은 FTS5(trigram 토크나이저 포함), JSON, `sqlite3_interrupt`, `sqlite3_deserialize`, `sqlite3_js_db_export`를 포함한다. 실제 사용 버전의 `PRAGMA compile_options` 결과를 Step 1 테스트로 고정한다.
+- ESM 배포본은 빌드가 esbuild로 Worker용 IIFE 번들에 접어 넣는다. 번들 안에서는 `import.meta.url`이 비어 있으므로 `sqlite3InitModule({ wasmBinary, locateFile: (name) => name })`처럼 base64를 디코딩한 ArrayBuffer와 파일 이름을 그대로 돌려주는 `locateFile`을 함께 넘긴다. 이렇게 하면 wasm·프록시 스크립트를 위한 별도 파일 요청이 일어나지 않는다. 단일 파일화가 복잡하다는 이전 판단은 이 조합으로 해소되었고, `file://`에서 연 문서의 Blob Worker 안에서 FTS5 trigram 질의가 동작함을 세션 A에서 실측했다.
+- DB는 항상 메모리 DB다. 파일 열기는 바이트를 `sqlite3_deserialize`로 넘기고, 저장은 `sqlite3_js_db_export`로 바이트를 얻는다. OPFS VFS 설치 실패는 경고 로그로만 남고 동작에 영향이 없다.
 - Worker는 `<script type="text/plain">` 블록의 소스를 Blob URL로 만들어 생성한다. Worker 생성이 막힌 환경에서는 같은 API를 메인 스레드에서 실행하는 인라인 전송 계층으로 자동 폴백한다(D-11 RPC 추상화 덕분에 비용이 낮다).
-- 중요한 특성: sql.js의 `Database.export()`는 내부적으로 DB를 닫았다가 다시 연다. 따라서 **export 전후로 모든 prepared statement가 무효화되고 `PRAGMA` 설정이 초기화된다.** Worker의 statement 캐시는 export 직후 반드시 비우고 PRAGMA를 다시 적용한다. 엔진 인터페이스에서는 이 동작을 `snapshot()`이 감싼다.
+- 중요한 특성: `sqlite3_js_db_export`는 DB를 닫지 않으므로 export 자체가 prepared statement를 무효화하지는 않는다. 그래도 엔진 인터페이스의 `snapshot()`은 **statement 캐시를 비우고 PRAGMA를 다시 적용하는 계약**을 유지한다. 호출자가 특정 wasm 빌드의 동작에 기대지 않게 하기 위해서이며, `snapshot()` 바깥에서 export를 직접 부르는 코드는 두지 않는다.
 - 이 결정은 브라우저 모드의 엔진 구현(`engine-wasm.js`)에 관한 것이다. 두 모드가 공유하는 엔진 인터페이스와 데스크톱 모드의 네이티브 구현은 D-15에서 정한다.
 
 ### D-03. 파일 포맷은 표준 SQLite 파일이고, 사용자 테이블·열의 물리 이름은 불투명 ID를 쓴다
@@ -183,11 +185,11 @@
 | 영역 | 선택 |
 |---|---|
 | 언어 | JavaScript(ES2022, ESM). 타입은 JSDoc으로 쓰고 `tsc --checkJs --noEmit --strict`로 검사 |
-| 빌드 | Node.js 20+, 의존성 없는 `build/build.mjs` (esbuild 등 번들러는 빌드 도구로만 허용, 런타임 의존 금지) |
-| 단위 테스트 | `node:test`. sql.js는 Node에서도 동작하므로 스키마·질의·파서·커맨드 로직을 Node에서 검증 |
+| 빌드 | Node.js 20+, `build/build.mjs`. 모듈 그래프 검사는 자체 구현이고 번들링은 esbuild를 빌드 도구로만 호출한다(런타임 의존 금지) |
+| 단위 테스트 | `node:test`. SQLite Wasm은 Node에서도 동작하므로 스키마·질의·파서·커맨드 로직을 Node에서 검증 |
 | E2E | Playwright(Chromium). `dist/jdrdatabase.html`을 `file://`로 열어 실제 산출물을 검증. 데스크톱은 같은 시나리오를 tauri-driver(WebDriver)로 Windows·Linux에서 실행 |
 | 린트·포맷 | ESLint(flat config) + Prettier. Rust는 rustfmt + clippy(`-D warnings`) |
-| 서드파티 런타임(JS) | sql.js, SheetJS CE 두 개만. `vendor/`에 버전 고정 파일과 LICENSE, SHA-256을 함께 커밋 |
+| 서드파티 런타임(JS) | 공식 SQLite Wasm(`@sqlite.org/sqlite-wasm`), SheetJS CE 두 개만. `vendor/`에 버전 고정 파일과 LICENSE, SHA-256을 함께 커밋 |
 | 데스크톱 셸 | Tauri 2 + Rust(stable). SQLite는 `rusqlite`(`bundled`). Rust 의존성은 `tauri`(플러그인 dialog, fs, single-instance 포함), `rusqlite`, `serde`, `serde_json`으로 제한. 단위 테스트는 `cargo test` |
 
 - 프레임워크를 쓰지 않는 사유: 가상 그리드는 어차피 직접 DOM을 제어해야 하고, 단일 파일 크기와 시작 시간을 아끼며, 의존성 수명 문제를 피한다.
@@ -205,7 +207,7 @@
 
 ### D-15. 엔진 백엔드를 이중화하고, 데스크톱 모드는 작업 사본 위에서 네이티브 SQLite를 쓴다
 
-- 교체 지점은 엔진 원시 계층이다. `db/engine.js`는 인터페이스와 선택 로직만 가지고, 구현은 `db/engine-wasm.js`(sql.js, 브라우저 모드)와 `db/engine-native.js`(타우리 IPC → 러스트 rusqlite, 데스크톱 모드) 둘이다. `query.js`, `tables.js`, `search.js`, `import/*`, `export/*`는 엔진 인터페이스만 호출하므로 두 모드에서 같은 코드가 돈다.
+- 교체 지점은 엔진 원시 계층이다. `db/engine.js`는 인터페이스와 선택 로직만 가지고, 구현은 `db/engine-wasm.js`(SQLite Wasm, 브라우저 모드)와 `db/engine-native.js`(타우리 IPC → 러스트 rusqlite, 데스크톱 모드) 둘이다. `query.js`, `tables.js`, `search.js`, `import/*`, `export/*`는 엔진 인터페이스만 호출하므로 두 모드에서 같은 코드가 돈다.
 - 엔진 인터페이스(Step 1에서 고정):
 
 ```js
@@ -218,7 +220,7 @@ run(sql, params)               // 쓰기 한 문장. { changes, lastId }
 runBatch(sql, paramsList)      // 같은 문장을 파라미터 목록만큼 반복. 하나의 트랜잭션. 가져오기·붙여넣기 전용
 transaction(fn)                // BEGIN / COMMIT / ROLLBACK
 prepareCached(sql)             // wasm 전용 최적화. native는 no-op 핸들
-snapshot()                     // wasm: Uint8Array(sql.js export) / native: E_UNSUPPORTED
+snapshot()                     // wasm: Uint8Array(sqlite3_js_db_export) / native: E_UNSUPPORTED
 saveTo(originalPath, expected) // native 전용. VACUUM INTO 임시 → 원자적 교체
 interrupt()                    // 진행 중 문장 중단
 ```
@@ -273,7 +275,7 @@ src/
     client.js                    RPC 클라이언트(메인 측), Worker/인라인 전송 선택
     worker.js                    Worker 진입점: RPC 디스패치
     engine.js                    엔진 인터페이스, 모드별 구현 선택, 공통 검증(1만 행 상한, 배치 크기)
-    engine-wasm.js               sql.js 구현: 초기화, snapshot(export), statement 캐시, PRAGMA
+    engine-wasm.js               SQLite Wasm 구현: 초기화, snapshot(export), statement 캐시, PRAGMA
     engine-native.js             타우리 구현: IPC 호출, Worker→메인 중계 클라이언트
     schema.js                    메타 테이블 DDL, 마이그레이션, 물리 이름 생성
     tables.js                    테이블·열 CRUD(메타 + DDL)
@@ -298,7 +300,7 @@ src/
     app.css grid.css dialogs.css
 
 vendor/
-  sql-wasm.js sql-wasm.wasm LICENSE.sqljs CHECKSUMS
+  sqlite3.mjs sqlite3.wasm sqlite3.d.mts LICENSE.sqlite-wasm CHECKSUMS
   xlsx.full.min.js LICENSE.sheetjs
 
 build/
@@ -336,7 +338,7 @@ scripts/
 └──────────────────────────────────────────────┼┘
                                                ▼
 ┌───────────────── Worker ──────────────────────┐
-│ db/worker ─▶ db/engine ─▶ engine-wasm(sql.js)  │
+│ db/worker ─▶ db/engine ─▶ engine-wasm(sqlite3) │
 │           ─▶ db/query, tables, search, values │
 │           ─▶ import/* (파서·추론·삽입)          │
 └───────────────────────────────────────────────┘
@@ -489,7 +491,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `verify.mjs`: `assertNoExternalRefs(html)`(`http://`, `https://`, `src=`/`href=`에 외부 경로 없음), `assertSizeBudget(html, 6 * 1024 * 1024)`, `assertCsp(html)`
 
 **예외 처리**
-- 빌드 중 import 순환 감지 시 실패. 상대 경로가 `src/` 밖을 가리키면 실패.
+- 빌드 중 import 순환 감지 시 실패. 상대 경로가 `src/`·`vendor/` 밖을 가리키면 실패.
 - `verify` 실패는 빌드 실패로 취급하고 CI에서 막는다.
 
 **완료 기준**
@@ -498,13 +500,13 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 ### Step 1. 엔진 인터페이스, wasm 엔진, RPC 계층
 
-**목표**: 두 모드가 공유할 엔진 인터페이스(D-15)를 고정하고, 그 첫 구현인 sql.js 엔진이 Worker 안에서 기동하며, 메인에서 RPC로 SQL을 실행하고, 메모리 DB를 바이트로 내보내고 다시 연다.
+**목표**: 두 모드가 공유할 엔진 인터페이스(D-15)를 고정하고, 그 첫 구현인 SQLite Wasm 엔진이 Worker 안에서 기동하며, 메인에서 RPC로 SQL을 실행하고, 메모리 DB를 바이트로 내보내고 다시 연다.
 
-**산출물**: `db/engine.js`, `db/engine-wasm.js`, `db/worker.js`, `db/client.js`, `util/errors.js`, `util/bytes.js`, `vendor/sql-wasm.*`
+**산출물**: `db/engine.js`, `db/engine-wasm.js`, `db/worker.js`, `db/client.js`, `util/errors.js`, `util/bytes.js`, `vendor/sqlite3.*`
 
 **주요 함수**
 - `engine.js`: D-15 인터페이스의 JSDoc `@typedef Engine`, `selectEngine(mode)`, 공통 검증 래퍼(결과 1만 행 상한, `runBatch` 파라미터 목록 1만 건 상한, 배치 직렬화 크기 64 MB 상한)
-- `engine-wasm.js`: `init({ wasmBinary })`, `open(bytes?)`, `close()`, `exec(sql, params)`, `run(sql, params)`, `runBatch(sql, paramsList)`(하나의 트랜잭션에서 prepared statement를 bind → step → reset 반복), `prepareCached(sql)`, `transaction(fn)`, `snapshot()`(sql.js export를 감싸고 statement 캐시 무효화·PRAGMA 재적용 수행), `applyPragmas()`, `interrupt()`, `capabilities()` → `{ mode: 'wasm', warnFileBytes: 700 MB, maxFileBytes: 1.5 GB, persistence: 'snapshot' }`
+- `engine-wasm.js`: `init({ wasmBinary })`, `open(bytes?)`, `close()`, `exec(sql, params)`, `run(sql, params)`, `runBatch(sql, paramsList)`(하나의 트랜잭션에서 prepared statement를 bind → step → reset 반복), `prepareCached(sql)`, `transaction(fn)`, `snapshot()`(`sqlite3_js_db_export`를 감싸고 statement 캐시 무효화·PRAGMA 재적용 수행), `applyPragmas()`, `interrupt()`, `capabilities()` → `{ mode: 'wasm', warnFileBytes: 700 MB, maxFileBytes: 1.5 GB, persistence: 'snapshot' }`
 - `client.createClient({ transport })`, `client.call(op, args, { transfer, onProgress, signal })`
 - `worker.js`: `dispatch(msg)` → `handlers[op]`. 진행 이벤트 `{ id, progress: { done, total, phase } }`
 - `createTransport()`: Worker 생성 시도 → 실패 시 `InlineTransport`(같은 스레드에서 `dispatch` 직접 호출)
@@ -512,7 +514,9 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 **예외 처리**
 - Worker 생성 실패(`SecurityError`, `file://` 제한): 인라인 전송으로 폴백하고 상태바에 "단일 스레드 모드" 표시.
 - wasm 인스턴스화 실패(메모리 부족, 지원 안 되는 브라우저): 시작 화면에 원인과 지원 브라우저 안내를 표시하고 앱을 잠근다.
-- sql.js export 이후 statement 캐시 무효화와 PRAGMA 재적용을 `snapshot()` 내부에서 반드시 수행한다(D-02). `snapshot()` 바깥에서 sql.js의 export를 직접 부르는 코드는 두지 않는다.
+- export 이후 statement 캐시 무효화와 PRAGMA 재적용을 `snapshot()` 내부에서 반드시 수행한다(D-02). `snapshot()` 바깥에서 `sqlite3_js_db_export`를 직접 부르는 코드는 두지 않는다.
+- `runBatch`의 파라미터 목록이 1만 건을 넘거나 직렬화 크기가 64 MB를 넘으면 `E_BATCH_TOO_LARGE`로 거부한다(호출자가 나눠 보내야 한다).
+- `interrupt()`는 wasm 모드에서 `sqlite3_interrupt`를 부른다. 엔진이 단일 스레드 Worker 안에서 돌기 때문에 실행 중인 문장 도중에 호출될 수는 없고, `runBatch`가 행 사이에서 확인하는 취소 표식으로 동작한다.
 - `runBatch` 도중 한 행이라도 실패하면 전체를 롤백하고 실패한 파라미터 인덱스를 `detail`에 담아 던진다.
 - RPC 타임아웃은 두지 않는다(대용량 작업은 수십 초가 정상). 대신 취소 신호(`signal`)를 지원하는 작업만 취소 가능하고, 그 외에는 진행률만 보고한다.
 - 메시지 크기: 결과 행이 10,000행을 넘는 요청은 Worker가 `E_RESULT_TOO_LARGE`로 거부한다(창 질의만 허용, 전체 SELECT 금지).
@@ -680,7 +684,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - 셀 값 길이 상한 10 MB 초과: 건너뛰고 보고서에 기록.
 - 기존 테이블에 추가 시 열 매핑 불일치: 매핑 UI에서 반드시 대응시키게 하고, 대응 없는 원본 열은 "건너뜀".
 - 취소: 현재 트랜잭션 롤백, 새 테이블이었으면 테이블 삭제, 기존 테이블이면 지금까지 커밋된 행은 유지되었음을 명시.
-- 메모리: 파서는 조각 단위지만 sql.js DB는 메모리에 있으므로 예상 결과 크기(파일 크기 × 1.2)가 남은 예산을 넘으면 시작 전에 경고.
+- 메모리: 파서는 조각 단위지만 wasm DB는 메모리에 있으므로 예상 결과 크기(파일 크기 × 1.2)가 남은 예산을 넘으면 시작 전에 경고.
 - 가져오기 도중에는 그리드 편집을 잠근다(같은 DB에 두 트랜잭션 불가).
 
 **완료 기준**
@@ -822,6 +826,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | op | 인자 | 결과 | 취소 |
 |---|---|---|---|
 | `engine.init` | wasm: `{ wasmBinary }` (transfer) / native: `{}` | `{ version, compileOptions, capabilities }` | 불가 |
+| `engine.exec` | `{ sql, params }` | `{ columns, rows }`. 진단·테스트 전용(Step 1 E2E의 `SELECT 1`, `window.__jdrTest`). UI 코드는 이 op를 호출하지 않는다 | 불가 |
 | `db.open` | wasm: `{ bytes? }` (transfer) / native: `{ originalPath? }` | `{ meta, tables, dirtyWorkcopy? }` | 불가 |
 | `db.snapshot` | `{ bumpRevision, savedBy }` | `{ bytes }` (transfer). wasm 전용, native는 `E_UNSUPPORTED` | 불가 |
 | `db.save` | `{ originalPath, bumpRevision, savedBy }` | `{ revision, savedAt }`. native 전용, wasm은 `E_UNSUPPORTED` | 불가 |
@@ -861,6 +866,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_DB_QUERY` | SQL 실행 오류 | 예 | 토스트, 캐시 무효화 |
 | `E_DB_BUSY` | 배타 작업 충돌 | 예 | "가져오기 진행 중" 안내 |
 | `E_RESULT_TOO_LARGE` | 1만 행 초과 결과 | 아니오(버그) | 콘솔 오류, 개발 중 발견 대상 |
+| `E_BATCH_TOO_LARGE` | `runBatch` 파라미터 1만 건 또는 직렬화 64 MB 초과 | 아니오(버그) | 콘솔 오류, 호출자가 나눠 보내야 함 |
 | `E_MEM` | 메모리 부족 | 부분 | 작업 중단, 저장 유도 |
 | `E_NAME_INVALID` | 빈·중복 이름 | 예 | 폼 오류 |
 | `E_SYSTEM_COLUMN` | 시스템 열 변경 시도 | 예 | 거부 |
@@ -923,7 +929,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | # | 리스크 | 영향 | 대응 |
 |---|---|---|---|
 | R1 | `file://`에서 Blob Worker·IndexedDB·File System Access의 브라우저별 가용성 | 폴백 경로로만 동작할 수 있음 | Step 1·2에서 실측, 지원 매트릭스 문서화, 모든 기능 감지 후 폴백 |
-| R2 | 브라우저 모드: sql.js wasm 메모리 성장 한계(브라우저 탭 한계). 데스크톱 모드: 작업 사본 복사와 `VACUUM INTO` 저장이 파일 크기에 비례하여 수십 GB에서 분 단위 | 브라우저: 대용량 파일 열기·저장 실패. 데스크톱: 열기·저장 대기 시간 | 브라우저: 엔진이 보고하는 경고·거부 상한, snapshot 시점 메모리 2배 예산 반영. 데스크톱: 진행률 표시, 수십 GB는 v1.1의 직접 모드 옵션으로 검토 |
+| R2 | 브라우저 모드: wasm 메모리 성장 한계(`sqlite3.wasm`의 최대 메모리 2 GB, 브라우저 탭 한계). 데스크톱 모드: 작업 사본 복사와 `VACUUM INTO` 저장이 파일 크기에 비례하여 수십 GB에서 분 단위 | 브라우저: 대용량 파일 열기·저장 실패. 데스크톱: 열기·저장 대기 시간 | 브라우저: 엔진이 보고하는 경고·거부 상한, snapshot 시점 메모리 2배 예산 반영. 데스크톱: 진행률 표시, 수십 GB는 v1.1의 직접 모드 옵션으로 검토 |
 | R3 | SheetJS CE 유지보수·배포 방식 변경 | XLSX 기능 의존성 | `vendor/`에 고정 버전 커밋, fflate + 자체 파서로 교체 가능한 어댑터 경계 유지 |
 | R4 | 클라우드 충돌 사본으로 인한 사용자 혼란 | 편집 유실 | revision 경고, 백업 1세대, 사용 안내 문서 |
 | R5 | 한글 로케일 정렬·대소문자 무시 요구 | 정렬 결과 기대 불일치 | v1은 코드 포인트 정렬로 한정하고 문서화. v1.1에서 `create_function` 기반 정렬 키 검토 |

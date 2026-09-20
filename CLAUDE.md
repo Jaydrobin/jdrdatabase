@@ -4,7 +4,7 @@
 
 ## 1. 프로젝트 한 줄 요약
 
-서버 없이 브라우저에서 단독 동작하는 스프레드시트형 SQLite 데이터베이스 관리 앱. 배포 단위는 `dist/jdrdatabase.html` 파일 하나이며, 같은 소스로 타우리 데스크톱 앱도 빌드한다. 엔진은 브라우저 모드에서 sql.js(SQLite WASM), 데스크톱 모드에서 러스트 rusqlite이고, UI는 프레임워크 없는 Vanilla JS, 저장은 표준 SQLite 파일.
+서버 없이 브라우저에서 단독 동작하는 스프레드시트형 SQLite 데이터베이스 관리 앱. 배포 단위는 `dist/jdrdatabase.html` 파일 하나이며, 같은 소스로 타우리 데스크톱 앱도 빌드한다. 엔진은 브라우저 모드에서 공식 SQLite Wasm(`@sqlite.org/sqlite-wasm`), 데스크톱 모드에서 러스트 rusqlite이고, UI는 프레임워크 없는 Vanilla JS, 저장은 표준 SQLite 파일.
 
 ## 2. 작업 시작 전 필독
 
@@ -40,9 +40,9 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 
 | 경로 | 규칙 |
 |---|---|
-| `src/db/*` | Worker에서 실행되는 코드. DOM, `window`, `document`에 접근하지 않는다. `engine-wasm.js`·`engine-native.js` 외의 모듈은 `engine.js` 인터페이스만 호출하고 sql.js나 타우리 invoke를 직접 부르지 않는다 |
+| `src/db/*` | Worker에서 실행되는 코드. DOM, `window`, `document`에 접근하지 않는다. `engine-wasm.js`·`engine-native.js` 외의 모듈은 `engine.js` 인터페이스만 호출하고 `sqlite3` 객체나 타우리 invoke를 직접 부르지 않는다 |
 | `src/import/*`, `src/export/*` | Worker에서 실행. `DOMParser` 등 메인 스레드 전용 API 금지 |
-| `src/ui/*`, `src/app/*`, `src/io/*` | 메인 스레드. sql.js를 직접 호출하지 않고 `db/client.js`만 사용한다. 타우리 invoke는 `io/ipc-bridge.js`와 `io/filesystem.js`에서만 부른다 |
+| `src/ui/*`, `src/app/*`, `src/io/*` | 메인 스레드. `sqlite3` 객체를 직접 호출하지 않고 `db/client.js`만 사용한다. 타우리 invoke는 `io/ipc-bridge.js`와 `io/filesystem.js`에서만 부른다 |
 | `src-tauri/` | 러스트 데스크톱 셸. 명령 함수는 `db.rs`·`save.rs`·`workcopy.rs`로 역할을 나누고, 오류는 `error.rs`의 `AppError`로만 돌려준다 |
 | `src/util/*` | 양쪽에서 쓰는 순수 함수만. 부수효과 금지 |
 | `vendor/` | 서드파티 고정 버전. 수정 금지. 파일마다 LICENSE와 `CHECKSUMS`의 SHA-256 동반 |
@@ -76,7 +76,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 - 식별자(테이블·열 이름)는 `schema.quoteIdent()`를 통해서만 SQL에 넣는다. 물리 이름은 앱이 생성하므로 안전하지만 규칙은 예외 없이 적용한다.
 - 전체 테이블을 한 번에 읽는 `SELECT`는 금지. 모든 읽기는 `LIMIT`이 있어야 하며 결과 1만 행 초과는 Worker가 거부한다.
 - 쓰기는 `engine.transaction()` 안에서만. 트랜잭션 밖의 `INSERT/UPDATE/DELETE`는 반려.
-- wasm 엔진의 `snapshot()` 뒤에는 prepared statement가 모두 무효화된다. statement를 모듈 변수에 캐시하지 말고 `engine.prepareCached()`만 쓴다. sql.js의 export를 `snapshot()` 바깥에서 직접 부르지 않는다.
+- `snapshot()`은 statement 캐시를 비우고 PRAGMA를 재적용한다. `snapshot()` 뒤에 캐시된 statement를 재사용하지 말고, statement를 모듈 변수에 캐시하지 말고 `engine.prepareCached()`만 쓴다. `sqlite3_js_db_export`를 `snapshot()` 바깥에서 직접 부르지 않는다.
 - 대량 삽입·갱신(가져오기, 붙여넣기)은 `engine.runBatch()`로 보낸다. 행마다 `run()`을 반복하는 코드는 데스크톱 모드에서 IPC 왕복이 행 수만큼 늘어나므로 반려.
 - 모드 분기 금지: `mode === 'native'` 같은 비교는 `main.js`와 `engine.js`의 선택 로직에만 허용한다. 나머지 코드는 `capabilities()`가 보고하는 값(상한, 저장 방식)을 읽는다. 파일 크기 상한 숫자를 UI 코드에 두지 않는다.
 - 사용자 테이블 DDL은 `STRICT`. 예외는 외부 SQLite 파일을 등록하는 경로뿐이며 그때는 메타에 `strict = 0`을 기록한다.
@@ -115,7 +115,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 
 ### 5.8 의존성 정책
 
-- JS 런타임 서드파티는 sql.js와 SheetJS CE 두 개뿐이다. 러스트 크레이트는 `tauri`(플러그인 dialog, fs, single-instance 포함), `rusqlite`(`bundled`), `serde`, `serde_json`으로 제한한다. 추가하려면 `DESIGN.md` D-12를 먼저 고친다.
+- JS 런타임 서드파티는 공식 SQLite Wasm(`@sqlite.org/sqlite-wasm`)과 SheetJS CE 두 개뿐이다. 러스트 크레이트는 `tauri`(플러그인 dialog, fs, single-instance 포함), `rusqlite`(`bundled`), `serde`, `serde_json`으로 제한한다. 추가하려면 `DESIGN.md` D-12를 먼저 고친다.
 - `vendor/` 파일 갱신 시: 버전, 출처 URL, SHA-256, 라이선스를 `vendor/CHECKSUMS`와 PR 설명에 기록한다. `verify.mjs`가 체크섬을 검사한다.
 - 빌드 산출물에 `http://`, `https://`, CDN 참조가 들어가면 `verify`가 실패한다. 우회하지 않는다.
 
@@ -129,7 +129,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 
 ## 6. 테스트 규약
 
-- 순수 로직(파서, 타입 추론, 질의 빌더, 값 검증, 커맨드 do/undo, revision 판정)은 `node:test` 단위 테스트가 필수다. sql.js는 Node에서 동작하므로 DB를 실제로 만들어 검사한다(모킹 금지).
+- 순수 로직(파서, 타입 추론, 질의 빌더, 값 검증, 커맨드 do/undo, revision 판정)은 `node:test` 단위 테스트가 필수다. SQLite Wasm은 Node에서 동작하므로 DB를 실제로 만들어 검사한다(모킹 금지).
 - 커맨드는 "적용 → 되돌리기 → DB 덤프 동일" 대칭성 테스트를 반드시 가진다.
 - 엔진 구현은 `test/unit/db/engine-contract.test.js`의 적합성 테스트를 모두 통과해야 한다. wasm 엔진은 Node에서, 네이티브 엔진은 tauri-driver 환경에서 같은 파일을 실행한다.
 - 러스트는 `cargo test`로 저장 원자성(실패 주입 시 원본 무손상), `run_batch` 원자성, `interrupt`, 한글 경로를 검증한다.
@@ -161,7 +161,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 2. **예외 처리**: `DESIGN.md` 해당 Step의 예외 목록이 코드에 모두 대응되는가. 삼켜진 `catch`가 없는가.
 3. **보안**: 파라미터 바인딩, `textContent`, CSP 유지, CSV 수식 주입 옵션.
 4. **성능**: 가상화 유지, 전체 SELECT 없음, 핫 경로 할당, transfer 사용.
-5. **Worker·IPC 경계**: 직렬화 불가 값, DOM 접근, 메인 전용 API, 엔진 인터페이스 우회(sql.js·invoke 직접 호출), 행 단위 반복 대신 `runBatch`.
+5. **Worker·IPC 경계**: 직렬화 불가 값, DOM 접근, 메인 전용 API, 엔진 인터페이스 우회(`sqlite3`·invoke 직접 호출), 행 단위 반복 대신 `runBatch`.
 6. **한글 입력·표시**: `isComposing`, EUC-KR, 코드 포인트 정렬 가정.
 7. **접근성**: 키보드만으로 도달 가능한가, 포커스 가시성, aria 속성.
 8. **문서 일치**: DESIGN.md·i18n·오류 코드 표.
@@ -183,7 +183,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
   - `feat(grid): 열 가상화 추가`
   - `fix(csv): 32KB 조각 경계에 걸친 따옴표 필드 파싱 오류 수정`
   - `docs(design): D-08 열 삭제를 소프트 삭제로 변경`
-- `vendor/` 갱신은 단독 커밋(`chore(vendor): sql.js 1.x.y`)으로 분리한다.
+- `vendor/` 갱신은 단독 커밋(`chore(vendor): sqlite-wasm 3.x.y`)으로 분리한다.
 - 커밋에 `dist/`, `node_modules/`, 1 MB 초과 픽스처를 넣지 않는다(`.gitignore`로 막고 CI에서 검사).
 
 ## 9. Claude Code 작업 지침
