@@ -191,9 +191,15 @@ export function createWasmEngine(options) {
       stmt.reset();
       stmt.clearBindings();
     } catch {
-      // reset 실패는 statement가 이미 무효라는 뜻이다. 캐시에서 빼고 다음 호출에서 다시 준비한다.
+      // oo1의 reset()은 직전 step()의 결과 코드를 다시 검사하므로 쓰기가 실패하면 항상 던진다.
+      // 캐시에서 빼고 finalize한다. 빼기만 하면 실패한 문장마다 sqlite3_stmt가 남는다.
       for (const [key, value] of cache) {
         if (value === stmt) cache.delete(key);
+      }
+      try {
+        stmt.finalize();
+      } catch {
+        // 이미 finalize된 statement는 무시해도 안전하다.
       }
     }
   }

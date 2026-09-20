@@ -85,6 +85,26 @@ test('snapshot: 트랜잭션 안에서는 거부, saveTo는 E_UNSUPPORTED', asyn
   await engine.close();
 });
 
+test('statement 캐시: 쓰기 실패로 reset이 던져도 캐시와 결과가 일관된다', async () => {
+  const engine = await openWasmEngine();
+  await engine.transaction(() => {
+    engine.run('CREATE TABLE t (a INTEGER) STRICT');
+  });
+  // oo1의 reset()은 직전 step()의 결과 코드를 다시 검사하므로 쓰기 실패 뒤에는 항상 던진다.
+  // 그 경로가 statement를 캐시에서 빼고 finalize까지 하는지 확인한다(빼기만 하면 sqlite3_stmt가 남는다).
+  for (let i = 0; i < 50; i += 1) {
+    await assert.rejects(
+      engine.transaction(() => engine.run(`INSERT INTO t VALUES (?) /* ${i} */`, ['not-an-int'])),
+      (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+    );
+  }
+  await engine.transaction(() => {
+    engine.run('INSERT INTO t VALUES (?)', [1]);
+  });
+  assert.deepEqual(engine.exec('SELECT a FROM t').rows, [[1]]);
+  await engine.close();
+});
+
 test('statement 캐시: 64개를 넘어도 오래된 것이 정리되고 결과는 유지된다', async () => {
   const engine = await openWasmEngine();
   for (let i = 0; i < 80; i += 1) {
