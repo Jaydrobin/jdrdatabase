@@ -26,6 +26,14 @@ import { t } from '../../i18n/index.js';
 /** @type {HTMLElement | null} */
 let openBackdrop = null;
 
+/**
+ * 모달이 떠 있는가. 전역 단축키가 모달 뒤의 앱을 움직이지 않도록 확인한다.
+ * @returns {boolean}
+ */
+export function isDialogOpen() {
+  return openBackdrop !== null;
+}
+
 const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 

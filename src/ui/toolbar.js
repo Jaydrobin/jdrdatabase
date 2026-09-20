@@ -5,6 +5,7 @@
  */
 import { t } from '../i18n/index.js';
 import { capabilities, fileFromInput, getFileInput } from '../io/filesystem.js';
+import { isDialogOpen } from './dialogs/dialog.js';
 
 /** @typedef {import('../app/store.js').Store} Store */
 
@@ -108,6 +109,10 @@ export function mountToolbar(parent, store) {
 
   /** @param {KeyboardEvent} ev */
   const onKeydown = (ev) => {
+    // 모달이 떠 있으면 그 답을 기다리는 흐름(열기, 저널 복구)이 진행 중이다. 그 도중의 저장은
+    // 아직 확정되지 않은 DB를 파일로 쓰고 저널을 비운다.
+    if (isDialogOpen()) return;
+    if (ev.isComposing) return;
     if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 's' || ev.key === 'S')) {
       ev.preventDefault();
       if (ev.shiftKey) void store.saveAs();

@@ -196,3 +196,35 @@ test('미저장 변경은 저널에 남아 탭을 다시 열면 복구된다', a
   await waitReady(page);
   await expect(page.locator('.jdr-dialog')).toHaveCount(0);
 });
+
+test('모달이 열려 있는 동안 Ctrl+S는 동작하지 않는다', async ({ page }) => {
+  // 저널 복구 대화상자는 열기 흐름 한가운데서 뜬다. 그 답을 기다리는 중의 저장은 파일 상태와
+  // 저널을 반쯤 열린 DB 기준으로 바꾼다. 모달 뒤에서 앱이 움직이면 안 된다.
+  await page.evaluate(
+    (cmd) =>
+      /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window)).__jdrTest.apply(cmd),
+    CREATE_T,
+  );
+  await expect.poll(async () => (await state(page))?.dirty).toBe(true);
+  await page.reload();
+  const dialog = page.locator('.jdr-dialog');
+  await expect(dialog.locator('.jdr-dialog__title')).toHaveText('저장되지 않은 변경 복구');
+
+  const before = await state(page);
+  await page.keyboard.press('Control+s');
+  await page.waitForTimeout(400);
+  // 대화상자는 그대로 떠 있고, 아직 답하지 않은 DB가 저장되지도 않았다.
+  await expect(dialog).toHaveCount(1);
+  const after = await state(page);
+  expect(after?.meta.revision).toBe(before?.meta.revision);
+  expect(after?.meta.saved_by).toBeUndefined();
+
+  // 대화상자를 닫고 복구가 끝나면 단축키가 다시 동작한다(재생 중에는 저장이 E_DB_BUSY로 막힌다).
+  await dialog.getByRole('button', { name: '복구' }).click();
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+  await expect(page.locator('.jdr-toast')).toContainText('변경 1건을 복구했습니다');
+  await expect.poll(async () => (await state(page))?.dirty).toBe(true);
+  await page.keyboard.press('Control+s');
+  await expect.poll(async () => (await state(page))?.dirty).toBe(false);
+  expect((await state(page))?.meta.revision).toBe('1');
+});
