@@ -7,19 +7,19 @@
  */
 import { createClient, createTransport } from './db/client.js';
 import { t } from './i18n/index.js';
+import { mountStatusbar } from './ui/statusbar.js';
 import { base64ToBytes } from './util/bytes.js';
 import { AppError, toAppError } from './util/errors.js';
 
 /** @typedef {import('./db/client.js').Client} Client */
 /** @typedef {import('./db/engine.js').EngineMode} EngineMode */
 /** @typedef {import('./i18n/index.js').MessageKey} MessageKey */
+/** @typedef {import('./ui/statusbar.js').Statusbar} Statusbar */
 
 /**
  * @typedef {object} Shell
  * @property {HTMLElement} main
- * @property {HTMLElement} status
- * @property {HTMLElement} mode
- * @property {HTMLElement} engine
+ * @property {Statusbar} statusbar
  */
 
 /**
@@ -42,23 +42,10 @@ function mount(root) {
   subtitle.textContent = t('app.subtitle');
 
   main.append(title, subtitle);
+  root.append(main);
 
-  const statusbar = document.createElement('footer');
-  statusbar.className = 'jdr-statusbar';
-  const status = document.createElement('span');
-  status.className = 'jdr-statusbar__item';
-  status.textContent = t('status.booting');
-  const mode = document.createElement('span');
-  mode.className = 'jdr-statusbar__item';
-  const engine = document.createElement('span');
-  engine.className = 'jdr-statusbar__item';
-  const version = document.createElement('span');
-  version.className = 'jdr-statusbar__item';
-  version.textContent = t('app.version', { version: __JDR_VERSION__ });
-  statusbar.append(status, mode, engine, version);
-
-  root.append(main, statusbar);
-  return { main, status, mode, engine };
+  const statusbar = mountStatusbar(root, { version: __JDR_VERSION__ });
+  return { main, statusbar };
 }
 
 /**
@@ -91,8 +78,8 @@ function showLock(shell, err) {
 
   box.append(title, message, supported, detail);
   shell.main.append(box);
-  shell.status.textContent = t('lock.title');
-  shell.status.classList.add('jdr-statusbar__item--danger');
+  shell.statusbar.setStatus('lock.title');
+  shell.statusbar.setDanger(true);
 }
 
 /**
@@ -204,11 +191,11 @@ async function start(shell) {
   }
 
   const session = await ready;
-  shell.status.textContent = t('status.ready');
-  shell.mode.textContent = t(
+  shell.statusbar.setStatus('status.ready');
+  shell.statusbar.setMode(
     session.transportKind === 'worker' ? 'status.mode.worker' : 'status.mode.inline',
   );
-  shell.engine.textContent = t('status.engine', { version: session.sqliteVersion });
+  shell.statusbar.setEngine(session.sqliteVersion);
   if (session.fallbackError) {
     console.warn(`${session.fallbackError.code}: ${session.fallbackError.message}`);
   }
