@@ -147,7 +147,7 @@
 
 - 그리드는 `[첫 가시 행 - 버퍼, 마지막 가시 행 + 버퍼]` 범위를 `SELECT ... ORDER BY <사용자 정렬>, id LIMIT n OFFSET m`으로 요청한다.
 - `OFFSET m`은 rowid b-tree의 잎 셀을 m개 걸어야 하므로 비용이 m에 비례한다. 세션 C 실측(30만 행, 장문 2열, 약 300 MB): OFFSET 0에서 10 ms, 15만에서 28 ms, 29만 9,800에서 50~60 ms로 8장 예산(50 ms)을 끝부분에서 넘는다. 그래서 정렬·필터가 없는 기본 뷰에서는 id가 빈틈없이 연속일 때(`max(id) - min(id) + 1 = count`, 가져오기·추가만 겪은 테이블) `WHERE id >= min + m ORDER BY id LIMIT n`으로 O(log n) 탐색을 쓴다(실측 7~12 ms). 행 삭제로 연속이 깨지면 OFFSET으로 돌아가며, 그 경우의 끝부분 지연은 R6의 대응(정렬 열 인덱스, keyset 페이징)으로 남긴다. 연속 판정에 쓰는 행 수는 Worker가 쓰기 op 일련번호와 함께 캐시한다(`count(*)`는 30만 행에서 35 ms). `min`·`max`는 따로 묻는다(한 문장에 둘을 넣으면 SQLite가 전체 스캔을 한다).
-- 블록 크기 200행의 LRU 캐시(최대 50블록)를 두고, 편집·정렬·필터·가져오기 후에는 해당 테이블 캐시를 전부 무효화한다.
+- 블록 크기 200행의 LRU 캐시(최대 50블록)를 두고, 편집·정렬·필터·가져오기 후에는 해당 테이블 캐시를 전부 무효화한다. 같은 테이블의 데이터 변경(편집·되돌리기)에 따른 무효화는 블록을 버리지 않고 낡은 것으로 표시해 다시 요청하며, 새 응답이 올 때까지 옛 행을 그대로 그린다(셀이 비었다 채워지는 깜빡임 방지). 테이블 전환은 블록을 버린다.
 - 총 행 수는 필터 조건을 포함한 `count(*)`로 필터 변경 시 1회만 계산한다.
 - 정렬은 항상 `id`를 보조 키로 붙여 안정적으로 만든다.
 
@@ -650,7 +650,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정). 그리드 오른쪽의 사이드 패널
 - `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`. DOM 없는 순수 상태이며 그리드가 렌더 때 읽는다
 - `clipboard.copy(range)` → TSV(`serializeTsv`), `clipboard.paste(text, anchor)` → `parseTsv` 후 복합 커맨드. 복사는 `navigator.clipboard.writeText`(범위의 전문은 `query.rows`로 읽는다), 붙여넣기는 그리드가 받는 `paste` 이벤트의 `clipboardData`다. Worker는 이를 `runBatch`로 실행한다
-- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08)
+- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.deleteRowRange({ tableId, offset, count })`(스냅샷 상한을 넘는 삭제. `undo`가 비고 `irreversible`), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08). 배치 목록은 `commands.chunkParams`가 `runBatch` 상한 단위로 나눈다
 - `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`. `history.apply(cmd)`는 `command.apply` → 스토어 기록 → `push`를 한 번에 한다. 스키마 op가 만든 커맨드는 스토어의 `onCommand` 알림으로 히스토리에 들어온다
 - Worker: `applyCommand(cmd)`(`BEGIN` ... `COMMIT`, 실패 시 `ROLLBACK`), `_updated_at` 갱신 트리거 대신 커맨드가 명시적으로 갱신
 

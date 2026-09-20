@@ -124,6 +124,68 @@ test('applyCommand: 취소 신호가 켜져 있으면 시작 전에 E_IMPORT_CAN
   await engine.close();
 });
 
+test('batch 단계: runBatch로 실행되고 do → undo → 덤프 동일, 빈 목록은 건너뛴다', async () => {
+  const engine = await openWasmEngine();
+  await engine.transaction(() => {
+    engine.run('CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT, n INTEGER) STRICT');
+  });
+  const before = dumpDb(engine);
+  /** @type {Command} */
+  const cmd = {
+    type: 'data.paste',
+    tableId: 't',
+    do: [
+      {
+        batch: {
+          sql: 'INSERT INTO t (id, s, n) VALUES (?, ?, ?)',
+          paramsList: [
+            [1, '가', 1],
+            [2, "O'Brien", null],
+            [3, null, 3],
+          ],
+        },
+      },
+      { batch: { sql: 'UPDATE t SET n = ? WHERE id = ?', paramsList: [] } },
+      { batch: { sql: 'UPDATE t SET n = ? WHERE id = ?', paramsList: [[30, 3]] } },
+    ],
+    undo: [{ batch: { sql: 'DELETE FROM t WHERE id = ?', paramsList: [[1], [2], [3]] } }],
+    summary: 'paste',
+  };
+  assert.equal(isCommand(cmd), true);
+  assert.equal(isCommand({ ...cmd, do: [{ batch: { sql: 'x' } }] }), false, 'paramsList 필수');
+  const applied = await applyCommand(engine, cmd, 'do');
+  assert.equal(applied.affected, 4, 'INSERT 3건 + UPDATE 1건');
+  assert.deepEqual(engine.exec('SELECT s, n FROM t ORDER BY id').rows, [
+    ['가', 1],
+    ["O'Brien", null],
+    [null, 30],
+  ]);
+  await applyCommand(engine, cmd, 'undo');
+  assert.deepEqual(dumpDb(engine), before);
+
+  // 배치 중간 실패는 앞 문장까지 모두 롤백한다(runBatch의 SAVEPOINT + 바깥 트랜잭션).
+  await assert.rejects(
+    applyCommand(engine, {
+      ...cmd,
+      do: [
+        { sql: 'INSERT INTO t (id, s) VALUES (?, ?)', params: [9, 'x'] },
+        {
+          batch: {
+            sql: 'INSERT INTO t (id, n) VALUES (?, ?)',
+            paramsList: [
+              [10, 1],
+              [11, 'no'],
+            ],
+          },
+        },
+      ],
+    }),
+    (e) => e instanceof AppError && e.code === 'E_DB_QUERY',
+  );
+  assert.deepEqual(engine.exec('SELECT count(*) FROM t').rows, [[0]]);
+  await engine.close();
+});
+
 test('convert 단계: 형태 검증과 정책별 동작, 진행률', async () => {
   const engine = await openWasmEngine();
   await engine.transaction(() => {

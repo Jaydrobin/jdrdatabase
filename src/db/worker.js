@@ -38,6 +38,7 @@ import {
 /** @typedef {import('./query.js').ViewSpec} ViewSpec */
 /** @typedef {import('./query.js').WindowRow} WindowRow */
 /** @typedef {import('./query.js').FullRow} FullRow */
+/** @typedef {import('./query.js').RowStats} RowStats */
 
 /**
  * `db.open`·`schema.adopt`의 결과.
@@ -81,6 +82,8 @@ import {
  *   'query.window': { args: { tableId: string, viewSpec: ViewSpec, offset: number, limit: number, seq: number }, result: { rows: WindowRow[], columnIds: string[], seq: number, elapsedMs: number } },
  *   'query.count': { args: { tableId: string, viewSpec: ViewSpec }, result: { count: number } },
  *   'query.row': { args: { tableId: string, rowId: number, colIds?: string[] }, result: { row: FullRow | null } },
+ *   'query.rows': { args: { tableId: string, viewSpec: ViewSpec, offset: number, limit: number, colIds?: string[] }, result: { rows: FullRow[] } },
+ *   'query.stats': { args: { tableId: string }, result: RowStats },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -366,6 +369,25 @@ export function createDispatcher(options) {
       return { row: query.fetchRow(active, table, args.rowId, args.colIds ?? []) };
     },
 
+    'query.rows': async (args) => {
+      const active = requireEngine();
+      const table = tables.requireTable(active, args.tableId);
+      return {
+        rows: query.fetchRows(
+          active,
+          table,
+          args.viewSpec ?? {},
+          { offset: args.offset, limit: args.limit },
+          args.colIds ?? [],
+        ),
+      };
+    },
+
+    'query.stats': async (args) => {
+      const active = requireEngine();
+      return query.stats(active, tables.requireTable(active, args.tableId));
+    },
+
     'db.close': async () => {
       await requireEngine().close();
       return null;
@@ -387,6 +409,8 @@ export function createDispatcher(options) {
     'query.window',
     'query.count',
     'query.row',
+    'query.rows',
+    'query.stats',
     'db.snapshot',
   ]);
 

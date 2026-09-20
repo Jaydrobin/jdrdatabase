@@ -13,6 +13,8 @@
   --jdr-warning-bg: #fff8c5;
   --jdr-accent: #0969da;
   --jdr-accent-hover: #0860ca;
+  --jdr-selection-bg: #ddf4ff;
+  --jdr-selection-strong-bg: #b6e3ff;
   --jdr-statusbar-height: 28px;
 }
 

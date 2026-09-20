@@ -2,8 +2,9 @@
 /**
  * 커맨드 실행기(D-08). `do` 또는 `undo` 문장 목록을 하나의 트랜잭션으로 실행한다.
  *
- * 문장은 `{ sql, params }`이며, Step 3의 열 타입 변경이 더하는 `{ convert }` 단계는 이 파일의
- * `runConvert`가 처리한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록되고 Worker 경계를 넘는다).
+ * 문장은 `{ sql, params }`이며, Step 5의 붙여넣기·다중 편집·행 삭제가 쓰는 `{ batch }` 단계는
+ * `engine.runBatch()`로, Step 3의 열 타입 변경이 더하는 `{ convert }` 단계는 이 파일의 `runConvert`가
+ * 처리한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록되고 Worker 경계를 넘는다).
  */
 import { AppError } from '../util/errors.js';
 import { quoteIdent } from './schema.js';
@@ -29,7 +30,12 @@ import { coerce, isLogicalType } from './values.js';
  * @property {ColumnOptions} [options] select 항목 등
  */
 /** @typedef {{ convert: ConvertStep }} ConvertStatement */
-/** @typedef {SqlStatement | ConvertStatement} Statement */
+/**
+ * 같은 문장을 파라미터 목록만큼 반복하는 단계(D-08). 목록 하나는 `runBatch` 상한 안이어야 하며
+ * 커맨드 생성기(`app/commands.js`)가 그 단위로 나눈다.
+ * @typedef {{ batch: { sql: string, paramsList: SqlParams[] } }} BatchStatement
+ */
+/** @typedef {SqlStatement | ConvertStatement | BatchStatement} Statement */
 
 /** 변환 복사가 한 번에 읽는 행 수. `runBatch` 상한(1만)보다 작게 둔다. */
 export const CONVERT_CHUNK_ROWS = 5_000;
@@ -90,7 +96,18 @@ export function isStatement(value) {
   if (typeof value !== 'object' || value === null) return false;
   const v = /** @type {Record<string, unknown>} */ (value);
   if ('convert' in v) return isConvertStep(v.convert);
+  if ('batch' in v) return isBatchStep(v.batch);
   return typeof v.sql === 'string';
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { sql: string, paramsList: SqlParams[] }}
+ */
+function isBatchStep(value) {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = /** @type {Record<string, unknown>} */ (value);
+  return typeof v.sql === 'string' && Array.isArray(v.paramsList);
 }
 
 /**
@@ -231,6 +248,11 @@ export async function applyCommand(engine, cmd, direction = 'do', ctx = {}) {
         const converted = await runConvert(engine, statement.convert, ctx);
         result.affected += converted.rows;
         result.nulled = (result.nulled ?? 0) + converted.nulled;
+      } else if ('batch' in statement) {
+        // 배치 하나가 비어 있으면 건너뛴다(붙여넣기가 기존 행 없이 새 행만 만들 때 등).
+        if (statement.batch.paramsList.length === 0) continue;
+        const done = await engine.runBatch(statement.batch.sql, statement.batch.paramsList);
+        result.affected += done.changes;
       } else {
         result.affected += engine.run(statement.sql, statement.params).changes;
       }

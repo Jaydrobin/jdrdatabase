@@ -5,15 +5,19 @@
  * 모드 문자열('wasm' | 'native') 판정은 이 파일에서만 한다(D-15). 다른 모듈은 `capabilities()`를 읽는다.
  * 데스크톱 모드는 Step 11에서 채워지며, 그 전까지는 `E_UNSUPPORTED`로 잠긴다(wasm 폴백 없음, D-15).
  */
-import { createSchemaCommands } from './app/commands.js';
+import { createSchemaCommands, editCell } from './app/commands.js';
+import { createHistory } from './app/history.js';
 import { createStore } from './app/store.js';
 import { createClient, createTransport } from './db/client.js';
+import { nowIso } from './db/schema.js';
 import { t } from './i18n/index.js';
 import { createAutosave } from './io/autosave.js';
 import * as filesystem from './io/filesystem.js';
 import { openIdb } from './io/idb.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
+import { confirmDialog } from './ui/dialogs/dialog.js';
+import { mountLongtextPanel } from './ui/editor/longtext.js';
 import { mountGridHost } from './ui/grid/grid.js';
 import { mountSidebar } from './ui/sidebar.js';
 import { mountStatusbar } from './ui/statusbar.js';
@@ -21,6 +25,7 @@ import { mountToasts } from './ui/toast.js';
 import { mountToolbar } from './ui/toolbar.js';
 import { base64ToBytes } from './util/bytes.js';
 import { AppError, toAppError } from './util/errors.js';
+import { formatInteger } from './util/format.js';
 
 /** @typedef {import('./db/client.js').Client} Client */
 /** @typedef {import('./db/engine.js').EngineMode} EngineMode */
@@ -218,6 +223,8 @@ async function start(shell) {
   let journal = null;
   /** @type {GridHost | null} */
   let gridHost = null;
+  /** @type {import('./app/history.js').History | null} */
+  let historyRef = null;
 
   if (__JDR_TEST__) {
     /** @type {Promise<{ transportKind: string, sqliteVersion: string }>} */
@@ -300,6 +307,8 @@ async function start(shell) {
         },
         /** 열린 그리드의 렌더·질의 통계(Step 4 성능 측정용). 그리드가 없으면 null. */
         grid: () => (gridHost ? gridHost.stats() : null),
+        /** 히스토리 스택 크기(Step 5 E2E용). */
+        history: () => (historyRef ? historyRef.state() : null),
       }),
       configurable: false,
       writable: false,
@@ -329,18 +338,53 @@ async function start(shell) {
     defaultFileName: t('file.defaultName'),
   });
   const active = store;
+  const history = createHistory({
+    client: session.client,
+    store: active,
+    notify: { error: (err) => shell.toasts.error(err), info: (k, p) => shell.toasts.info(k, p) },
+  });
 
-  mountToolbar(shell.toolbarHost, active);
+  historyRef = history;
+  mountToolbar(shell.toolbarHost, active, history);
   const sidebar = mountSidebar(shell.body, {
     store: active,
     commands: createSchemaCommands(active),
     toasts: shell.toasts,
   });
   shell.body.prepend(sidebar.el);
+  // 장문 편집기는 그리드 오른쪽의 사이드 패널이다. 확정은 셀 편집 커맨드 하나로 히스토리에 들어간다.
+  const longtext = mountLongtextPanel(shell.body, {
+    client: session.client,
+    toasts: shell.toasts,
+    onSave: async ({ target, oldValue, oldUpdatedAt, newValue }) => {
+      if (oldValue === newValue) return true;
+      const result = await history.apply(
+        editCell({
+          tableId: target.tableId,
+          rowId: target.rowId,
+          colId: target.column.id,
+          oldValue,
+          newValue,
+          oldUpdatedAt,
+          now: nowIso(),
+        }),
+      );
+      return result !== null;
+    },
+  });
   gridHost = mountGridHost(shell.main, {
     store: active,
     client: session.client,
     toasts: shell.toasts,
+    history,
+    longtext,
+    confirmIrreversible: ({ count }) =>
+      confirmDialog({
+        title: t('confirm.irreversible.title'),
+        message: t('confirm.irreversible.message', { count: formatInteger(count) }),
+        okLabel: t('confirm.irreversible.ok'),
+        danger: true,
+      }),
   });
 
   /** @param {BeforeUnloadEvent} ev */

@@ -1,13 +1,16 @@
 // @ts-check
 /**
  * 도구 모음(Step 2): 새로 만들기, 열기, 최근 파일, 저장, 다른 이름으로 저장, 파일 이름과 dirty 표시, 저널 상한 배너.
+ * Step 5: 되돌리기·다시 실행 버튼. 문서 수준 단축키(저장·되돌리기)는 `app/shortcuts.js`의 표를 따른다.
  * 사용자 데이터(파일 이름)는 textContent로만 넣는다.
  */
+import { mountShortcuts } from '../app/shortcuts.js';
 import { t } from '../i18n/index.js';
 import { capabilities, fileFromInput, getFileInput } from '../io/filesystem.js';
 import { isDialogOpen } from './dialogs/dialog.js';
 
 /** @typedef {import('../app/store.js').Store} Store */
+/** @typedef {import('../app/history.js').History} History */
 
 /**
  * @typedef {object} Toolbar
@@ -32,9 +35,10 @@ function makeButton(label, action) {
 /**
  * @param {HTMLElement} parent
  * @param {Store} store
+ * @param {History} history
  * @returns {Toolbar}
  */
-export function mountToolbar(parent, store) {
+export function mountToolbar(parent, store, history) {
   const el = document.createElement('header');
   el.className = 'jdr-toolbar';
   el.setAttribute('role', 'toolbar');
@@ -46,6 +50,8 @@ export function mountToolbar(parent, store) {
   recentButton.hidden = true;
   const saveButton = makeButton(t('toolbar.save'), 'save');
   const saveAsButton = makeButton(t('toolbar.saveAs'), 'save-as');
+  const undoButton = makeButton(t('toolbar.undo'), 'undo');
+  const redoButton = makeButton(t('toolbar.redo'), 'redo');
 
   const fileName = document.createElement('span');
   fileName.className = 'jdr-toolbar__file';
@@ -67,6 +73,8 @@ export function mountToolbar(parent, store) {
     recentButton,
     saveButton,
     saveAsButton,
+    undoButton,
+    redoButton,
     fileName,
     dirtyMark,
     readOnlyMark,
@@ -82,6 +90,14 @@ export function mountToolbar(parent, store) {
     saveButton.disabled = state.readOnly !== 'none';
     saveAsButton.disabled = state.readOnly !== 'none';
     banner.hidden = !state.journalFull;
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const h = history.state();
+    const writable = store.getState().readOnly === 'none';
+    undoButton.disabled = !writable || h.busy || h.undo === 0;
+    redoButton.disabled = !writable || h.busy || h.redo === 0;
   }
 
   // 폴백 열기 경로(D-04 2층): FSA가 없으면 숨은 <input type="file">을 연다. 이 요소는 문서에 상주하며
@@ -101,25 +117,22 @@ export function mountToolbar(parent, store) {
   const onRecent = () => void store.openRecent();
   const onSave = () => void store.save();
   const onSaveAs = () => void store.saveAs();
+  const onUndo = () => void history.undo();
+  const onRedo = () => void history.redo();
   newButton.addEventListener('click', onNew);
   openButton.addEventListener('click', onOpen);
   recentButton.addEventListener('click', onRecent);
   saveButton.addEventListener('click', onSave);
   saveAsButton.addEventListener('click', onSaveAs);
+  undoButton.addEventListener('click', onUndo);
+  redoButton.addEventListener('click', onRedo);
 
-  /** @param {KeyboardEvent} ev */
-  const onKeydown = (ev) => {
-    // 모달이 떠 있으면 그 답을 기다리는 흐름(열기, 저널 복구)이 진행 중이다. 그 도중의 저장은
-    // 아직 확정되지 않은 DB를 파일로 쓰고 저널을 비운다.
-    if (isDialogOpen()) return;
-    if (ev.isComposing) return;
-    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 's' || ev.key === 'S')) {
-      ev.preventDefault();
-      if (ev.shiftKey) void store.saveAs();
-      else void store.save();
-    }
-  };
-  document.addEventListener('keydown', onKeydown);
+  // 모달이 떠 있으면 그 답을 기다리는 흐름(열기, 저널 복구)이 진행 중이다. 그 도중의 저장은
+  // 아직 확정되지 않은 DB를 파일로 쓰고 저널을 비운다. 되돌리기도 같은 이유로 막는다.
+  const unmountShortcuts = mountShortcuts(
+    { save: onSave, saveAs: onSaveAs, undo: onUndo, redo: onRedo },
+    { guard: () => !isDialogOpen() },
+  );
 
   async function refreshRecent() {
     const recent = await store.recentFile();
@@ -131,6 +144,7 @@ export function mountToolbar(parent, store) {
     store.on('state:changed', render),
     store.on('file:saved', () => void refreshRecent()),
     store.on('file:opened', () => void refreshRecent()),
+    history.onChange(renderHistory),
   ];
   render();
   void refreshRecent();
@@ -144,7 +158,9 @@ export function mountToolbar(parent, store) {
       recentButton.removeEventListener('click', onRecent);
       saveButton.removeEventListener('click', onSave);
       saveAsButton.removeEventListener('click', onSaveAs);
-      document.removeEventListener('keydown', onKeydown);
+      undoButton.removeEventListener('click', onUndo);
+      redoButton.removeEventListener('click', onRedo);
+      unmountShortcuts();
       for (const off of unsubscribe) off();
       el.remove();
     },

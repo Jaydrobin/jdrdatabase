@@ -11,8 +11,10 @@ import {
   count,
   denseFromId,
   fetchRow,
+  fetchRows,
   fetchWindow,
   PREVIEW_CHARS,
+  stats,
   visibleColumns,
 } from '../../../src/db/query.js';
 import { migrate } from '../../../src/db/schema.js';
@@ -124,6 +126,53 @@ test('fetchRow: 전문 로드(미리보기 없음), 없는 행은 null, 없는 �
   assert.deepEqual(Object.keys(only?.cells ?? {}), [body]);
   assert.equal(fetchRow(engine, table, 999), null);
   assert.throws(() => fetchRow(engine, table, 1, ['c_nope0000']), /column not found/);
+  // 시스템 열의 시각도 함께 온다(되돌리기가 원래대로 되돌려 놓는 데 쓴다). 직접 넣은 행이라 null.
+  assert.equal(row?.createdAt, null);
+  assert.equal(row?.updatedAt, null);
+});
+
+test('fetchRows: 뷰 순서로 offset·limit, 열을 비우면 소프트 삭제된 열까지, stats는 count·minId·maxId', async () => {
+  const { engine, table, tableId, name, age, body, flag, long } = await setup();
+  await engine.transaction(() => {
+    engine.run(`UPDATE "${tableId}" SET "_updated_at" = ? WHERE "id" = ?`, [
+      '2026-01-01T00:00:00.000Z',
+      1,
+    ]);
+  });
+  const all = fetchRows(engine, table, {}, { offset: 0, limit: 10 });
+  assert.equal(all.length, 3);
+  assert.deepEqual(
+    all.map((r) => r.id),
+    [1, 2, 3],
+  );
+  assert.equal(all[0]?.updatedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(all[1]?.cells[body], long, '미리보기가 아니라 전문');
+  const page = fetchRows(engine, table, {}, { offset: 1, limit: 1 }, [name, age]);
+  assert.deepEqual(page, [
+    { id: 2, cells: { [name]: '둘', [age]: null }, createdAt: null, updatedAt: null },
+  ]);
+  assert.throws(() => fetchRows(engine, table, {}, { offset: 0, limit: 20_000 }), /limit/);
+  assert.throws(
+    () => fetchRows(engine, table, {}, { offset: 0, limit: 1 }, ['c_nope0000']),
+    /column not found/,
+  );
+
+  // 소프트 삭제된 열: 열 목록을 비우면 스냅샷에 포함되고, 명시하면 살아 있는 열만 고를 수 있다.
+  await tables.softDeleteColumn(engine, tableId, flag);
+  const after = tables.requireTable(engine, tableId);
+  const snapshot = fetchRows(engine, after, {}, { offset: 0, limit: 1 });
+  assert.deepEqual(Object.keys(snapshot[0]?.cells ?? {}).sort(), [name, age, body, flag].sort());
+  assert.throws(
+    () => fetchRows(engine, after, {}, { offset: 0, limit: 1 }, [flag]),
+    /column not found/,
+  );
+
+  assert.deepEqual(stats(engine, after), { count: 3, minId: 1, maxId: 3 });
+  await engine.transaction(() => {
+    engine.run(`DELETE FROM "${tableId}"`);
+  });
+  assert.deepEqual(stats(engine, after), { count: 0, minId: null, maxId: null });
+  await engine.close();
 });
 
 test('visibleColumns: position 순서, 소프트 삭제·숨김 제외', async () => {

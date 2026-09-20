@@ -8,8 +8,30 @@ import { BLOCK_ROWS, createBlockCache, MAX_BLOCKS } from '../../../../src/ui/gri
  * @returns {import('../../../../src/ui/grid/cache.js').CachedBlock}
  */
 function entry(block) {
-  return { block, rows: [{ id: block * BLOCK_ROWS + 1, cells: [], lengths: [] }], columnIds: [] };
+  return {
+    block,
+    rows: [{ id: block * BLOCK_ROWS + 1, cells: [], lengths: [] }],
+    columnIds: [],
+    version: 0,
+  };
 }
+
+test('블록 캐시: markStale은 블록을 버리지 않고 has만 false로, put이 다시 살린다', () => {
+  const cache = createBlockCache();
+  cache.put('t_a', entry(0));
+  cache.put('t_b', entry(0));
+  cache.markStale('t_a');
+  assert.equal(cache.has('t_a', 0), false, '다시 요청하게 한다');
+  assert.equal(cache.get('t_a', 0)?.rows[0]?.id, 1, '새 응답 전까지 옛 행을 돌려준다');
+  assert.equal(cache.has('t_b', 0), true);
+  cache.put('t_a', entry(0));
+  assert.equal(cache.has('t_a', 0), true);
+  assert.deepEqual(
+    cache.blocks('t_a').map((b) => b.block),
+    [0],
+  );
+  assert.equal(cache.size(), 2);
+});
 
 test('블록 캐시: D-06 상수(200행, 50블록)', () => {
   assert.equal(BLOCK_ROWS, 200);

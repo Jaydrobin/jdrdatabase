@@ -8,14 +8,19 @@
  * - 렌더 경로는 레이아웃 측정을 한 번(뷰포트 크기·스크롤 위치)만 하고, 인라인 스타일은 위치 계산
  *   (`transform`, `width`, `height`)에만 쓴다(CLAUDE.md 5.5).
  * - 사용자 데이터는 `cells.render`가 textContent로만 넣는다.
+ * - 편집(Step 5): 선택 모델(`selection.js`)을 그리고, 편집·삭제·복사·붙여넣기·행 추가·삭제 요청은
+ *   `hooks`로 편집 컨트롤러(`editing.js`)에 넘긴다. 커맨드는 이 파일에서 만들지 않는다.
  */
+import { resolveShortcut } from '../../app/shortcuts.js';
 import { MIN_COLUMN_WIDTH } from '../../app/store.js';
-import { visibleColumns } from '../../db/query.js';
+import { PREVIEW_CHARS, visibleColumns } from '../../db/query.js';
 import { t } from '../../i18n/index.js';
 import { toAppError } from '../../util/errors.js';
 import { formatInteger } from '../../util/format.js';
 import { BLOCK_ROWS, createBlockCache } from './cache.js';
 import { render as renderCell } from './cells.js';
+import { createEditingController } from './editing.js';
+import { createSelection } from './selection.js';
 
 /** @typedef {import('../../app/store.js').Store} Store */
 /** @typedef {import('../../app/store.js').TableViewState} TableViewState */
@@ -25,6 +30,12 @@ import { render as renderCell } from './cells.js';
 /** @typedef {import('../../db/tables.js').TableInfo} TableInfo */
 /** @typedef {import('../../db/tables.js').ColumnInfo} ColumnInfo */
 /** @typedef {import('../toast.js').Toasts} Toasts */
+/** @typedef {import('../../db/engine.js').SqlValue} SqlValue */
+/** @typedef {import('./selection.js').Selection} Selection */
+/** @typedef {import('./selection.js').CellRange} CellRange */
+/** @typedef {import('./editing.js').GridHooks} GridHooks */
+/** @typedef {import('../../app/history.js').History} History */
+/** @typedef {import('../editor/longtext.js').LongtextPanel} LongtextPanel */
 
 /** 행 높이(px, D-05). */
 export const ROW_HEIGHT = 32;
@@ -192,6 +203,34 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {(row: number, col: number) => void} scrollToCell
  * @property {() => GridStats} stats
  * @property {() => void} unmount
+ * @property {(hooks: GridHooks | null) => void} setHooks 편집 컨트롤러 연결(Step 5)
+ * @property {() => Selection} selection 선택 모델(읽기용)
+ * @property {(row: number, col: number, extend?: boolean) => void} moveCursor 활성 셀 이동(+스크롤). `extend`면 범위를 넓힌다
+ * @property {() => TableInfo | null} table
+ * @property {() => ColumnInfo[]} columns 지금 그리는 열(살아 있고 숨기지 않은 열, 표시 순서)
+ * @property {() => number} rowCount
+ * @property {(row: number, col: number) => CellInfo | null} cellInfo 캐시에 있는 셀의 값·행 id. 아직 읽지 않았으면 null
+ * @property {(row: number, col: number) => { left: number, top: number, width: number, height: number }} cellRect 캔버스 기준 셀 위치
+ * @property {(rowId: number, colId: string, value: SqlValue) => void} patchCell 캐시의 셀 값을 고쳐 다시 그린다(편집 확정 직후)
+ * @property {HTMLElement} editorHost 인라인 편집기를 붙이는 요소(캔버스)
+ * @property {() => void} focus 스크롤 영역(role=grid)에 포커스
+ */
+
+/**
+ * 렌더 한 번 동안 고정되는 선택 상태.
+ * @typedef {object} SelectionSnapshot
+ * @property {CellRange} range
+ * @property {{ row: number, col: number }} active
+ * @property {boolean} multi 범위가 셀 하나보다 큰가
+ */
+
+/**
+ * 캐시에서 읽은 셀 정보.
+ * @typedef {object} CellInfo
+ * @property {number} rowId
+ * @property {ColumnInfo} column
+ * @property {SqlValue} value 미리보기(텍스트는 256자까지)
+ * @property {number | null} length 미리보기가 잘렸으면 전체 문자 수
  */
 
 /**
@@ -212,6 +251,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {number[]} cellVersions 마지막으로 내용을 그린 데이터 세대
  * @property {boolean[]} cellFrozen 마지막으로 쓴 고정 여부
  * @property {boolean[]} cellCursor 마지막으로 쓴 활성 셀 여부
+ * @property {boolean[]} cellSelected 마지막으로 쓴 선택 범위 포함 여부
  * @property {number} y 마지막으로 쓴 translateY
  */
 
@@ -249,7 +289,17 @@ export function createGrid(deps) {
   const frozenSelect = document.createElement('select');
   frozenSelect.className = 'jdr-grid__frozen-select';
   frozenLabel.append(frozenText, frozenSelect);
-  bar.append(rowCountLabel, frozenLabel);
+  const rowInsertButton = document.createElement('button');
+  rowInsertButton.type = 'button';
+  rowInsertButton.className = 'jdr-grid__button';
+  rowInsertButton.dataset.action = 'row-insert';
+  rowInsertButton.textContent = t('grid.rowInsert');
+  const rowDeleteButton = document.createElement('button');
+  rowDeleteButton.type = 'button';
+  rowDeleteButton.className = 'jdr-grid__button';
+  rowDeleteButton.dataset.action = 'row-delete';
+  rowDeleteButton.textContent = t('grid.rowDelete');
+  bar.append(rowCountLabel, frozenLabel, rowInsertButton, rowDeleteButton);
 
   const scroller = div('jdr-grid__scroller', 'grid');
   scroller.tabIndex = 0;
@@ -284,8 +334,13 @@ export function createGrid(deps) {
   const pool = [];
   /** @type {HTMLElement[]} */
   const headerCells = [];
-  /** @type {{ row: number, col: number }} */
-  const cursor = { row: 0, col: 0 };
+  const selection = createSelection();
+  /** @type {GridHooks | null} */
+  let hooks = null;
+  /** 블록 내용 세대. 새 응답·셀 패치마다 오르고, 칸은 자기 세대와 다르면 다시 그린다. */
+  let dataVersion = 0;
+  /** `rowAt()`이 돌려준 행의 블록 세대(할당 없이 넘기기 위한 모듈 변수). */
+  let lastRowVersion = -1;
   let viewportWidth = 0;
   let viewportHeight = 0;
   let rafId = 0;
@@ -423,6 +478,7 @@ export function createGrid(deps) {
       cellVersions: [-1],
       cellFrozen: [true],
       cellCursor: [false],
+      cellSelected: [false],
       y: -1,
     };
   }
@@ -433,8 +489,22 @@ export function createGrid(deps) {
     slot.el.hidden = true;
     for (let k = 0; k < slot.cellCursor.length; k += 1) {
       if (slot.cellCursor[k]) setCursorCell(slot, k, false);
+      if (slot.cellSelected[k]) setSelectedCell(slot, k, false);
     }
     pool.push(slot);
+  }
+
+  /**
+   * 선택 범위 표시. 활성 셀과 같은 방식으로 칸마다 마지막 값을 들고 비교한다.
+   * @param {RowSlot} slot
+   * @param {number} k
+   * @param {boolean} on
+   */
+  function setSelectedCell(slot, k, on) {
+    const cell = slot.cells[k];
+    if (!cell) return;
+    slot.cellSelected[k] = on;
+    cell.classList.toggle('jdr-grid__cell--selected', on);
   }
 
   /**
@@ -461,8 +531,9 @@ export function createGrid(deps) {
    * @param {number} scrollLeft
    * @param {{ start: number, end: number }} colRange
    * @param {WindowRow | null} data
+   * @param {SelectionSnapshot} sel 이번 렌더의 선택 상태(행마다 다시 읽지 않는다)
    */
-  function renderRow(slot, rowIndex, y, scrollLeft, colRange, data) {
+  function renderRow(slot, rowIndex, y, scrollLeft, colRange, data, sel) {
     const rowEl = slot.el;
     if (slot.rowIndex !== rowIndex) {
       // 풀에서 꺼낸 요소는 다른 행의 내용을 담고 있다. 칸 내용을 모두 다시 그리게 표시한다.
@@ -482,6 +553,9 @@ export function createGrid(deps) {
       slot.cellLefts[0] = scrollLeft;
       setTransform(rowNumber, scrollLeft, 0);
     }
+    const { range, active, multi } = sel;
+    const rowSelected = rowIndex >= range.r0 && rowIndex <= range.r1;
+    if (slot.cellSelected[0] !== rowSelected) setSelectedCell(slot, 0, rowSelected);
     const needed = 1 + frozen + Math.max(0, colRange.end - colRange.start);
     while (slot.cells.length < needed) {
       const cell = div('jdr-grid__cell', 'gridcell');
@@ -493,6 +567,7 @@ export function createGrid(deps) {
       slot.cellVersions.push(-1);
       slot.cellFrozen.push(false);
       slot.cellCursor.push(false);
+      slot.cellSelected.push(false);
     }
     while (slot.cells.length > needed) {
       slot.cells.pop()?.remove();
@@ -502,8 +577,9 @@ export function createGrid(deps) {
       slot.cellVersions.pop();
       slot.cellFrozen.pop();
       slot.cellCursor.pop();
+      slot.cellSelected.pop();
     }
-    const rowVersion = data ? generation : -1;
+    const rowVersion = data ? lastRowVersion : -1;
     for (let k = 1; k < needed; k += 1) {
       const colIndex = k <= frozen ? k - 1 : colRange.start + (k - 1 - frozen);
       const cell = /** @type {HTMLElement} */ (slot.cells[k]);
@@ -539,8 +615,11 @@ export function createGrid(deps) {
           cell.textContent = '';
         }
       }
-      const isCursor = rowIndex === cursor.row && colIndex === cursor.col;
+      const isCursor = rowIndex === active.row && colIndex === active.col;
       if (slot.cellCursor[k] !== isCursor) setCursorCell(slot, k, isCursor);
+      const isSelected =
+        multi && rowSelected && colIndex >= range.c0 && colIndex <= range.c1 && !isCursor;
+      if (slot.cellSelected[k] !== isSelected) setSelectedCell(slot, k, isSelected);
     }
   }
 
@@ -554,6 +633,7 @@ export function createGrid(deps) {
     if (!table) return null;
     const block = Math.floor(rowIndex / BLOCK_ROWS);
     const cached = cache.get(table.id, block);
+    lastRowVersion = cached ? cached.version : -1;
     return cached?.rows[rowIndex - block * BLOCK_ROWS] ?? null;
   }
 
@@ -611,7 +691,13 @@ export function createGrid(deps) {
       // 도착한 응답은 다른 열 목록으로 만들어졌을 수 있고, 그대로 그리면 값이 남의 열 밑에 들어간다.
       // 버린 블록은 캐시에 없으므로 목록이 맞춰진 뒤의 렌더가 다시 요청한다.
       if (!sameColumns(result.columnIds)) return;
-      cache.put(tableId, { block, rows: result.rows, columnIds: result.columnIds });
+      dataVersion += 1;
+      cache.put(tableId, {
+        block,
+        rows: result.rows,
+        columnIds: result.columnIds,
+        version: dataVersion,
+      });
       scheduleRender();
     } catch (err) {
       if (gen !== generation) return;
@@ -652,6 +738,12 @@ export function createGrid(deps) {
     const colRange = computeColumnRange(scrollLeft, viewportWidth, { lefts, widths, frozen });
     ensureBlocks(range);
     placeHeader(scrollLeft, colRange);
+    /** @type {SelectionSnapshot} */
+    const sel = {
+      range: selection.getRange(),
+      active: selection.getActive(),
+      multi: !selection.isSingle(),
+    };
 
     for (const [rowIndex, slot] of active) {
       if (rowIndex < range.start || rowIndex >= range.end) {
@@ -666,7 +758,7 @@ export function createGrid(deps) {
         active.set(i, slot);
       }
       const y = range.offsetY + (i - range.first) * ROW_HEIGHT;
-      renderRow(slot, i, y, scrollLeft, colRange, rowAt(i));
+      renderRow(slot, i, y, scrollLeft, colRange, rowAt(i), sel);
     }
     stats.renders += 1;
     stats.domRows = active.size;
@@ -750,67 +842,188 @@ export function createGrid(deps) {
     if (table && column) store.setColumnWidth(table.id, column.id, widths[col] ?? column.width);
   };
 
-  /** @param {MouseEvent} ev */
-  const onCanvasClick = (ev) => {
-    const target = /** @type {HTMLElement | null} */ (ev.target);
-    const cell = target?.closest('.jdr-grid__cell');
+  /**
+   * 이벤트가 난 셀의 좌표. 행 번호 칸이면 `col`은 -1.
+   * @param {EventTarget | null} target
+   * @returns {{ row: number, col: number } | null}
+   */
+  function cellAt(target) {
+    const el = /** @type {HTMLElement | null} */ (target);
+    const cell = el?.closest('.jdr-grid__cell');
     const rowEl = cell?.parentElement;
-    if (!(cell instanceof HTMLElement) || !(rowEl instanceof HTMLElement)) return;
+    if (!(cell instanceof HTMLElement) || !(rowEl instanceof HTMLElement)) return null;
     const row = Number(rowEl.dataset.row ?? -1);
+    if (row < 0) return null;
+    if (cell.classList.contains('jdr-grid__cell--rownum')) return { row, col: -1 };
     const col = Number(cell.dataset.col ?? -1);
-    if (row < 0 || col < 0) return;
-    moveCursor(row, col);
+    return col < 0 ? null : { row, col };
+  }
+
+  /** 드래그 선택 상태. */
+  /** @type {{ pointerId: number, rows: boolean } | null} */
+  let dragging = null;
+
+  /** @param {PointerEvent} ev */
+  const onCanvasPointerDown = (ev) => {
+    if (ev.button !== 0) return;
+    // 편집기 안의 포인터 이벤트는 편집기의 것이다.
+    if (ev.target instanceof HTMLElement && ev.target.closest('.jdr-editor')) return;
+    const pos = cellAt(ev.target);
+    if (!pos) return;
+    // 셀을 누르면 포커스가 스크롤 영역에 남아야 키보드 입력이 이어진다. 편집기가 열려 있으면 blur가
+    // 확정을 시도하므로 여기서 preventDefault로 포커스 이동을 막지 않는다.
+    if (pos.col < 0) {
+      if (ev.shiftKey) selection.selectRows(selection.getRange().r0, pos.row);
+      else selection.selectRows(pos.row, pos.row);
+      dragging = { pointerId: ev.pointerId, rows: true };
+    } else {
+      if (ev.shiftKey) selection.extendTo(pos.row, pos.col);
+      else selection.setActive(pos.row, pos.col);
+      dragging = { pointerId: ev.pointerId, rows: false };
+    }
+    // 포인터 캡처는 쓰지 않는다. 캡처하면 뒤따르는 click·dblclick의 target이 캔버스가 되어 어느 셀을
+    // 두 번 눌렀는지 알 수 없다. 드래그는 캔버스 위의 pointermove와 버튼 상태로만 잇는다.
+    scheduleRender();
+  };
+  /** @param {PointerEvent} ev */
+  const onCanvasPointerMove = (ev) => {
+    if (!dragging || ev.pointerId !== dragging.pointerId) return;
+    if (ev.buttons === 0) {
+      dragging = null;
+      return;
+    }
+    const pos = cellAt(document.elementFromPoint(ev.clientX, ev.clientY));
+    if (!pos) return;
+    const range = selection.getRange();
+    const active = selection.getActive();
+    if (dragging.rows) {
+      if (active.row !== pos.row) {
+        const anchorRow = active.row === range.r0 ? range.r1 : range.r0;
+        selection.selectRows(anchorRow, pos.row);
+        scheduleRender();
+      }
+    } else if (pos.col >= 0 && (active.row !== pos.row || active.col !== pos.col)) {
+      selection.extendTo(pos.row, pos.col);
+      scheduleRender();
+    }
+  };
+  /** @param {PointerEvent} ev */
+  const onCanvasPointerUp = (ev) => {
+    if (!dragging || ev.pointerId !== dragging.pointerId) return;
+    dragging = null;
+  };
+  /** @param {MouseEvent} ev */
+  const onCanvasDblClick = (ev) => {
+    if (ev.target instanceof HTMLElement && ev.target.closest('.jdr-editor')) return;
+    const pos = cellAt(ev.target);
+    if (!pos || pos.col < 0) return;
+    selection.setActive(pos.row, pos.col);
+    scheduleRender();
+    hooks?.onEdit(pos.row, pos.col, null);
   };
 
   /**
    * @param {number} row
    * @param {number} col
+   * @param {boolean} [extend]
    */
-  function moveCursor(row, col) {
+  function moveCursor(row, col, extend = false) {
     if (rowCount === 0 || columns.length === 0) return;
-    cursor.row = clamp(row, 0, rowCount - 1);
-    cursor.col = clamp(col, 0, columns.length - 1);
-    grid.scrollToCell(cursor.row, cursor.col);
+    const r = clamp(row, 0, rowCount - 1);
+    const c = clamp(col, 0, columns.length - 1);
+    if (extend) selection.extendTo(r, c);
+    else selection.setActive(r, c);
+    grid.scrollToCell(r, c);
     scheduleRender();
   }
 
   /** @param {KeyboardEvent} ev */
   const onKeydown = (ev) => {
     if (ev.isComposing || !table) return;
+    // 편집기 안의 키는 편집기가 stopPropagation으로 막지만, 만일을 위해 스크롤 영역 자신의 키만 다룬다.
+    if (ev.target !== scroller) return;
     const pageRows = Math.max(1, Math.floor(viewportHeight / ROW_HEIGHT) - 1);
+    const active = selection.getActive();
+    const extend = ev.shiftKey;
     let handled = true;
     switch (ev.key) {
       case 'ArrowDown':
-        moveCursor(cursor.row + 1, cursor.col);
+        moveCursor(active.row + 1, active.col, extend);
         break;
       case 'ArrowUp':
-        moveCursor(cursor.row - 1, cursor.col);
+        moveCursor(active.row - 1, active.col, extend);
         break;
       case 'ArrowRight':
-        moveCursor(cursor.row, cursor.col + 1);
+        moveCursor(active.row, active.col + 1, extend);
         break;
       case 'ArrowLeft':
-        moveCursor(cursor.row, cursor.col - 1);
+        moveCursor(active.row, active.col - 1, extend);
         break;
       case 'PageDown':
-        moveCursor(cursor.row + pageRows, cursor.col);
+        moveCursor(active.row + pageRows, active.col, extend);
         break;
       case 'PageUp':
-        moveCursor(cursor.row - pageRows, cursor.col);
+        moveCursor(active.row - pageRows, active.col, extend);
         break;
       case 'Home':
-        if (ev.ctrlKey || ev.metaKey) moveCursor(0, 0);
-        else moveCursor(cursor.row, 0);
+        if (ev.ctrlKey || ev.metaKey) moveCursor(0, 0, extend);
+        else moveCursor(active.row, 0, extend);
         break;
       case 'End':
-        if (ev.ctrlKey || ev.metaKey) moveCursor(rowCount - 1, columns.length - 1);
-        else moveCursor(cursor.row, columns.length - 1);
+        if (ev.ctrlKey || ev.metaKey) moveCursor(rowCount - 1, columns.length - 1, extend);
+        else moveCursor(active.row, columns.length - 1, extend);
         break;
       default:
         handled = false;
     }
-    if (handled) ev.preventDefault();
+    if (handled) {
+      ev.preventDefault();
+      return;
+    }
+    if (!hooks) return;
+    const action = resolveShortcut(ev, 'grid');
+    if (action === 'edit') {
+      ev.preventDefault();
+      hooks.onEdit(active.row, active.col, null);
+    } else if (action === 'cancel') {
+      if (!selection.isSingle()) {
+        selection.setActive(active.row, active.col);
+        scheduleRender();
+      }
+    } else if (action === 'clear') {
+      ev.preventDefault();
+      hooks.onClear(selection.getRange());
+    } else if (action === 'copy') {
+      ev.preventDefault();
+      hooks.onCopy(selection.getRange());
+    } else if (action === 'selectAll') {
+      ev.preventDefault();
+      selection.selectAll();
+      scheduleRender();
+    } else if (action === 'rowInsert') {
+      ev.preventDefault();
+      hooks.onRowInsert();
+    } else if (action === 'rowDelete') {
+      ev.preventDefault();
+      hooks.onRowDelete(selection.getRange());
+    } else if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      // 셀에서 바로 타이핑: 첫 글자를 편집기의 초기값으로 넘긴다(Step 5 예외 처리).
+      ev.preventDefault();
+      hooks.onEdit(active.row, active.col, ev.key);
+    }
   };
+
+  /** @param {ClipboardEvent} ev */
+  const onPaste = (ev) => {
+    if (!hooks || !table) return;
+    if (ev.target instanceof HTMLElement && ev.target.closest('.jdr-editor')) return;
+    const text = ev.clipboardData?.getData('text/plain') ?? '';
+    if (!text) return;
+    ev.preventDefault();
+    hooks.onPaste(text, selection.getActive());
+  };
+  const onRowInsertClick = () => hooks?.onRowInsert();
+  const onRowDeleteClick = () => hooks?.onRowDelete(selection.getRange());
 
   /**
    * 리스너는 마운트에서 한 번에 걸고 언마운트에서 한 번에 뗀다(CLAUDE.md 5.5). 등록을 `createGrid`에
@@ -823,8 +1036,15 @@ export function createGrid(deps) {
     header.addEventListener('pointermove', onHeaderPointerMove);
     header.addEventListener('pointerup', onHeaderPointerUp);
     header.addEventListener('pointercancel', onHeaderPointerUp);
-    canvas.addEventListener('click', onCanvasClick);
+    canvas.addEventListener('pointerdown', onCanvasPointerDown);
+    canvas.addEventListener('pointermove', onCanvasPointerMove);
+    canvas.addEventListener('pointerup', onCanvasPointerUp);
+    canvas.addEventListener('pointercancel', onCanvasPointerUp);
+    canvas.addEventListener('dblclick', onCanvasDblClick);
     scroller.addEventListener('keydown', onKeydown);
+    scroller.addEventListener('paste', onPaste);
+    rowInsertButton.addEventListener('click', onRowInsertClick);
+    rowDeleteButton.addEventListener('click', onRowDeleteClick);
   }
 
   function removeListeners() {
@@ -834,8 +1054,15 @@ export function createGrid(deps) {
     header.removeEventListener('pointermove', onHeaderPointerMove);
     header.removeEventListener('pointerup', onHeaderPointerUp);
     header.removeEventListener('pointercancel', onHeaderPointerUp);
-    canvas.removeEventListener('click', onCanvasClick);
+    canvas.removeEventListener('pointerdown', onCanvasPointerDown);
+    canvas.removeEventListener('pointermove', onCanvasPointerMove);
+    canvas.removeEventListener('pointerup', onCanvasPointerUp);
+    canvas.removeEventListener('pointercancel', onCanvasPointerUp);
+    canvas.removeEventListener('dblclick', onCanvasDblClick);
     scroller.removeEventListener('keydown', onKeydown);
+    scroller.removeEventListener('paste', onPaste);
+    rowInsertButton.removeEventListener('click', onRowInsertClick);
+    rowDeleteButton.removeEventListener('click', onRowDeleteClick);
   }
 
   function clearRows() {
@@ -854,6 +1081,7 @@ export function createGrid(deps) {
         resizeObserver?.observe(scroller);
         mounted = true;
       }
+      hooks?.onReset();
       generation += 1;
       inflight.clear();
       cache.invalidate();
@@ -861,8 +1089,8 @@ export function createGrid(deps) {
       table = options.table;
       viewSpec = options.viewSpec;
       columns = visibleColumns(table, viewSpec);
-      cursor.row = 0;
-      cursor.col = 0;
+      selection.reset();
+      selection.setBounds(0, columns.length);
       rowCount = 0;
       stats.rowCount = 0;
       applyColumnLayout(options.view);
@@ -902,7 +1130,8 @@ export function createGrid(deps) {
       canvas.style.height = `${canvasHeightFor(layout())}px`;
       scroller.setAttribute('aria-rowcount', String(rowCount + 1));
       rowCountLabel.textContent = t('grid.rowCount', { count: formatInteger(rowCount) });
-      if (cursor.row >= rowCount) cursor.row = Math.max(0, rowCount - 1);
+      selection.setBounds(rowCount, columns.length);
+      rowDeleteButton.disabled = rowCount === 0;
       scheduleRender();
     },
 
@@ -918,7 +1147,8 @@ export function createGrid(deps) {
       if (!table) return;
       generation += 1;
       inflight.clear();
-      cache.invalidate(table.id);
+      // 블록을 버리지 않고 낡은 것으로만 표시한다. 새 응답이 올 때까지 옛 행을 그려 깜빡임을 없앤다.
+      cache.markStale(table.id);
       void recount(table.id, generation);
       scheduleRender();
     },
@@ -959,6 +1189,7 @@ export function createGrid(deps) {
 
     unmount() {
       if (!mounted) return;
+      hooks?.onReset();
       if (rafId !== 0) cancelAnimationFrame(rafId);
       rafId = 0;
       removeListeners();
@@ -970,6 +1201,75 @@ export function createGrid(deps) {
       table = null;
       el.remove();
       mounted = false;
+    },
+
+    setHooks(next) {
+      hooks = next;
+    },
+
+    selection: () => selection,
+
+    moveCursor(row, col, extend = false) {
+      moveCursor(row, col, extend);
+    },
+
+    table: () => table,
+    columns: () => columns,
+    rowCount: () => rowCount,
+
+    cellInfo(row, col) {
+      const column = columns[col];
+      const data = rowAt(row);
+      if (!column || !data) return null;
+      return {
+        rowId: data.id,
+        column,
+        value: data.cells[col] ?? null,
+        length: data.lengths[col] ?? null,
+      };
+    },
+
+    cellRect(row, col) {
+      const c = clamp(col, 0, Math.max(0, columns.length - 1));
+      const scrollLeft = scroller.scrollLeft;
+      const range = computeRange(scroller.scrollTop, viewportHeight, layout());
+      const top = range.offsetY + (row - range.first) * ROW_HEIGHT;
+      const isFrozen = c < frozen;
+      return {
+        left: (lefts[c] ?? 0) + (isFrozen ? scrollLeft : 0),
+        top,
+        width: widths[c] ?? 0,
+        height: ROW_HEIGHT,
+      };
+    },
+
+    patchCell(rowId, colId, value) {
+      if (!table) return;
+      const col = columns.findIndex((c) => c.id === colId);
+      if (col < 0) return;
+      const column = columns[col];
+      for (const block of cache.blocks(table.id)) {
+        const row = block.rows.find((r) => r.id === rowId);
+        if (!row) continue;
+        const isText = column?.type === 'text' || column?.type === 'longtext';
+        if (isText && typeof value === 'string' && value.length > PREVIEW_CHARS) {
+          row.cells[col] = value.slice(0, PREVIEW_CHARS);
+          row.lengths[col] = value.length;
+        } else {
+          row.cells[col] = value;
+          row.lengths[col] = null;
+        }
+        dataVersion += 1;
+        block.version = dataVersion;
+        scheduleRender();
+        return;
+      }
+    },
+
+    editorHost: canvas,
+
+    focus() {
+      scroller.focus();
     },
   };
   return grid;
@@ -984,9 +1284,9 @@ export function createGrid(deps) {
 
 /**
  * 메인 영역의 그리드 호스트: 스토어의 선택·테이블·뷰·데이터 변경을 구독해 그리드를 열고 닫고,
- * 테이블이 없거나 열이 없으면 빈 상태를 보여 준다.
+ * 테이블이 없거나 열이 없으면 빈 상태를 보여 준다. 편집 컨트롤러(Step 5)를 그리드에 잇는다.
  * @param {HTMLElement} container
- * @param {{ store: Store, client: Client, toasts: Toasts }} deps
+ * @param {{ store: Store, client: Client, toasts: Toasts, history: History, longtext: LongtextPanel, confirmIrreversible: (info: { count: number }) => Promise<boolean> }} deps
  * @returns {GridHost}
  */
 export function mountGridHost(container, deps) {
@@ -1011,6 +1311,16 @@ export function mountGridHost(container, deps) {
       store.selectTable(null);
       store.refreshTables().catch((/** @type {unknown} */ e) => toasts.error(toAppError(e)));
     },
+  });
+
+  const editing = createEditingController({
+    grid,
+    client,
+    store,
+    history: deps.history,
+    toasts,
+    longtext: deps.longtext,
+    confirmIrreversible: deps.confirmIrreversible,
   });
 
   function closeGrid() {
@@ -1065,6 +1375,7 @@ export function mountGridHost(container, deps) {
     unmount() {
       for (const off of unsubscribe) off();
       closeGrid();
+      editing.dispose();
       el.remove();
     },
   };

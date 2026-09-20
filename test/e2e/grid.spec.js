@@ -506,10 +506,11 @@ test('스키마가 바뀐 뒤 다시 마운트되기 전에 온 창 질의 응�
     .poll(async () => (await hook(page).grid())?.queries ?? 0, { timeout: 5_000 })
     .toBeGreaterThan(before);
 
-  // 아직 옛 머리글이면 경주가 열려 있는 구간이다. 여기서 값이 한 칸 밀리면 안 된다.
+  // 아직 옛 머리글이면 경주가 열려 있는 구간이다. 여기서 값이 한 칸 밀리면 안 된다. 다른 열 목록으로
+  // 만들어진 응답은 버리고, 낡은 블록의 옛 값(옛 머리글과 맞는 값)을 새 목록이 올 때까지 그대로 그린다.
   await expect(page.locator('.jdr-grid__hcell[data-col="1"]')).toHaveText('나이');
-  await expect(cell(0, 1)).toHaveText('');
-  await expect(cell(0, 2)).toHaveText('');
+  await expect(cell(0, 1)).toHaveText('3');
+  await expect(cell(0, 2)).toHaveText('비고1');
 
   // 목록이 도착하면 다시 마운트되어 남은 두 열이 제 값으로 채워진다.
   await expect(page.locator('.jdr-grid__hcell[data-col="1"]')).toHaveText('비고');

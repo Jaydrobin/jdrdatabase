@@ -580,8 +580,27 @@ test('query.window / query.count / query.row: 창 질의 op (Step 4)', async () 
   assert.deepEqual(await client.call('query.count', { tableId, viewSpec: {} }), { count: 2 });
 
   const full = await client.call('query.row', { tableId, rowId: 1, colIds: [body] });
-  assert.deepEqual(full, { row: { id: 1, cells: { [body]: long } } });
+  assert.deepEqual(full, {
+    row: { id: 1, cells: { [body]: long }, createdAt: null, updatedAt: null },
+  });
   assert.deepEqual(await client.call('query.row', { tableId, rowId: 99 }), { row: null });
+
+  // Step 5: 전문 행 목록과 행 통계(데이터 커맨드가 옛 값·새 id를 읽는 경로).
+  const rows = await client.call('query.rows', {
+    tableId,
+    viewSpec: {},
+    offset: 1,
+    limit: 10,
+    colIds: [name],
+  });
+  assert.deepEqual(rows, {
+    rows: [{ id: 2, cells: { [name]: '둘' }, createdAt: null, updatedAt: null }],
+  });
+  assert.deepEqual(await client.call('query.stats', { tableId }), {
+    count: 2,
+    minId: 1,
+    maxId: 2,
+  });
 
   // 삭제된 테이블: E_DB_QUERY(그리드는 빈 상태로 그리고 사이드바로 복귀).
   await client.call('schema.drop', { tableId });
@@ -607,4 +626,6 @@ test('query.*는 읽기라 배타 op가 아니고, 쓰기 op 도중에도 허용
   assert.equal(isExclusiveOp('query.window'), false);
   assert.equal(isExclusiveOp('query.count'), false);
   assert.equal(isExclusiveOp('query.row'), false);
+  assert.equal(isExclusiveOp('query.rows'), false);
+  assert.equal(isExclusiveOp('query.stats'), false);
 });

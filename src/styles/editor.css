@@ -1,0 +1,113 @@
+/* 편집기(Step 5): 인라인 편집기와 장문 사이드 패널. 위치 계산(transform, width, height)만 인라인이다. */
+.jdr-editor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  will-change: transform;
+}
+
+.jdr-editor[hidden] {
+  display: none;
+}
+
+.jdr-editor__field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0 7px;
+  border: 2px solid var(--jdr-accent);
+  border-radius: 0;
+  background: var(--jdr-bg);
+  font: inherit;
+  color: inherit;
+  outline: none;
+}
+
+.jdr-editor--invalid .jdr-editor__field {
+  border-color: var(--jdr-danger);
+}
+
+.jdr-editor__error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  min-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--jdr-danger);
+  background: var(--jdr-danger-bg);
+  font-size: 12px;
+  color: var(--jdr-danger);
+  white-space: nowrap;
+}
+
+.jdr-editor__error[hidden] {
+  display: none;
+}
+
+.jdr-longtext {
+  display: flex;
+  flex: 0 0 420px;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  border-left: 1px solid var(--jdr-border);
+  background: var(--jdr-bg-muted);
+}
+
+.jdr-longtext[hidden] {
+  display: none;
+}
+
+.jdr-longtext__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.jdr-longtext__where {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--jdr-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jdr-longtext__textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 4px;
+  background: var(--jdr-bg);
+  font: inherit;
+  color: inherit;
+  resize: none;
+}
+
+.jdr-longtext__textarea:focus-visible {
+  border-color: var(--jdr-accent);
+  outline: none;
+}
+
+.jdr-longtext__warning {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--jdr-warning-bg);
+  font-size: 12px;
+}
+
+.jdr-longtext__warning[hidden] {
+  display: none;
+}
+
+.jdr-longtext__buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

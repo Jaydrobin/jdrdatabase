@@ -20,6 +20,8 @@
 | `CompressionStream` (gzip 저장) | 미확인 (세션 G) | 미확인 | 미확인 | 미확인 |
 | 그리드가 쓰는 `ResizeObserver`, Pointer Events(`setPointerCapture`로 열 너비 끌기), `performance.mark/measure`(테스트 빌드의 렌더 시간) | ✓ (세션 C, E2E `grid.spec.js`·`test/perf/grid.perf.spec.js`) | 미확인 | 미확인 | 미확인 |
 | 300 MB DB(30만 행)를 `<input type="file">`로 열기 | ✓ (세션 C, `test:perf`: 읽기 → transfer → deserialize → integrity_check까지 약 2~3초) | 미확인 | 미확인 | 미확인 |
+| 클립보드: `navigator.clipboard.writeText`(복사), 포커스된 비편집 요소(`role="grid"` div)에 오는 `paste` 이벤트(Ctrl+V), `window.isSecureContext` | ✓ (세션 D, E2E `edit.spec.js`. `file://`도 secure context이며 Playwright가 `clipboard-read`·`clipboard-write` 권한을 준 컨텍스트에서 실제 Ctrl+C·Ctrl+V로 확인). 권한 프롬프트가 있는 실제 브라우저에서의 동작은 미확인 | 미확인 | 미확인 | 미확인 |
+| 한글 IME 조합 중 Enter 무시(`isComposing`) | 시뮬레이션만 ✓ (세션 D, 합성 `compositionstart/end` + `isComposing: true` keydown). 실제 IME는 헤드리스에서 미확인 | 미확인 | 미확인 | 미확인 |
 
 ## 데스크톱 모드 (타우리 WebView)
 

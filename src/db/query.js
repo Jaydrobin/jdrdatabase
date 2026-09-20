@@ -39,10 +39,20 @@ import { quoteIdent } from './schema.js';
  */
 
 /**
- * 편집용 전문 행. `cells`는 열 id → 값.
+ * 편집용 전문 행. `cells`는 열 id → 값. 시스템 열의 시각은 되돌리기가 원래대로 되돌려 놓는 데 쓴다.
  * @typedef {object} FullRow
  * @property {number} id
  * @property {Record<string, SqlValue>} cells
+ * @property {string | null} createdAt `_created_at`
+ * @property {string | null} updatedAt `_updated_at`
+ */
+
+/**
+ * 행 통계(`query.stats`). 빈 테이블이면 `minId`·`maxId`는 null.
+ * @typedef {object} RowStats
+ * @property {number} count
+ * @property {number | null} minId
+ * @property {number | null} maxId
  */
 
 /** 그리드가 받는 텍스트 미리보기 길이(문자 수, D-05). */
@@ -215,6 +225,47 @@ export function count(engine, table, viewSpec) {
 }
 
 /**
+ * 전문 행 읽기가 돌려줄 열. `colIds`가 비면 살아 있는 열(`includeDeleted`면 소프트 삭제된 열까지) 전부.
+ * @param {TableInfo} table
+ * @param {string[]} colIds
+ * @param {boolean} includeDeleted
+ * @returns {ColumnInfo[]}
+ */
+function wantedColumns(table, colIds, includeDeleted) {
+  const pool = includeDeleted ? table.columns : table.columns.filter((c) => c.deletedAt === null);
+  if (colIds.length === 0) return pool;
+  const missing = colIds.filter((id) => !pool.some((c) => c.id === id));
+  if (missing.length > 0) {
+    throw new AppError('E_DB_QUERY', 'column not found', {
+      detail: { tableId: table.id, columnIds: missing },
+    });
+  }
+  return pool.filter((c) => colIds.includes(c.id));
+}
+
+/**
+ * `SELECT id, _created_at, _updated_at, <열들>` 결과 행 하나를 `FullRow`로 만든다.
+ * @param {SqlValue[]} raw
+ * @param {ColumnInfo[]} wanted
+ * @returns {FullRow}
+ */
+function toFullRow(raw, wanted) {
+  /** @type {Record<string, SqlValue>} */
+  const cells = {};
+  wanted.forEach((c, i) => {
+    cells[c.id] = raw[i + 3] ?? null;
+  });
+  const createdAt = raw[1];
+  const updatedAt = raw[2];
+  return {
+    id: Number(raw[0]),
+    cells,
+    createdAt: typeof createdAt === 'string' ? createdAt : null,
+    updatedAt: typeof updatedAt === 'string' ? updatedAt : null,
+  };
+}
+
+/**
  * 편집용 전문 로드. 미리보기 없이 값 전체를 읽는다.
  * @param {Engine} engine
  * @param {TableInfo} table
@@ -223,15 +274,8 @@ export function count(engine, table, viewSpec) {
  * @returns {FullRow | null}
  */
 export function fetchRow(engine, table, rowId, colIds = []) {
-  const live = table.columns.filter((c) => c.deletedAt === null);
-  const wanted = colIds.length === 0 ? live : live.filter((c) => colIds.includes(c.id));
-  const missing = colIds.filter((id) => !live.some((c) => c.id === id));
-  if (missing.length > 0) {
-    throw new AppError('E_DB_QUERY', 'column not found', {
-      detail: { tableId: table.id, columnIds: missing },
-    });
-  }
-  const select = ['"id"', ...wanted.map((c) => quoteIdent(c.id))];
+  const wanted = wantedColumns(table, colIds, false);
+  const select = ['"id"', '"_created_at"', '"_updated_at"', ...wanted.map((c) => quoteIdent(c.id))];
   const r = engine.exec(
     engine.prepareCached(
       `SELECT ${select.join(', ')} FROM ${quoteIdent(table.id)} WHERE "id" = ? LIMIT 1`,
@@ -240,10 +284,49 @@ export function fetchRow(engine, table, rowId, colIds = []) {
   );
   const raw = r.rows[0];
   if (!raw) return null;
-  /** @type {Record<string, SqlValue>} */
-  const cells = {};
-  wanted.forEach((c, i) => {
-    cells[c.id] = raw[i + 1] ?? null;
-  });
-  return { id: Number(raw[0]), cells };
+  return toFullRow(raw, wanted);
+}
+
+/**
+ * 뷰 순서로 `offset`부터 `limit`개의 전문 행을 읽는다(`query.rows`). 붙여넣기·다중 편집·행 삭제가
+ * 커맨드를 만들기 전에 옛 값을 읽는 경로다. `colIds`가 비면 소프트 삭제된 열까지 물리 열 전부를
+ * 돌려주어 행 삭제의 되돌리기가 행을 원래대로 되살릴 수 있게 한다.
+ * @param {Engine} engine
+ * @param {TableInfo} table
+ * @param {ViewSpec} viewSpec
+ * @param {{ offset: number, limit: number }} range
+ * @param {string[]} [colIds]
+ * @returns {FullRow[]}
+ */
+export function fetchRows(engine, table, viewSpec, range, colIds = []) {
+  void viewSpec;
+  const offset = assertNonNegativeInt(range.offset, 'offset', Number.MAX_SAFE_INTEGER);
+  const limit = assertNonNegativeInt(range.limit, 'limit', MAX_RESULT_ROWS);
+  const wanted = wantedColumns(table, colIds, colIds.length === 0);
+  const select = ['"id"', '"_created_at"', '"_updated_at"', ...wanted.map((c) => quoteIdent(c.id))];
+  const r = engine.exec(
+    engine.prepareCached(
+      `SELECT ${select.join(', ')} FROM ${quoteIdent(table.id)} ORDER BY "id" LIMIT ? OFFSET ?`,
+    ),
+    [limit, offset],
+  );
+  return r.rows.map((raw) => toFullRow(/** @type {SqlValue[]} */ (raw), wanted));
+}
+
+/**
+ * 행 수와 id 범위(`query.stats`). 행 추가 커맨드가 새 id를 `maxId + 1`부터 정하는 데 쓴다.
+ * `min`·`max`는 따로 묻는다(D-06).
+ * @param {Engine} engine
+ * @param {TableInfo} table
+ * @returns {RowStats}
+ */
+export function stats(engine, table) {
+  const ident = quoteIdent(table.id);
+  const total = count(engine, table, {});
+  if (total === 0) return { count: 0, minId: null, maxId: null };
+  const lo = engine.exec(engine.prepareCached(`SELECT min("id") FROM ${ident} LIMIT 1`))
+    .rows[0]?.[0];
+  const hi = engine.exec(engine.prepareCached(`SELECT max("id") FROM ${ident} LIMIT 1`))
+    .rows[0]?.[0];
+  return { count: total, minId: Number(lo), maxId: Number(hi) };
 }

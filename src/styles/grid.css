@@ -175,3 +175,35 @@
   font-size: 11px;
   color: var(--jdr-fg-muted);
 }
+
+.jdr-grid__button {
+  padding: 2px 10px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 4px;
+  background: var(--jdr-bg);
+  font: inherit;
+  font-size: 12px;
+  color: var(--jdr-fg);
+  cursor: pointer;
+}
+
+.jdr-grid__button:hover:not(:disabled) {
+  border-color: var(--jdr-accent);
+}
+
+.jdr-grid__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jdr-grid__cell--selected {
+  background: var(--jdr-selection-bg);
+}
+
+.jdr-grid__cell--rownum.jdr-grid__cell--selected {
+  background: var(--jdr-selection-strong-bg);
+}
+
+.jdr-grid__canvas {
+  user-select: none;
+}

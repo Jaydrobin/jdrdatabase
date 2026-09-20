@@ -89,6 +89,13 @@ export const MIN_COLUMN_WIDTH = 40;
 /** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed'} StoreEvent */
 
 /**
+ * `recordCommand`의 선택 사항.
+ * @typedef {object} RecordOptions
+ * @property {boolean} [fromHistory] 히스토리(`app/history.js`)가 적용·되돌리기·다시 실행으로 부른 것. `onCommand`를 내지 않는다
+ * @property {boolean} [refresh] false면 `data:changed`를 내지 않는다(호출자가 그리드 캐시를 직접 고친 경우). 기본 true
+ */
+
+/**
  * 스키마 op 이름(`schema.*` 중 쓰기). 결과는 적용된 커맨드를 담는다.
  * @typedef {'schema.create' | 'schema.rename' | 'schema.drop' | 'schema.addColumn' | 'schema.renameColumn' | 'schema.reorderColumns' | 'schema.softDeleteColumn' | 'schema.restoreColumn' | 'schema.changeColumnType'} SchemaOp
  */
@@ -117,7 +124,9 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {() => Promise<boolean>} save
  * @property {() => Promise<boolean>} saveAs
  * @property {() => void} markDirty
- * @property {(cmd: Command) => Promise<void>} recordCommand 적용된 커맨드를 저널에 넣고 dirty로 표시한다
+ * @property {(cmd: Command, options?: RecordOptions) => Promise<void>} recordCommand 적용된 커맨드를 저널에 넣고 dirty로 표시한다. 히스토리가 부른 것이 아니면 `onCommand` 구독자에게 알린다
+ * @property {(handler: (cmd: Command) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
+ * @property {() => void} refreshData 그리드가 블록 캐시를 버리고 다시 읽게 한다(`data:changed`)
  * @property {() => Promise<boolean>} recoverPending 시작 시 저널에 남은 새 DB 기록을 복구 제안한다
  * @property {() => Promise<{ name: string, handle: FileSystemFileHandle } | null>} recentFile IDB에 남은 최근 파일 핸들(권한은 아직 묻지 않음)
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
@@ -159,6 +168,8 @@ export function createStore(deps) {
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
   const listeners = new Map();
+  /** @type {Set<(cmd: Command) => void>} */
+  const commandListeners = new Set();
   /** @type {Map<string, TableViewState>} */
   const views = new Map();
 
@@ -593,7 +604,7 @@ export function createStore(deps) {
       emit('file:dirty');
     },
 
-    async recordCommand(cmd) {
+    async recordCommand(cmd, options = {}) {
       try {
         await autosave.recordCommand(cmd);
       } catch (err) {
@@ -605,7 +616,21 @@ export function createStore(deps) {
         emit('journal:full');
       }
       store.markDirty();
+      if (!options.fromHistory) {
+        for (const handler of commandListeners) handler(cmd);
+      }
       // 커맨드는 DB 내용을 바꿨다. 그리드는 블록 캐시를 버리고 다시 읽는다(D-06).
+      if (options.refresh !== false) emit('data:changed');
+    },
+
+    onCommand(handler) {
+      commandListeners.add(handler);
+      return () => {
+        commandListeners.delete(handler);
+      };
+    },
+
+    refreshData() {
       emit('data:changed');
     },
 
