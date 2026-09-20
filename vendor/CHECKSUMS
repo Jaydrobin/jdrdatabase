@@ -1,0 +1,5 @@
+# SHA-256 of third-party files in vendor/. Verified by build/verify.mjs and test/unit/build.test.js.
+# @sqlite.org/sqlite-wasm 3.53.4-build1 (SQLite 3.53.4) - https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.53.4-build1.tgz
+a6d3fe46aa3f924e7686329f97b0564549ef1f787e0c19924179aef7f72bcc01  sqlite3.mjs
+2ee8f3dab694532afc8840e07703127287662d08b74e6ff50491ce63f00d5752  sqlite3.wasm
+ed942b7da4c559615d105cdf9230978ee1f3731e2c2dc98e94cf81a0abe8ee17  sqlite3.d.mts
