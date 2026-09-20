@@ -62,7 +62,9 @@ export default defineConfig([
   },
   {
     files: WORKER_SIDE,
-    languageOptions: { globals: { ...globals.worker, ...BUILD_CONSTANTS } },
+    languageOptions: {
+      globals: { ...globals['shared-node-browser'], ...globals.worker, ...BUILD_CONSTANTS },
+    },
     rules: {
       'no-restricted-globals': [
         'error',
@@ -81,7 +83,7 @@ export default defineConfig([
   },
   {
     files: SHARED,
-    languageOptions: { globals: { ...BUILD_CONSTANTS } },
+    languageOptions: { globals: { ...globals['shared-node-browser'], ...BUILD_CONSTANTS } },
   },
   {
     files: NODE_SIDE,

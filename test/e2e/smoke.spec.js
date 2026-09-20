@@ -27,5 +27,7 @@ test('file://로 열면 제목이 표시되고 네트워크 요청이 없다', a
   expect(typeof hook?.version).toBe('string');
 
   expect(errors).toEqual([]);
-  expect(requests.filter((u) => !u.startsWith('file://'))).toEqual([]);
+  // 허용: 문서 자체(file://)와 Worker 소스의 Blob URL(blob:). 그 밖의 스킴(http, https, data 등)은 0건이어야 한다.
+  expect(requests.filter((u) => !u.startsWith('file://') && !u.startsWith('blob:'))).toEqual([]);
+  expect(requests.some((u) => u.startsWith('blob:'))).toBe(true);
 });

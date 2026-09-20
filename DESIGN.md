@@ -298,14 +298,20 @@ src/
     bytes.js                     base64, 크기 계산
   styles/
     app.css grid.css dialogs.css
+  types/
+    build-constants.d.ts         빌드가 define으로 치환하는 컴파일 타임 상수(__JDR_TEST__, __JDR_VERSION__) 선언
 
 vendor/
   sqlite3.mjs sqlite3.wasm sqlite3.d.mts LICENSE.sqlite-wasm CHECKSUMS
   xlsx.full.min.js LICENSE.sheetjs
 
 build/
-  build.mjs                      단일 HTML 생성(브라우저·타우리 두 변형)
-  verify.mjs                     산출물 검증(외부 참조 0건, 크기 예산, 두 변형의 동일성)
+  build.mjs                      단일 HTML 생성(브라우저·타우리·테스트 세 변형)
+  verify.mjs                     산출물 검증(외부 참조 0건, 크기 예산, CSP, 두 변형의 동일성, vendor 체크섬)
+  template.html                  산출물 템플릿(자리표시자: CSP_META, CSS, WORKER_JS, WASM_B64, MAIN_JS)
+
+docs/
+  support-matrix.md              브라우저·WebView API 가용성 실측표(R1, R8). 미확인 항목은 "미확인"으로 남긴다
 
 src-tauri/
   Cargo.toml tauri.conf.json build.rs
@@ -318,7 +324,7 @@ src-tauri/
   tests/                         cargo test(저장 원자성, 배치, 인터럽트, 한글 경로)
 
 test/
-  unit/                          node:test
+  unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드)
   e2e/                           Playwright(브라우저), 같은 시나리오를 tauri-driver로 재사용
   fixtures/                      CSV·XLSX·DB 표본
 scripts/
