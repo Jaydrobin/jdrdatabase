@@ -2,12 +2,12 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.1 (초안) |
-| 작성일 | 2026-09-19 |
-| 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱 |
+| 문서 버전 | 0.2 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20) |
+| 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
-이 문서는 "NocoDB 데스크톱/로컬 구동" 방식, 즉 서버 없이 사용자의 PC에서 단독으로 동작하는 스프레드시트형 데이터베이스 관리 프로그램을 **단일 HTML 파일**로 구현하기 위한 설계도이다. 0장에서 타당성 질문 세 가지에 답하고, 1장부터 실제 설계와 단계별 구현 계획을 기술한다.
+이 문서는 "NocoDB 데스크톱/로컬 구동" 방식, 즉 서버 없이 사용자의 PC에서 단독으로 동작하는 스프레드시트형 데이터베이스 관리 프로그램을 **단일 HTML 파일**로 구현하기 위한 설계도이다. 같은 소스에서 타우리 데스크톱 앱도 빌드하며, 데스크톱 앱에서는 DB 엔진이 네이티브 SQLite로 바뀌어 파일 크기 상한이 디스크 용량으로 확장된다(D-15). 0장에서 타당성 질문 세 가지에 답하고, 1장부터 실제 설계와 단계별 구현 계획을 기술한다.
 
 ---
 
@@ -17,29 +17,32 @@
 
 **가능하다. 단, 아래 조건과 상한을 전제로 한다.**
 
-- 저장·질의 엔진은 SQLite를 WebAssembly로 컴파일한 **sql.js**를 사용한다. wasm 바이너리를 base64로 HTML에 인라인하므로 외부 파일이나 네트워크가 필요 없다. 데이터베이스 전체는 브라우저 메모리에 상주하고, 모든 질의는 Web Worker에서 실행되어 UI가 멈추지 않는다.
+- 브라우저 모드의 저장·질의 엔진은 SQLite를 WebAssembly로 컴파일한 **sql.js**를 사용한다. wasm 바이너리를 base64로 HTML에 인라인하므로 외부 파일이나 네트워크가 필요 없다. 데이터베이스 전체는 브라우저 메모리에 상주하고, 모든 질의는 Web Worker에서 실행되어 UI가 멈추지 않는다.
 - 화면은 **가상 스크롤 그리드**로 구현한다. 수십만 행 중 화면에 보이는 수십 행만 DOM으로 만들고, 스크롤할 때 `LIMIT/OFFSET` 창 질의로 필요한 행만 가져온다.
 - 장문 셀은 그리드에서 앞부분 256자만 `substr()`로 가져와 미리보기로 표시하고, 전문은 사용자가 편집기를 열 때만 로드한다. 따라서 셀 하나가 수십만 자라도 스크롤 성능에 영향을 주지 않는다.
 - SQLite 자체의 문자열 상한은 기본 10억 바이트(`SQLITE_MAX_LENGTH`)이므로 수십만 자(UTF-8 한글 기준 수백 KB) 셀은 문제없이 저장된다.
 
-**정직하게 밝혀야 할 상한**
+**정직하게 밝혀야 할 상한 (브라우저 모드)**
 
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 설계상 DB 파일 상한 | 약 700 MB | 브라우저 탭당 실용 메모리 약 1.5–2 GB. 저장 시 `export()`가 사본을 만들어 최대 2배가 필요 |
+| 설계상 DB 파일 상한 | 약 700 MB | 브라우저 탭당 실용 메모리 약 1.5–2 GB. 저장 시 `snapshot()`이 사본을 만들어 최대 2배가 필요 |
 | 단일 ArrayBuffer 상한 | 2 GB | 파일 읽기·쓰기 경로가 하나의 버퍼를 사용 |
 | 현실적 셀 수 | 수십만~수백만 셀 | 셀 30만 개 × 평균 2 KB = 600 MB → 가능 |
 | 지원하지 않는 경우 | 모든 셀이 수십만 자 | 셀 30만 개 × 300 KB = 90 GB → 브라우저에서 불가 |
 
-즉 "수십만 자를 담을 수 있는 셀"이 수십만 건 있는 것(대부분 짧고 일부만 긴 실제 데이터)은 지원 대상이고, "모든 셀이 수십만 자"인 데이터는 지원 대상이 아니다. 이 상한은 앱이 파일을 열 때 크기를 검사하여 사용자에게 경고하는 형태로 반영한다.
+즉 "수십만 자를 담을 수 있는 셀"이 수십만 건 있는 것(대부분 짧고 일부만 긴 실제 데이터)은 지원 대상이고, "모든 셀이 수십만 자"인 데이터는 브라우저 모드의 지원 대상이 아니다. 상한 값은 엔진이 `capabilities()`로 보고하고, 앱은 파일을 열 때 그 값과 비교하여 경고·거부한다.
+
+**데스크톱 모드에서는 이 상한이 사라진다.** 위 상한은 DB 전체가 WebView 메모리 안의 sql.js에 상주하기 때문에 생긴다. 타우리 데스크톱 빌드(D-15)에서는 러스트 쪽 네이티브 SQLite가 디스크의 파일을 직접 열어 페이지 캐시만 메모리에 올리므로, 파일 크기 상한은 디스크 용량이 되고 남는 상한은 UI 쪽 것(수백만 행에서의 OFFSET·count 지연, FTS 인덱스 생성 시간)뿐이다. 타우리로 감싸기만 하고 sql.js를 그대로 쓰면 WebView(WebView2, WKWebView, WebKitGTK)도 같은 wasm32 메모리 한계를 가지므로 상한은 그대로 남는다. 상한을 없애는 것은 셸이 아니라 엔진 교체이며, 그래서 엔진 원시 계층을 두 구현으로 나눈다.
 
 ### Q2. 데이터베이스를 단일 바이너리 파일로 두고 구글 드라이브로 여러 PC를 오가며 관리할 수 있는가?
 
 **가능하다. 아래 방식으로 설계하면 안전하다.**
 
 - 저장 형식은 **표준 SQLite 파일** 하나(예: `my-database.db`)이다. `sqlite3` CLI나 DB Browser for SQLite로도 열린다.
-- 앱은 파일을 통째로 메모리에 읽고, 저장할 때 통째로 다시 쓴다. sql.js가 메모리 내 DB이므로 WAL이나 journal 같은 부속 파일이 생기지 않는다. 클라우드 동기화가 부속 파일을 누락하여 DB가 깨지는 전형적인 문제가 원천적으로 없다.
+- 브라우저 모드에서 앱은 파일을 통째로 메모리에 읽고, 저장할 때 통째로 다시 쓴다. sql.js가 메모리 내 DB이므로 WAL이나 journal 같은 부속 파일이 생기지 않는다. 클라우드 동기화가 부속 파일을 누락하여 DB가 깨지는 전형적인 문제가 원천적으로 없다.
 - 저장은 File System Access API의 `createWritable()`로 수행한다. 이 API는 임시 파일에 쓴 뒤 `close()` 시점에 교체하므로 저장 도중 전원이 꺼져도 원본이 반쯤 덮어써지는 일이 없다.
+- 데스크톱 모드에서는 네이티브 SQLite가 원본을 직접 쓰지 않고 앱 데이터 폴더의 작업 사본을 연다. 저장 시 `VACUUM INTO`로 만든 임시 파일을 원본 자리에 이름 교체하므로, 저널·WAL 부속 파일이 클라우드 폴더에 생기지 않고 저장의 원자성도 브라우저 모드와 같다(D-15).
 
 **한계와 완화책**
 
@@ -69,6 +72,7 @@
 5. 데이터는 표준 SQLite 파일 하나로 저장되며, 클라우드 드라이브로 옮겨 다른 PC에서 이어서 작업할 수 있다.
 6. CSV·XLSX 가져오기와 CSV·XLSX 내보내기를 지원한다.
 7. 실수로부터 보호한다: 되돌리기/다시 실행, 미저장 변경 복구, 저장 전 백업.
+8. 같은 소스로 타우리 데스크톱 앱을 빌드한다. 데스크톱 앱에서는 DB 파일 크기 상한이 디스크 용량으로 확장되고, 파일 접근이 브라우저 API 가용성에 좌우되지 않는다.
 
 ### 1.2 비목표 (v1에서 하지 않는 것)
 
@@ -76,7 +80,8 @@
 - 테이블 간 관계(링크 필드), 수식 필드, 자동화·웹훅
 - 첨부 파일(이미지·바이너리) 필드
 - 모바일 터치 최적화
-- 데이터베이스 파일이 브라우저 메모리를 넘는 규모(수 GB)
+- 브라우저 모드에서 브라우저 메모리를 넘는 규모(수 GB)의 파일. 이 규모는 데스크톱 모드가 담당한다
+- 데스크톱 모드에서 원본 파일을 작업 사본 없이 직접 여는 방식, 그리고 CSV·XLSX 파서를 러스트로 옮기는 것(파서는 두 모드 모두 JS Worker)
 
 ---
 
@@ -89,8 +94,9 @@
 - 소스는 `src/`의 ES 모듈로 작성하고 `build/build.mjs`가 JS·CSS·wasm(base64)·Worker 소스를 `dist/jdrdatabase.html` 하나로 합친다.
 - 런타임 네트워크 요청은 0건이다. `<meta http-equiv="Content-Security-Policy">`로 `default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data:`를 선언하여 외부 자원 참조가 섞이면 실행 단계에서 드러나게 한다.
 - 사유: 개발·테스트 편의와 단일 파일 배포를 양립시키기 위함이다. 소스를 직접 단일 파일로 쓰면 테스트와 코드 리뷰가 불가능해진다.
+- 빌드는 같은 소스에서 두 변형을 만든다. `dist/jdrdatabase.html`(브라우저용, 메타 CSP 포함)과 `dist/tauri/index.html`(타우리용, 메타 CSP 없음). 타우리는 IPC를 위해 자체 CSP를 `tauri.conf.json`에서 주입하므로 메타 CSP와 충돌한다. 두 변형은 CSP 태그 유무만 다르고 나머지 바이트는 같아야 하며 `verify.mjs`가 이를 검사한다.
 
-### D-02. 저장 엔진은 sql.js(SQLite WASM)이며 Web Worker에서 실행한다
+### D-02. 브라우저 모드의 저장 엔진은 sql.js(SQLite WASM)이며 Web Worker에서 실행한다
 
 | 대안 | 탈락 사유 |
 |---|---|
@@ -101,7 +107,8 @@
 - sql.js는 FTS5, JSON1이 포함된 빌드이다. 실제 사용 버전의 `PRAGMA compile_options` 결과를 Step 1 테스트로 고정한다.
 - wasm은 `initSqlJs({ wasmBinary })`로 전달한다. base64를 디코딩한 ArrayBuffer를 넘기므로 `locateFile`이나 별도 파일이 필요 없다.
 - Worker는 `<script type="text/plain">` 블록의 소스를 Blob URL로 만들어 생성한다. Worker 생성이 막힌 환경에서는 같은 API를 메인 스레드에서 실행하는 인라인 전송 계층으로 자동 폴백한다(D-11 RPC 추상화 덕분에 비용이 낮다).
-- 중요한 특성: sql.js의 `Database.export()`는 내부적으로 DB를 닫았다가 다시 연다. 따라서 **export 전후로 모든 prepared statement가 무효화되고 `PRAGMA` 설정이 초기화된다.** Worker의 statement 캐시는 export 직후 반드시 비우고 PRAGMA를 다시 적용한다.
+- 중요한 특성: sql.js의 `Database.export()`는 내부적으로 DB를 닫았다가 다시 연다. 따라서 **export 전후로 모든 prepared statement가 무효화되고 `PRAGMA` 설정이 초기화된다.** Worker의 statement 캐시는 export 직후 반드시 비우고 PRAGMA를 다시 적용한다. 엔진 인터페이스에서는 이 동작을 `snapshot()`이 감싼다.
+- 이 결정은 브라우저 모드의 엔진 구현(`engine-wasm.js`)에 관한 것이다. 두 모드가 공유하는 엔진 인터페이스와 데스크톱 모드의 네이티브 구현은 D-15에서 정한다.
 
 ### D-03. 파일 포맷은 표준 SQLite 파일이고, 사용자 테이블·열의 물리 이름은 불투명 ID를 쓴다
 
@@ -111,7 +118,7 @@
 - 모든 사용자 테이블은 `STRICT` 테이블(SQLite 3.37+)로 만들어 열 타입이 섞여 정렬이 깨지는 문제를 막는다. 값 검증은 앱이 쓰기 전에 수행한다.
 - 시스템 열: `id INTEGER PRIMARY KEY`(rowid 별칭), `_created_at TEXT`, `_updated_at TEXT`. 시스템 열은 사용자가 지울 수 없다.
 
-### D-04. 영속화는 3중 구조: 정본 파일, 폴백 다운로드, 미저장 변경 저널
+### D-04. 브라우저 모드의 영속화는 3중 구조: 정본 파일, 폴백 다운로드, 미저장 변경 저널
 
 | 층 | 구현 | 역할 |
 |---|---|---|
@@ -119,9 +126,10 @@
 | 2. 폴백 | `<input type="file">` 읽기 + `<a download>` 쓰기 | Firefox, Safari, API가 막힌 환경 |
 | 3. 저널 | 커맨드(D-08)를 IndexedDB `journal` 스토어에 순서대로 기록. 파일 저장 시 비움 | 탭이 죽거나 저장을 잊었을 때 복구 |
 
-- 저장 = `db.export()` → `Uint8Array` → `writable.write()` → `close()`. `close()`에서 원자적으로 교체된다.
+- 저장 = `snapshot()` → `Uint8Array` → `writable.write()` → `close()`. `close()`에서 원자적으로 교체된다.
 - 저장 직전에 기존 파일 바이트를 IndexedDB `backups` 스토어에 1세대 보관한다(파일이 200 MB 이하일 때). 그보다 크면 보관을 건너뛰고 사용자에게 알린다.
 - IndexedDB는 기능 감지로 사용하며, 없어도(일부 브라우저의 `file://` 오리진) 1·2층만으로 동작해야 한다.
+- 데스크톱 모드의 영속화(작업 사본, 네이티브 저장, `.bak` 백업)는 D-15를 따른다. `known_revisions`와 설정은 두 모드 모두 IndexedDB에 둔다.
 
 ### D-05. 그리드는 Canvas가 아니라 DOM 가상화로 그린다
 
@@ -168,6 +176,7 @@
 
 - 메시지 형식은 6장에 정의한다. 전송 가능한 값(구조화 복제 가능)만 넘긴다. 큰 바이너리는 transferable로 이동한다.
 - 이 경계 덕분에 Worker 미지원 환경 폴백(D-02), 테스트에서 Worker 없이 Node로 Worker 코드를 실행하는 것이 가능하다.
+- 데스크톱 모드에서 Worker 안의 엔진 호출은 메인 스레드를 거쳐 타우리 IPC로 전달된다(D-15). 이 중계는 `db/client.js`의 전송 계층이 아니라 엔진 구현 안에서 처리하므로 RPC 프로토콜은 두 모드에서 같다.
 
 ### D-12. 기술 스택은 프레임워크 없는 Vanilla JS + JSDoc 타입이다
 
@@ -176,21 +185,55 @@
 | 언어 | JavaScript(ES2022, ESM). 타입은 JSDoc으로 쓰고 `tsc --checkJs --noEmit --strict`로 검사 |
 | 빌드 | Node.js 20+, 의존성 없는 `build/build.mjs` (esbuild 등 번들러는 빌드 도구로만 허용, 런타임 의존 금지) |
 | 단위 테스트 | `node:test`. sql.js는 Node에서도 동작하므로 스키마·질의·파서·커맨드 로직을 Node에서 검증 |
-| E2E | Playwright(Chromium). `dist/jdrdatabase.html`을 `file://`로 열어 실제 산출물을 검증 |
-| 린트·포맷 | ESLint(flat config) + Prettier |
-| 서드파티 런타임 | sql.js, SheetJS CE 두 개만. `vendor/`에 버전 고정 파일과 LICENSE, SHA-256을 함께 커밋 |
+| E2E | Playwright(Chromium). `dist/jdrdatabase.html`을 `file://`로 열어 실제 산출물을 검증. 데스크톱은 같은 시나리오를 tauri-driver(WebDriver)로 Windows·Linux에서 실행 |
+| 린트·포맷 | ESLint(flat config) + Prettier. Rust는 rustfmt + clippy(`-D warnings`) |
+| 서드파티 런타임(JS) | sql.js, SheetJS CE 두 개만. `vendor/`에 버전 고정 파일과 LICENSE, SHA-256을 함께 커밋 |
+| 데스크톱 셸 | Tauri 2 + Rust(stable). SQLite는 `rusqlite`(`bundled`). Rust 의존성은 `tauri`(플러그인 dialog, fs, single-instance 포함), `rusqlite`, `serde`, `serde_json`으로 제한. 단위 테스트는 `cargo test` |
 
 - 프레임워크를 쓰지 않는 사유: 가상 그리드는 어차피 직접 DOM을 제어해야 하고, 단일 파일 크기와 시작 시간을 아끼며, 의존성 수명 문제를 피한다.
 
-### D-13. 브라우저 지원
+### D-13. 브라우저·데스크톱 지원
 
 - 1순위: Chromium 계열(Chrome, Edge) 최신 2개 버전. File System Access API로 완전한 경험.
 - 2순위: Firefox, Safari 최신 버전. 다운로드 폴백으로 동작하되 "저장 시 파일이 다운로드 폴더에 생성됨"을 안내.
 - `file://`로 직접 연 경우와 로컬 정적 서버로 연 경우 모두 지원한다. `file://`에서의 Worker(Blob URL), IndexedDB, File System Access API 가용성은 브라우저마다 다르므로 모두 기능 감지 후 폴백한다. Step 1·2에서 실측하여 지원 매트릭스를 README에 기록한다.
+- 데스크톱: 타우리 2가 지원하는 Windows 10+(WebView2), macOS 11+(WKWebView), Linux(WebKitGTK 2.40+). WebView마다 IndexedDB·CompressionStream 가용성이 다르므로 브라우저와 같은 기능 감지를 적용한다. 파일 접근은 타우리 플러그인이 담당하므로 File System Access 가용성 문제는 데스크톱에 없다.
 
 ### D-14. UI 문자열은 한국어 기본이며 문자열 테이블로 분리한다
 
 - `src/i18n/ko.js`가 기본, `en.js`는 키만 준비한다. 코드에 리터럴 UI 문자열을 쓰지 않는다.
+
+### D-15. 엔진 백엔드를 이중화하고, 데스크톱 모드는 작업 사본 위에서 네이티브 SQLite를 쓴다
+
+- 교체 지점은 엔진 원시 계층이다. `db/engine.js`는 인터페이스와 선택 로직만 가지고, 구현은 `db/engine-wasm.js`(sql.js, 브라우저 모드)와 `db/engine-native.js`(타우리 IPC → 러스트 rusqlite, 데스크톱 모드) 둘이다. `query.js`, `tables.js`, `search.js`, `import/*`, `export/*`는 엔진 인터페이스만 호출하므로 두 모드에서 같은 코드가 돈다.
+- 엔진 인터페이스(Step 1에서 고정):
+
+```js
+init(opts)                     // wasm: { wasmBinary } / native: {}
+capabilities()                 // { mode, maxFileBytes, warnFileBytes, persistence, cancellable, fts5 }
+open(source)                   // wasm: bytes / native: { originalPath }
+close()
+exec(sql, params)              // 읽기. 결과 행 배열. 1만 행 초과 거부
+run(sql, params)               // 쓰기 한 문장. { changes, lastId }
+runBatch(sql, paramsList)      // 같은 문장을 파라미터 목록만큼 반복. 하나의 트랜잭션. 가져오기·붙여넣기 전용
+transaction(fn)                // BEGIN / COMMIT / ROLLBACK
+prepareCached(sql)             // wasm 전용 최적화. native는 no-op 핸들
+snapshot()                     // wasm: Uint8Array(sql.js export) / native: E_UNSUPPORTED
+saveTo(originalPath, expected) // native 전용. VACUUM INTO 임시 → 원자적 교체
+interrupt()                    // 진행 중 문장 중단
+```
+
+- 모드 선택은 시작 시 타우리 전역 객체(`window.__TAURI_INTERNALS__`)의 존재로 판정한다. 판정은 `main.js` 한 곳에서만 하고 결과를 스토어에 둔다. 다른 모듈은 `capabilities()`를 읽고 모드 문자열을 비교하지 않는다.
+- 상한은 엔진이 보고한다. wasm은 `warnFileBytes` 700 MB, `maxFileBytes` 1.5 GB이고 native는 둘 다 `Infinity`다. 파일 열기·가져오기·붙여넣기의 크기 검사는 모두 이 값을 기준으로 하며 UI 코드에 숫자를 두지 않는다.
+- Worker 안에서는 타우리 invoke를 직접 쓸 수 없다. `engine-native.js`는 Worker에서 실행되면 메인 스레드에 `engine:call` 메시지로 호출을 위임하고, 메인의 `io/ipc-bridge.js`가 invoke로 러스트 명령을 부른 뒤 `engine:result`로 되돌린다. 왕복이 한 번 늘어나므로 가져오기·붙여넣기는 `runBatch`로 1,000행을 한 번에 보낸다. 창 질의(200행)는 왕복 1회라 영향이 없다.
+- 작업 사본 모델. 데스크톱 모드는 사용자가 고른 원본 파일을 직접 열지 않는다. 앱 데이터 폴더 `workcopies/<db_id>/current.db`로 복사한 뒤 그 사본을 연다. 사유: (1) 네이티브 SQLite가 원본을 직접 쓰면 `-journal`·`-wal` 부속 파일이 클라우드 폴더에 생겨 D-10의 전제가 깨진다. (2) 클라우드 클라이언트가 열린 파일을 잠그거나 교체하는 일이 사본에는 일어나지 않는다. (3) "명시적 저장 전까지 원본은 바뀌지 않는다"는 브라우저 모드와 같은 의미가 유지된다.
+- 저장은 `VACUUM INTO '<원본>.tmp-<랜덤>'` 후 원본 자리에 rename(같은 볼륨이므로 원자적)이다. rename 전에 기존 원본을 `<원본>.bak`으로 옮겨 1세대 백업을 남긴다(브라우저 모드의 IDB 백업에 해당). 저장 시간은 파일 크기에 비례하며, 클라우드 전체 업로드와 같은 차수다.
+- 미저장 변경은 작업 사본 자체에 남는다. 브라우저 모드의 IDB 저널은 데스크톱 모드에서 쓰지 않는다. 다음 실행에서 같은 `db_id`의 작업 사본에 dirty 표식(`_jdr_meta.dirty = 1`, 커맨드 적용 시 설정하고 저장 성공 시 해제)이 있으면 4.3절의 저널 조건과 같은 판정으로 "저장되지 않은 변경 복구" 흐름에 들어간다.
+- 원본이 열려 있는 동안 디스크에서 바뀌는 경우(다른 PC에서 동기화됨): 저장 직전에 원본의 mtime·크기를 열 때 값과 비교하고, 다르면 `E_ORIGINAL_CHANGED`로 저장을 멈추고 "덮어쓰기 / 다른 이름으로 저장 / 취소"를 묻는다.
+- 러스트 쪽: 관리 상태의 `Mutex<Option<Connection>>` 하나. 긴 명령은 `spawn_blocking`에서 실행하고 진행률은 `tauri::ipc::Channel`로 보낸다. 취소는 `InterruptHandle::interrupt()`. 작업 사본에는 `PRAGMA journal_mode=WAL`을 적용해 읽기·쓰기 동시성을 얻고(사본은 클라우드 폴더 밖이라 부속 파일이 문제되지 않음), 저장 전 `wal_checkpoint(TRUNCATE)`를 실행한다. rusqlite `bundled` 빌드에 FTS5가 포함되는지는 Step 1의 wasm 검사와 같은 방식으로 `PRAGMA compile_options`를 `cargo test`에서 고정한다.
+- 파일 대화상자와 경로 접근은 타우리 dialog·fs 플러그인을 쓰며, `io/filesystem.js`가 `capabilities()`에 따라 구현을 고른다. 브라우저 모드의 폴백 사다리(D-04)는 데스크톱 모드에 존재하지 않는다.
+- 데스크톱 모드에서 IPC가 실패하면 wasm 엔진으로 폴백하지 않는다. 폴백하면 상한이 조용히 되돌아와 사용자가 큰 파일을 열다 실패하게 되므로, `E_NATIVE_IPC`로 앱을 잠그고 원인을 보여 준다.
+- 하지 않는 것: 원본을 직접 여는 "직접 모드"는 v1에 없다(작업 사본 복사가 부담되는 수십 GB 파일은 v1.1에서 옵션으로 검토). CSV·XLSX 파서는 두 모드 모두 JS Worker에서 돌리며, 러스트 파서로 옮기는 것은 Step 11의 성능 측정 후 판단한다.
 
 ---
 
@@ -199,10 +242,11 @@
 ### 3.1 모듈 구성
 
 ```
-dist/jdrdatabase.html            ← 빌드 산출물 (배포 단위)
+dist/jdrdatabase.html            ← 브라우저용 빌드 산출물 (배포 단위)
+dist/tauri/index.html            ← 타우리용 변형 (메타 CSP 없음, 나머지 동일)
 
 src/
-  main.js                        부트스트랩: 기능 감지, Worker 기동, 초기 화면
+  main.js                        부트스트랩: 기능 감지, 모드 판정(브라우저/데스크톱), Worker 기동, 초기 화면
   app/
     store.js                     앱 상태(열린 파일, 현재 테이블·뷰, 선택, dirty) + 이벤트 버스
     history.js                   undo/redo 스택, 저널 연동
@@ -221,13 +265,16 @@ src/
       table.js column.js import.js export.js settings.js conflict.js
     toolbar.js sidebar.js statusbar.js toast.js
   io/
-    filesystem.js                File System Access + 폴백 다운로드 추상화
+    filesystem.js                File System Access + 폴백 다운로드 + 타우리 dialog/fs 추상화
+    ipc-bridge.js                메인 스레드에서 Worker의 engine:call 메시지를 타우리 invoke로 중계
     idb.js                       IndexedDB 래퍼(handles, journal, backups, known_revisions)
     autosave.js                  저널 기록·복구, 자동 저장 타이머
   db/
     client.js                    RPC 클라이언트(메인 측), Worker/인라인 전송 선택
     worker.js                    Worker 진입점: RPC 디스패치
-    engine.js                    sql.js 초기화, export, statement 캐시, PRAGMA
+    engine.js                    엔진 인터페이스, 모드별 구현 선택, 공통 검증(1만 행 상한, 배치 크기)
+    engine-wasm.js               sql.js 구현: 초기화, snapshot(export), statement 캐시, PRAGMA
+    engine-native.js             타우리 구현: IPC 호출, Worker→메인 중계 클라이언트
     schema.js                    메타 테이블 DDL, 마이그레이션, 물리 이름 생성
     tables.js                    테이블·열 CRUD(메타 + DDL)
     query.js                     창 질의 빌더(정렬·필터·검색), count
@@ -255,12 +302,22 @@ vendor/
   xlsx.full.min.js LICENSE.sheetjs
 
 build/
-  build.mjs                      단일 HTML 생성
-  verify.mjs                     산출물 검증(외부 참조 0건, 크기 예산)
+  build.mjs                      단일 HTML 생성(브라우저·타우리 두 변형)
+  verify.mjs                     산출물 검증(외부 참조 0건, 크기 예산, 두 변형의 동일성)
+
+src-tauri/
+  Cargo.toml tauri.conf.json build.rs
+  src/
+    main.rs                      타우리 진입점, 플러그인 등록(dialog, fs, single-instance)
+    db.rs                        커넥션 상태, 명령: open/close/exec/run/run_batch/begin/commit/rollback/interrupt/capabilities
+    save.rs                      VACUUM INTO, .bak 회전, 원자적 교체, mtime 검사
+    workcopy.rs                  앱 데이터 폴더 경로, 작업 사본 복사·목록·정리
+    error.rs                     AppError 직렬화(JS 오류 코드와 1:1), rusqlite 오류 매핑
+  tests/                         cargo test(저장 원자성, 배치, 인터럽트, 한글 경로)
 
 test/
   unit/                          node:test
-  e2e/                           Playwright
+  e2e/                           Playwright(브라우저), 같은 시나리오를 tauri-driver로 재사용
   fixtures/                      CSV·XLSX·DB 표본
 scripts/
   gen-fixture.mjs                벤치마크용 대용량 CSV 생성
@@ -279,12 +336,28 @@ scripts/
 └──────────────────────────────────────────────┼┘
                                                ▼
 ┌───────────────── Worker ──────────────────────┐
-│ db/worker ─▶ db/engine(sql.js) ─▶ 메모리 DB    │
+│ db/worker ─▶ db/engine ─▶ engine-wasm(sql.js)  │
 │           ─▶ db/query, tables, search, values │
 │           ─▶ import/* (파서·추론·삽입)          │
 └───────────────────────────────────────────────┘
-        ▲ 파일 바이트(transfer)          │ export 바이트(transfer)
+        ▲ 파일 바이트(transfer)          │ snapshot 바이트(transfer)
         └──── io/filesystem ◀────────────┘
+```
+
+데스크톱 모드는 Worker와 RPC가 같고 엔진 구현만 바뀐다. Worker의 `engine-native`는 SQL 호출을 메인에 위임하고, 메인의 `ipc-bridge`가 러스트로 보낸다.
+
+```
+┌──────── Main thread ────────┐      ┌──────────── Worker ────────────┐
+│ db/client ── RPC ───────────┼─────▶│ db/worker ─▶ db/engine         │
+│ io/ipc-bridge ◀─engine:call─┼──────│           ─▶ engine-native     │
+│      │        ─engine:result┼─────▶│           ─▶ query, import/*   │
+└──────┼──────────────────────┘      └────────────────────────────────┘
+       │ invoke / Channel(진행률)
+       ▼
+┌──────────────── Rust (src-tauri) ────────────────┐
+│ db.rs ─▶ rusqlite ─▶ 작업 사본 current.db (WAL)   │
+│ save.rs: VACUUM INTO tmp → 원본→.bak → tmp→원본    │
+└──────────────────────────────────────────────────┘
 ```
 
 ### 3.3 대표 흐름
@@ -293,7 +366,9 @@ scripts/
 
 **셀 편집**: 인라인 편집기 확정 → `values.validate(type, raw)` → `commands.editCell()`이 커맨드 생성 → `history.push()` → `client.applyCommand()` → Worker 트랜잭션 실행 → 성공 시 캐시의 해당 행 갱신, 저널 기록, dirty 표시. 실패 시 히스토리에서 제거하고 토스트.
 
-**저장**: `Ctrl+S` → `client.exportDb()`(Worker가 `revision+1`, `saved_at`, `saved_by` 기록 후 export) → 바이트 transfer → 기존 파일 백업(IDB) → `filesystem.write()` → 성공 시 저널 비움, `known_revisions` 갱신, dirty 해제.
+**저장(브라우저 모드)**: `Ctrl+S` → `client.call('db.snapshot')`(Worker가 `revision+1`, `saved_at`, `saved_by` 기록 후 `snapshot()`) → 바이트 transfer → 기존 파일 백업(IDB) → `filesystem.write()` → 성공 시 저널 비움, `known_revisions` 갱신, dirty 해제.
+
+**저장(데스크톱 모드)**: `Ctrl+S` → `client.call('db.save', { originalPath })` → Worker가 메타를 같은 방식으로 기록하고 `engine.saveTo()` 호출 → `ipc-bridge` → 러스트 `save_to`: 원본 mtime·크기 검사 → `wal_checkpoint(TRUNCATE)` → `VACUUM INTO` 임시 파일 → 원본을 `.bak`으로 이동 → 임시 파일을 원본으로 rename → 작업 사본의 dirty 표식 해제 → 성공 시 `known_revisions` 갱신, dirty 해제. `store.save()`는 `capabilities().persistence`가 `snapshot`인지 `native`인지로 두 경로를 고른다.
 
 ---
 
@@ -303,7 +378,8 @@ scripts/
 
 ```sql
 CREATE TABLE IF NOT EXISTS _jdr_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
--- keys: schema_version, db_id, revision, saved_at, saved_by, created_at, app_version
+-- keys: schema_version, db_id, revision, saved_at, saved_by, created_at, app_version,
+--       dirty (데스크톱 모드 작업 사본 전용, D-15)
 
 CREATE TABLE IF NOT EXISTS _jdr_tables (
   id TEXT PRIMARY KEY,            -- 't_' || 8hex
@@ -363,6 +439,8 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 | 저널에 `db_id` 일치, `base_revision == file.revision` | 미저장 변경 존재 | "복구 / 버리기" 선택 |
 | 저널에 `db_id` 일치, `base_revision != file.revision` | 다른 버전 위의 미저장 변경 | 경고 후 "버리기 / 별도 파일로 내보내기" |
 
+데스크톱 모드에서는 "저널" 조건을 "dirty 표식이 있는 작업 사본"으로 읽는다. 작업 사본의 `_jdr_meta.revision`이 `base_revision` 역할을 하고, 원본 파일의 `revision`과 비교한다.
+
 ---
 
 ## 5. 단계별 구현 계획
@@ -392,14 +470,15 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 - `npm run check`(lint + typecheck + unit) 통과, `npm run build && npm run verify` 통과
 - Playwright가 `file://.../dist/jdrdatabase.html`을 열어 제목 텍스트를 확인
 
-### Step 1. DB 엔진과 RPC 계층
+### Step 1. 엔진 인터페이스, wasm 엔진, RPC 계층
 
-**목표**: Worker 안에서 sql.js가 기동하고, 메인에서 RPC로 SQL을 실행하며, 메모리 DB를 바이트로 내보내고 다시 연다.
+**목표**: 두 모드가 공유할 엔진 인터페이스(D-15)를 고정하고, 그 첫 구현인 sql.js 엔진이 Worker 안에서 기동하며, 메인에서 RPC로 SQL을 실행하고, 메모리 DB를 바이트로 내보내고 다시 연다.
 
-**산출물**: `db/engine.js`, `db/worker.js`, `db/client.js`, `util/errors.js`, `util/bytes.js`, `vendor/sql-wasm.*`
+**산출물**: `db/engine.js`, `db/engine-wasm.js`, `db/worker.js`, `db/client.js`, `util/errors.js`, `util/bytes.js`, `vendor/sql-wasm.*`
 
 **주요 함수**
-- `engine.init({ wasmBinary })`, `engine.open(bytes?)`, `engine.close()`, `engine.exec(sql, params)`, `engine.run(sql, params)`, `engine.prepareCached(sql)`, `engine.transaction(fn)`, `engine.export()`, `engine.applyPragmas()`
+- `engine.js`: D-15 인터페이스의 JSDoc `@typedef Engine`, `selectEngine(mode)`, 공통 검증 래퍼(결과 1만 행 상한, `runBatch` 파라미터 목록 1만 건 상한, 배치 직렬화 크기 64 MB 상한)
+- `engine-wasm.js`: `init({ wasmBinary })`, `open(bytes?)`, `close()`, `exec(sql, params)`, `run(sql, params)`, `runBatch(sql, paramsList)`(하나의 트랜잭션에서 prepared statement를 bind → step → reset 반복), `prepareCached(sql)`, `transaction(fn)`, `snapshot()`(sql.js export를 감싸고 statement 캐시 무효화·PRAGMA 재적용 수행), `applyPragmas()`, `interrupt()`, `capabilities()` → `{ mode: 'wasm', warnFileBytes: 700 MB, maxFileBytes: 1.5 GB, persistence: 'snapshot' }`
 - `client.createClient({ transport })`, `client.call(op, args, { transfer, onProgress, signal })`
 - `worker.js`: `dispatch(msg)` → `handlers[op]`. 진행 이벤트 `{ id, progress: { done, total, phase } }`
 - `createTransport()`: Worker 생성 시도 → 실패 시 `InlineTransport`(같은 스레드에서 `dispatch` 직접 호출)
@@ -407,13 +486,16 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 **예외 처리**
 - Worker 생성 실패(`SecurityError`, `file://` 제한): 인라인 전송으로 폴백하고 상태바에 "단일 스레드 모드" 표시.
 - wasm 인스턴스화 실패(메모리 부족, 지원 안 되는 브라우저): 시작 화면에 원인과 지원 브라우저 안내를 표시하고 앱을 잠근다.
-- `export()` 이후 statement 캐시 무효화와 PRAGMA 재적용을 `engine.export()` 내부에서 반드시 수행한다(D-02).
+- sql.js export 이후 statement 캐시 무효화와 PRAGMA 재적용을 `snapshot()` 내부에서 반드시 수행한다(D-02). `snapshot()` 바깥에서 sql.js의 export를 직접 부르는 코드는 두지 않는다.
+- `runBatch` 도중 한 행이라도 실패하면 전체를 롤백하고 실패한 파라미터 인덱스를 `detail`에 담아 던진다.
 - RPC 타임아웃은 두지 않는다(대용량 작업은 수십 초가 정상). 대신 취소 신호(`signal`)를 지원하는 작업만 취소 가능하고, 그 외에는 진행률만 보고한다.
 - 메시지 크기: 결과 행이 10,000행을 넘는 요청은 Worker가 `E_RESULT_TOO_LARGE`로 거부한다(창 질의만 허용, 전체 SELECT 금지).
 
 **완료 기준**
 - 단위 테스트: Node에서 `engine`을 초기화해 `PRAGMA compile_options`에 `ENABLE_FTS5`가 있고 `sqlite_version() >= 3.37`임을 고정한다.
-- 왕복 테스트: 테이블 생성 → export → 새 엔진에 import → 같은 데이터.
+- 왕복 테스트: 테이블 생성 → `snapshot()` → 새 엔진에 `open(bytes)` → 같은 데이터.
+- 단위: `runBatch` 1만 행이 단일 트랜잭션으로 원자적(중간 행 실패 주입 시 0행 삽입).
+- 단위: 인터페이스 적합성 테스트를 엔진 구현과 분리된 파일(`test/unit/db/engine-contract.test.js`)로 두어 Step 11의 네이티브 엔진이 같은 테스트를 통과하게 한다.
 - E2E: Worker 모드와 인라인 모드 각각에서 `SELECT 1` 성공.
 
 ### Step 2. 파일 열기·저장·저널·백업
@@ -423,7 +505,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 **산출물**: `io/filesystem.js`, `io/idb.js`, `io/autosave.js`, `app/store.js`(파일 상태 부분), `ui/toolbar.js`, `ui/dialogs/conflict.js`
 
 **주요 함수**
-- `filesystem.capabilities()` → `{ fsa: boolean, idb: boolean }`
+- `filesystem.capabilities()` → `{ fsa: boolean, idb: boolean, native: boolean }`. `native`는 데스크톱 모드에서만 참이며, 그때 `pickOpen()`·`pickSaveAs()`는 타우리 dialog 플러그인을 호출해 경로 문자열을 돌려주고 `readAll()`·`write()`는 호출되지 않는다(바이트 이동은 러스트가 담당). 이 분기는 이 단계에서 인터페이스와 스텁만 두고 구현은 Step 11에서 채운다.
 - `filesystem.pickOpen()`, `filesystem.pickSaveAs(suggestedName)`, `filesystem.readAll(handleOrFile)` → `Uint8Array`, `filesystem.write(handle, bytes)`, `filesystem.download(name, bytes)`
 - `idb.open()`; 스토어 `handles`, `journal`, `backups`, `known_revisions`, `settings`
 - `autosave.recordCommand(cmd)`, `autosave.clear()`, `autosave.recoverable(dbId)`, `autosave.replay(commands)`
@@ -433,7 +515,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 **예외 처리**
 - SQLite 파일이 아님 / 손상: `E_FILE_NOT_SQLITE`, `E_FILE_CORRUPT`(`PRAGMA integrity_check` 실패). 열지 않고 안내.
 - `_jdr_meta`가 없는 일반 SQLite 파일: "이 파일은 다른 도구가 만든 SQLite 파일입니다. 메타 정보를 추가하여 이 앱에서 관리하시겠습니까?" → 승인 시 기존 테이블을 `_jdr_tables`에 등록(열 타입은 `text`로 추정, STRICT 아님을 표시).
-- 파일 크기 상한: 700 MB 초과 시 경고 후 계속, 1.5 GB 초과 시 거부(`E_FILE_TOO_LARGE`).
+- 파일 크기 상한: 엔진의 `capabilities().warnFileBytes` 초과 시 경고 후 계속, `maxFileBytes` 초과 시 거부(`E_FILE_TOO_LARGE`). wasm 엔진에서는 각각 700 MB, 1.5 GB이고 네이티브 엔진에서는 검사가 발생하지 않는다.
 - 메모리 부족(`RangeError`, wasm `abort`): 열기·저장을 중단하고 "파일이 너무 큽니다" 안내. 저장 중이었으면 원본은 그대로임을 명시.
 - 파일 핸들 권한 만료: `queryPermission` → `requestPermission` 순으로 재요청. 거부 시 "다른 이름으로 저장"으로 유도.
 - 저장 도중 브라우저가 닫히는 경우: `createWritable`의 원자성으로 원본은 보존됨. `beforeunload`에서 dirty이면 이탈 확인.
@@ -505,7 +587,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 - `inline.open(cell, { initialText })`, `inline.commit()`, `inline.cancel()`
 - `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정)
 - `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`
-- `clipboard.copy(range)` → TSV, `clipboard.paste(text, anchor)` → 복합 커맨드
+- `clipboard.copy(range)` → TSV, `clipboard.paste(text, anchor)` → 복합 커맨드. Worker는 이를 `runBatch`로 실행한다
 - `commands.editCell({ tableId, rowId, colId, oldValue, newValue })`, `commands.insertRows({ tableId, count, at })`, `commands.deleteRows({ tableId, rowIds, snapshot })`, `commands.bulkEdit({ tableId, edits })`
 - `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`
 - Worker: `applyCommand(cmd)`(`BEGIN` ... `COMMIT`, 실패 시 `ROLLBACK`), `_updated_at` 갱신 트리거 대신 커맨드가 명시적으로 갱신
@@ -562,7 +644,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 - `csv.detectDelimiter(headText)`(후보별 행 간 필드 수 분산이 최소인 것)
 - `csv.parse(file, { encoding, delimiter, hasHeader })` → 행 이터레이터. `file.stream().pipeThrough(new TextDecoderStream(encoding))`에 상태 기계(필드 안/따옴표 안/따옴표 뒤) 적용, 조각 경계에 걸친 레코드는 다음 조각으로 이월
 - `infer.sample(iterator, 1000)`, `infer.column(values)` → `{ type, confidence, examples }`(우선순위 boolean → integer → real → date → datetime → text; 최대 길이 2,000자 초과가 하나라도 있으면 longtext)
-- `pipeline.run({ source, mapping, target, policy, onProgress, signal })`: 1,000행 트랜잭션, prepared statement 재사용, `_created_at` 일괄, 종료 시 `{ inserted, skipped, errors[] }` 보고서
+- `pipeline.run({ source, mapping, target, policy, onProgress, signal })`: 1,000행 단위 `runBatch`(하나의 트랜잭션, prepared statement 재사용), `_created_at` 일괄, 종료 시 `{ inserted, skipped, errors[] }` 보고서
 
 **예외 처리**
 - 인코딩 오판(깨진 문자(U+FFFD) 비율 1% 초과): 미리보기 단계에서 경고하고 인코딩 재선택 유도.
@@ -616,8 +698,8 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 - `exportCsv(tableId, viewSpec?, { encoding: 'utf-8-bom' | 'utf-8', delimiter })`: 창 질의로 5,000행씩 스트리밍하여 `WritableStream`에 쓰기(전체를 문자열로 만들지 않음)
 - `exportXlsx(tableId)`: 10만 행 초과 시 경고(SheetJS 쓰기는 메모리 상주). 100만 행은 XLSX 규격 상한.
 - `filesystem.write(handle, bytes, { gzip })`: `new CompressionStream('gzip')`, 확장자 `.db.gz`. 열기 시 gzip 매직(`1f 8b`)으로 자동 판별
-- `backups.restore()`: IDB의 직전 저장본을 새 이름으로 내보내기
-- 자동 저장: dirty 후 N초(기본 꺼짐, 30초~5분)마다 `store.save()`. 정본 파일 핸들이 있을 때만.
+- `backups.restore()`: 직전 저장본(브라우저 모드는 IDB `backups`, 데스크톱 모드는 `.bak` 파일)을 새 이름으로 내보내기
+- 자동 저장: dirty 후 N초(기본 꺼짐, 30초~5분)마다 `store.save()`. 정본 파일(핸들 또는 경로)이 있을 때만.
 
 **예외 처리**
 - 내보내기 대상 셀에 구분자·개행·따옴표 포함: RFC 4180 인용. 엑셀 호환을 위해 UTF-8 BOM 기본.
@@ -650,6 +732,51 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 - Playwright axe 검사에서 critical 0건.
 - `dist/jdrdatabase.html` 6 MB 이하.
 
+### Step 11. 타우리 데스크톱 셸과 네이티브 엔진
+
+**목표**: 같은 소스에서 타우리 데스크톱 앱을 빌드하고, 데스크톱 모드에서는 rusqlite 네이티브 엔진과 작업 사본 모델(D-15)로 DB 파일 상한을 디스크 용량으로 확장한다.
+
+**선행 조건**: Step 10까지 완료된 브라우저 경로. Step 1의 엔진 인터페이스와 적합성 테스트, Step 2의 `capabilities()` 기반 상한 검사가 이미 있어야 한다.
+
+**산출물**: `src-tauri/` 전체, `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `build/build.mjs`(타우리 변형), `package.json` scripts `tauri:dev`·`tauri:build`, CI 매트릭스(Windows·macOS·Linux 빌드와 `cargo test`), `docs/desktop.md`
+
+**주요 함수 (JS)**
+- `engine-native.js`: 인터페이스 전체 구현. Worker 컨텍스트면 `bridgeCall(op, args, onProgress)`로 메인에 위임하고, 메인 컨텍스트(인라인 전송)면 `invoke`를 직접 호출. `capabilities()` → `{ mode: 'native', warnFileBytes: Infinity, maxFileBytes: Infinity, persistence: 'native' }`
+- `ipc-bridge.js`: `attach(worker)`(Worker의 `engine:call` 수신 → `invoke` → `engine:result` 회신), `invokeWithChannel(cmd, args, onProgress)`, `detach()`
+- `filesystem.js`: `pickOpen()`·`pickSaveAs()`의 타우리 dialog 분기, `capabilities().native = true`
+- `store.save()`: `persistence === 'native'`이면 `client.call('db.save', { originalPath })`
+- `main.js`: `detectMode()` → `'browser' | 'desktop'`, `selectEngine(mode)`
+
+**주요 함수 (Rust)**
+- `db.rs`: `open(original_path) -> OpenInfo`(작업 사본 준비 후 연결, 기존 사본의 dirty 여부 포함), `close()`, `exec(sql, params) -> Rows`, `run(sql, params) -> RunResult`, `run_batch(sql, params_list) -> usize`(단일 트랜잭션), `begin() / commit() / rollback()`, `interrupt()`, `capabilities()`
+- `save.rs`: `save_to(original_path, expected_mtime, expected_len) -> SaveInfo`(mtime·크기 검사 → checkpoint → `VACUUM INTO` 임시 → 원본을 `.bak`으로 → 임시를 원본으로 rename → 임시 정리), `restore_backup(original_path)`
+- `workcopy.rs`: `workcopy_path(db_id)`, `prepare(original_path) -> PathBuf`(복사, 남은 사본이 dirty면 그대로 두고 알림), `list()`, `purge(older_than)`
+- `error.rs`: `AppError { code, message, detail }` + `serde::Serialize`. rusqlite 오류 매핑: `SQLITE_FULL` → `E_DISK_FULL`, `SQLITE_BUSY`·`SQLITE_LOCKED` → `E_FILE_LOCKED`, `SQLITE_INTERRUPT` → `E_IMPORT_CANCELLED`, 그 외 → `E_DB_QUERY`
+
+**예외 처리**
+- 타우리 전역 객체는 있으나 `invoke`가 실패(명령 미등록, 권한 설정 누락): `E_NATIVE_IPC`. 앱을 잠그고 원인을 표시한다. wasm으로 폴백하지 않는다(D-15).
+- 작업 사본 복사 중 디스크 부족: `E_DISK_FULL`. 원본은 손대지 않았음을 명시.
+- 저장 중 디스크 부족(`VACUUM INTO` 실패): 임시 파일 삭제, 원본과 `.bak` 그대로. `E_DISK_FULL`.
+- rename 단계 실패(권한, 클라우드 클라이언트의 잠금): `E_FILE_LOCKED`. `.bak`으로 옮긴 원본이 있으면 되돌려 놓고, 임시 파일 경로를 알려 주며 "다른 이름으로 저장"을 유도.
+- 원본이 열려 있는 동안 디스크에서 바뀜: `E_ORIGINAL_CHANGED`(D-15).
+- 이전 실행의 작업 사본이 남아 있음(비정상 종료): dirty면 복구 흐름, 아니면 폐기 후 새로 복사.
+- 원본 파일이 이동·삭제됨: 저장 시 `E_FILE_WRITE`, "다른 이름으로 저장".
+- 두 번째 인스턴스 실행: single-instance 플러그인으로 첫 인스턴스에 포워딩. 한 인스턴스 안의 다중 창은 v1에 없다.
+- IPC 페이로드: `run_batch` 한 번의 인자가 64 MB를 넘으면 JS 쪽 공통 검증(Step 1)이 배치를 쪼갠다(장문 셀 다량 붙여넣기).
+- 러스트 패닉: panic hook에서 로그 파일에 기록하고 창에 오류를 표시. 커넥션 뮤텍스가 poison되면 `close` 후 재열기.
+- WebView 차이: WKWebView에서 IndexedDB·CompressionStream이 없을 수 있으므로 기능 감지(D-13). `known_revisions`를 저장할 곳이 없으면 revision 경고를 건너뛰고 상태바에 표시.
+- 경로: 유니코드·공백 포함 경로, UNC 경로를 `PathBuf`로만 다루고 문자열 결합 금지. 픽스처에 한글 경로 포함.
+- 접근 범위: 타우리 fs 스코프를 사용자가 대화상자로 고른 경로와 앱 데이터 폴더로 제한.
+- 가져오기·붙여넣기 중 `interrupt()`: 러스트가 현재 문장을 중단하고 트랜잭션을 롤백한 뒤 `E_IMPORT_CANCELLED`를 돌려준다. 브라우저 모드와 같은 결과 보고 형식을 유지.
+
+**완료 기준**
+- `cargo test`: `PRAGMA compile_options`에 `ENABLE_FTS5` 포함, 저장 원자성(`VACUUM INTO` 도중 실패 주입 시 원본 무손상), `run_batch` 원자성, `interrupt`로 긴 질의 중단, 한글 경로 왕복.
+- Step 1의 엔진 적합성 테스트를 네이티브 엔진에 대해 tauri-driver 환경에서 통과.
+- 데스크톱 E2E(tauri-driver, Windows·Linux): 브라우저 E2E와 같은 시나리오 파일을 실행하되 파일 대화상자는 테스트 훅으로 경로를 주입.
+- 5 GB 픽스처(`gen-fixture.mjs`의 `--rows 5000000` 확장)로 열기(작업 사본 복사 제외) 2초 이하, 창 질의 50 ms 이하, 저장은 같은 크기 파일 복사 시간의 1.5배 이내.
+- `verify.mjs`가 브라우저 산출물과 타우리 산출물이 CSP 태그 외 동일함을 확인.
+- `docs/desktop.md`에 작업 사본 위치, `.bak` 파일, 클라우드 폴더 사용 절차, 브라우저 모드와의 차이(상한, 저널 대신 작업 사본)를 기술.
+
 ---
 
 ## 6. RPC 프로토콜 (D-11)
@@ -668,9 +795,10 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 
 | op | 인자 | 결과 | 취소 |
 |---|---|---|---|
-| `engine.init` | `{ wasmBinary }` (transfer) | `{ version, compileOptions }` | 불가 |
-| `db.open` | `{ bytes? }` (transfer) | `{ meta, tables }` | 불가 |
-| `db.export` | `{ bumpRevision, savedBy }` | `{ bytes }` (transfer) | 불가 |
+| `engine.init` | wasm: `{ wasmBinary }` (transfer) / native: `{}` | `{ version, compileOptions, capabilities }` | 불가 |
+| `db.open` | wasm: `{ bytes? }` (transfer) / native: `{ originalPath? }` | `{ meta, tables, dirtyWorkcopy? }` | 불가 |
+| `db.snapshot` | `{ bumpRevision, savedBy }` | `{ bytes }` (transfer). wasm 전용, native는 `E_UNSUPPORTED` | 불가 |
+| `db.save` | `{ originalPath, bumpRevision, savedBy }` | `{ revision, savedAt }`. native 전용, wasm은 `E_UNSUPPORTED` | 불가 |
 | `db.close` | | | |
 | `schema.*` | 3장 `tables` 함수와 1:1 | | 타입 변경만 가능 |
 | `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, seq }` | 불가(짧음) |
@@ -681,6 +809,8 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 | `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
 | `import.run` | `{ file, mapping, target, policy }` | `{ report }` | 가능 |
 | `export.stream` | `{ tableId, viewSpec, format, options }` | 조각 이벤트 `{ chunk }` 후 완료 | 가능 |
+
+데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다.
 
 규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_BUSY`. `command.apply`, `import.run`, `search.enable`은 서로 배타적이며 동시에 오면 `E_BUSY`. `query.*`는 언제나 허용된다(읽기).
 
@@ -697,7 +827,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 | `E_ENV_NO_IDB` | IndexedDB 사용 불가 | 예 | 저널·백업·최근 파일 비활성 안내 |
 | `E_FILE_NOT_SQLITE` | 헤더 불일치 | 예 | 열기 취소 |
 | `E_FILE_CORRUPT` | integrity_check 실패 | 예 | 열기 취소, sqlite3 `.recover` 안내 |
-| `E_FILE_TOO_LARGE` | 1.5 GB 초과 | 예 | 열기 거부 |
+| `E_FILE_TOO_LARGE` | 엔진의 `maxFileBytes` 초과(wasm 1.5 GB, native 없음) | 예 | 열기 거부 |
 | `E_FILE_NEWER_SCHEMA` | 앱보다 새 schema_version | 예 | 읽기 전용으로 열기 |
 | `E_FILE_PERMISSION` | 핸들 권한 거부 | 예 | 다른 이름으로 저장 유도 |
 | `E_FILE_WRITE` | 쓰기 실패 | 예 | 원본 보존 안내, 재시도·다운로드 대안 |
@@ -716,6 +846,11 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 | `E_XLSX_ENCRYPTED` / `E_XLSX_CORRUPT` | 파일 문제 | 예 | 거부 |
 | `E_GZIP_UNSUPPORTED` | 압축 스트림 없음 | 예 | 비압축 안내 |
 | `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내 |
+| `E_UNSUPPORTED` | 현재 엔진이 지원하지 않는 op(`db.snapshot`을 native에, `db.save`를 wasm에) | 아니오(버그) | 콘솔 오류 |
+| `E_NATIVE_IPC` | 데스크톱 모드에서 타우리 IPC 실패 | 아니오 | 앱 잠금, 원인 표시. wasm 폴백 없음 |
+| `E_DISK_FULL` | 작업 사본 복사·저장 중 디스크 부족 | 예 | 원본 무손상 안내, 공간 확보 후 재시도 |
+| `E_FILE_LOCKED` | 원본 교체 실패(잠금·권한) | 예 | `.bak` 원복, 임시 파일 경로 안내, 다른 이름으로 저장 |
+| `E_ORIGINAL_CHANGED` | 열린 뒤 원본이 디스크에서 바뀜 | 예 | 덮어쓰기 / 다른 이름으로 저장 / 취소 |
 
 원칙:
 1. 데이터 유실 가능성이 있는 경로(저장, 삭제, 가져오기 취소)는 실패 시 **원본이 어떤 상태인지**를 메시지에 반드시 포함한다.
@@ -737,12 +872,23 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 | 셀 편집 반영 | 30 ms 이하 | `command.apply` 왕복 |
 | 정렬 변경(인덱스 없음) | 1초 이하 | `query.window` 첫 응답 |
 | trigram 검색 | 200 ms 이하 | `query.count` |
-| 300 MB 저장 | 5초 이하 + 디스크 시간 | `db.export` + write |
+| 300 MB 저장 | 5초 이하 + 디스크 시간 | `db.snapshot` + write |
 | 150 MB CSV 가져오기 | 60초 이하 | `import.run` |
 | 산출물 크기 | 6 MB 이하 | `verify.mjs` |
 | 최대 힙(300 MB DB 저장 시점) | 1.2 GB 이하 | 힙 스냅샷 |
 
-예산을 넘기면 원인을 기록하고 설계(D-05, D-06)를 재검토한다. 예산을 낮추는 것으로 해결하지 않는다.
+데스크톱 모드(Step 11)는 같은 UI 예산에 아래를 더한다. 측정 환경은 위와 같고, 픽스처는 500만 행 × 20열(약 5 GB DB)이다.
+
+| 항목 | 목표 | 측정 방법 |
+|---|---|---|
+| 5 GB 파일 열기(작업 사본 복사 제외) | 2초 이하 | `db.open` 응답 시간 |
+| 작업 사본 복사 | 같은 크기 파일 복사 시간의 1.2배 이내 | 러스트 측 타이머 |
+| 창 질의(200행, 500만 행 테이블 끝부분) | 50 ms 이하 | 러스트 측 타이머 |
+| `run_batch` 1,000행(장문 2열 포함) | 100 ms 이하 | IPC 왕복 |
+| 5 GB 저장 | 같은 크기 파일 복사 시간의 1.5배 이내 | `db.save` |
+| 최대 상주 메모리(5 GB DB) | 500 MB 이하 | OS 프로세스 측정 |
+
+예산을 넘기면 원인을 기록하고 설계(D-05, D-06, D-15)를 재검토한다. 예산을 낮추는 것으로 해결하지 않는다.
 
 ---
 
@@ -751,11 +897,13 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
 | # | 리스크 | 영향 | 대응 |
 |---|---|---|---|
 | R1 | `file://`에서 Blob Worker·IndexedDB·File System Access의 브라우저별 가용성 | 폴백 경로로만 동작할 수 있음 | Step 1·2에서 실측, 지원 매트릭스 문서화, 모든 기능 감지 후 폴백 |
-| R2 | sql.js wasm 메모리 성장 한계(브라우저 탭 한계) | 대용량 파일 열기·저장 실패 | 파일 크기 경고·거부 상한, export 시점 메모리 2배 예산 반영 |
+| R2 | 브라우저 모드: sql.js wasm 메모리 성장 한계(브라우저 탭 한계). 데스크톱 모드: 작업 사본 복사와 `VACUUM INTO` 저장이 파일 크기에 비례하여 수십 GB에서 분 단위 | 브라우저: 대용량 파일 열기·저장 실패. 데스크톱: 열기·저장 대기 시간 | 브라우저: 엔진이 보고하는 경고·거부 상한, snapshot 시점 메모리 2배 예산 반영. 데스크톱: 진행률 표시, 수십 GB는 v1.1의 직접 모드 옵션으로 검토 |
 | R3 | SheetJS CE 유지보수·배포 방식 변경 | XLSX 기능 의존성 | `vendor/`에 고정 버전 커밋, fflate + 자체 파서로 교체 가능한 어댑터 경계 유지 |
 | R4 | 클라우드 충돌 사본으로 인한 사용자 혼란 | 편집 유실 | revision 경고, 백업 1세대, 사용 안내 문서 |
 | R5 | 한글 로케일 정렬·대소문자 무시 요구 | 정렬 결과 기대 불일치 | v1은 코드 포인트 정렬로 한정하고 문서화. v1.1에서 `create_function` 기반 정렬 키 검토 |
-| R6 | 100만 행 이상에서 OFFSET 지연 | 스크롤 끝부분 느림 | 필요 시 정렬 열 인덱스 자동 생성(사용자 옵션) 또는 keyset 페이징 |
+| R6 | 브라우저 모드: 100만 행 근처에서 OFFSET 지연. 데스크톱 모드: 수백만~수천만 행에서 OFFSET·`count(*)`·FTS 인덱스 생성이 초 단위 이상 | 스크롤 끝부분과 필터 변경이 느림, 검색 인덱스 생성이 오래 걸림 | 정렬 열 인덱스 자동 생성(사용자 옵션), keyset 페이징, `count(*)`는 비동기로 표시하고 완료 전에는 근사값, FTS 생성은 진행률과 취소 |
 | R7 | STRICT 테이블이 아닌 외부 SQLite 파일 편집 | 타입 혼재 | "관리 대상 등록" 시 읽기 전용 기본, 변환 마법사는 v1.1 |
+| R8 | WebView별 차이(WKWebView의 IndexedDB·CompressionStream, WebKitGTK 버전)와 tauri-driver의 macOS 미지원 | 데스크톱 기능 일부가 플랫폼별로 다르고 macOS E2E 자동화 불가 | 기능 감지, 지원 매트릭스에 데스크톱 열 추가, macOS는 수동 점검 목록 |
+| R9 | rusqlite `bundled` 빌드의 컴파일 플래그(FTS5, `VACUUM INTO` 지원 버전)와 JS 쪽 SQLite 버전 불일치 | 같은 SQL이 한 모드에서만 실패 | 두 엔진의 `sqlite_version()`·`compile_options`를 테스트로 고정하고 차이를 문서화 |
 
 미확정: 기본 파일 확장자를 `.db`로 할지 `.jdr.db`로 할지(현재 `.db`). 자동 저장의 기본 켜짐 여부(현재 꺼짐).
