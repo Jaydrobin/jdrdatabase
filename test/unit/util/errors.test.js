@@ -1,6 +1,9 @@
 // @ts-check
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   AppError,
   deserializeError,
@@ -76,4 +79,24 @@ test('ERROR_CODES: 중복 없이 E_ 접두사, isErrorCode', () => {
   for (const code of ERROR_CODES) assert.match(code, /^E_[A-Z_]+$/);
   assert.equal(isErrorCode('E_DB_QUERY'), true);
   assert.equal(isErrorCode('nope'), false);
+});
+
+test('DESIGN.md 7장 표가 모든 오류 코드를 담는다 (CLAUDE.md 7.1)', async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  const design = await readFile(path.join(root, 'DESIGN.md'), 'utf8');
+  const chapter = design.slice(design.indexOf('## 7.'), design.indexOf('## 8.'));
+  assert.ok(chapter.length > 0, 'DESIGN.md에서 7장을 찾지 못함');
+  // 한 행이 `E_A` / `E_B`처럼 코드를 둘 담기도 하므로 행 단위가 아니라 코드 단위로 모은다.
+  const documented = new Set(
+    chapter
+      .split('\n')
+      .filter((line) => line.startsWith('| `E_'))
+      .flatMap((line) => [...line.matchAll(/`(E_[A-Z_]+)`/g)].map((m) => m[1])),
+  );
+  const missing = ERROR_CODES.filter((code) => !documented.has(code));
+  assert.deepEqual(missing, [], `7장 표에 없는 코드: ${missing.join(', ')}`);
+  const extra = [...documented].filter(
+    (code) => !ERROR_CODES.includes(/** @type {never} */ (code)),
+  );
+  assert.deepEqual(extra, [], `util/errors.js에 없는 코드: ${extra.join(', ')}`);
 });
