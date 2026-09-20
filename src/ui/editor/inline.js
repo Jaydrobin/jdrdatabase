@@ -41,6 +41,7 @@ import { t } from '../../i18n/index.js';
  * @typedef {object} InlineEditor
  * @property {HTMLElement} el 편집기 컨테이너(마운트는 호출자가 캔버스에 한다)
  * @property {(cell: EditCell, options: OpenOptions) => void} open
+ * @property {(rect: { left: number, top: number, width: number, height: number }) => void} moveTo 편집 중인 칸이 움직이면 따라간다(그리드가 렌더마다 부른다)
  * @property {(reason?: CommitReason) => Promise<boolean>} commit 검증 → onCommit. 실패는 표시하고 false
  * @property {() => void} cancel
  * @property {() => boolean} isOpen
@@ -112,6 +113,19 @@ export function createInlineEditor() {
     return input;
   }
 
+  /**
+   * 편집기를 칸 위에 놓는다. 값이 바뀔 때만 쓴다(렌더마다 불리므로).
+   * @param {{ left: number, top: number, width: number, height: number }} rect
+   */
+  function place(rect) {
+    const transform = `translate(${rect.left}px, ${rect.top}px)`;
+    if (el.style.transform !== transform) el.style.transform = transform;
+    const width = `${rect.width}px`;
+    if (el.style.width !== width) el.style.width = width;
+    const height = `${rect.height}px`;
+    if (el.style.height !== height) el.style.height = height;
+  }
+
   function teardown() {
     if (field) {
       field.removeEventListener('keydown', onKeydown);
@@ -167,9 +181,7 @@ export function createInlineEditor() {
       options = opts;
       field = buildField(cell.column, opts.initialText ?? cell.text);
       el.append(field, error);
-      el.style.transform = `translate(${cell.rect.left}px, ${cell.rect.top}px)`;
-      el.style.width = `${cell.rect.width}px`;
-      el.style.height = `${cell.rect.height}px`;
+      place(cell.rect);
       el.hidden = false;
       field.addEventListener('keydown', onKeydown);
       field.addEventListener('blur', onBlur);
@@ -179,6 +191,13 @@ export function createInlineEditor() {
         const end = field.value.length;
         field.setSelectionRange(end, end);
       }
+    },
+
+    moveTo(rect) {
+      // 열려 있을 때만. 닫힌 편집기는 hidden이라 위치가 의미 없다.
+      if (!current) return;
+      current.rect = rect;
+      place(rect);
     },
 
     async commit(reason = 'enter') {

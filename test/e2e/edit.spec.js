@@ -442,3 +442,37 @@ test('접근성: 선택한 범위의 칸이 aria-selected로 드러난다', asyn
   await page.keyboard.press('Escape');
   await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(1);
 });
+
+test('편집기는 고정 열에서도 셀을 따라간다(가로 스크롤·열 너비 변경)', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 600 });
+  const { table } = await seed(page);
+  // 첫 열을 고정하면 그 칸은 가로 스크롤에도 왼쪽에 남는다. 편집기는 열 때 잰 캔버스 좌표에
+  // 머물러 있었으므로 캔버스와 함께 밀려나 편집 중인 칸에서 떨어졌다(실측 300 px).
+  await page.locator('.jdr-grid__frozen-select').selectOption('1');
+  await cell(page, 0, 0).click();
+  await page.keyboard.press('Enter');
+  const editor = page.locator('.jdr-editor');
+  await expect(editor).toBeVisible();
+
+  /** 편집기와 편집 중인 칸의 x 좌표 차이. */
+  const gap = async () => {
+    const e = await editor.boundingBox();
+    const c = await cell(page, 0, 0).boundingBox();
+    if (!e || !c) throw new Error('box missing');
+    return Math.abs(e.x - c.x);
+  };
+  expect(await gap()).toBeLessThan(2);
+
+  await page.locator('.jdr-grid__scroller').evaluate((el) => {
+    el.scrollLeft = 300;
+  });
+  await expect.poll(gap).toBeLessThan(2);
+  await expect(editor).toBeVisible();
+
+  // 확정하면 고정 열의 그 칸에 값이 들어간다.
+  await editor.locator('input').fill('고정편집');
+  await page.keyboard.press('Enter');
+  await expect(cell(page, 0, 0)).toHaveText('고정편집');
+  const rows = await hook(page).query(`SELECT count(*) FROM "${table.id}" WHERE "id" = 1`);
+  expect(rows.rows[0][0]).toBe(1);
+});

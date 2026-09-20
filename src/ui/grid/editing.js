@@ -54,6 +54,7 @@ import { cellToText, convertPastedCell, parseTsv, planPaste, serializeTsv } from
  * @property {() => void} onRowInsert
  * @property {(range: CellRange) => void} onRowDelete
  * @property {() => void} onReset 그리드가 다른 테이블로 바뀌거나 내려갈 때. 편집기를 닫는다
+ * @property {() => void} onRelayout 렌더 끝. 열려 있는 편집기를 편집 중인 칸 위에 다시 놓는다
  */
 
 /**
@@ -488,6 +489,12 @@ export function createEditingController(deps) {
     onReset: () => {
       inline.cancel();
       longtext.close();
+    },
+    onRelayout: () => {
+      // 고정 열의 칸은 렌더마다 `scrollLeft`만큼 다시 놓이고, 열 너비 조절도 칸을 옮긴다.
+      // 편집기가 열 때 잰 좌표에 머물면 편집 중인 칸에서 떨어져 나간다.
+      const cell = inline.cell();
+      if (cell) inline.moveTo(grid.cellRect(cell.row, cell.col));
     },
   };
   grid.setHooks(hooks);

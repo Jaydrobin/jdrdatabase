@@ -771,6 +771,8 @@ export function createGrid(deps) {
       const y = range.offsetY + (i - range.first) * ROW_HEIGHT;
       renderRow(slot, i, y, scrollLeft, colRange, rowAt(i), sel);
     }
+    // 칸을 다 놓은 뒤에 편집기를 그 위에 맞춘다. 열려 있지 않으면 하는 일이 없다.
+    hooks?.onRelayout();
     stats.renders += 1;
     stats.domRows = active.size;
     stats.lastRenderMs = performance.now() - started;
