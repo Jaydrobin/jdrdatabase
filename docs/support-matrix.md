@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | Blob URL Worker 생성·기동 | ✓ (세션 A, E2E `engine.spec.js`) | 미확인 | 미확인 | 미확인 |
 | WebAssembly 인스턴스화, CSP `script-src 'unsafe-inline' 'wasm-unsafe-eval' blob:` | ✓ (세션 A). `'wasm-unsafe-eval'` 없이는 `CompileError: Refused to compile or instantiate WebAssembly module` | 미확인 | 미확인 | 미확인 |
-| SQLite Wasm 3.53.4 기동, FTS5 trigram 질의 | ✓ (세션 A) | 미확인 | 미확인 | 미확인 |
+| SQLite Wasm 3.53.4 기동, FTS5 trigram 질의 | ✓ (세션 A, E2E `engine.spec.js`가 Worker 안에서 `CREATE VIRTUAL TABLE … tokenize='trigram'` 후 한글 부분 일치 질의까지 실행) | 미확인 | 미확인 | 미확인 |
 | Worker 없이 메인 스레드에서 엔진 실행(인라인 전송) | ✓ (세션 A, E2E 인라인 모드) | 미확인 | 미확인 | 미확인 |
 | 런타임 네트워크 요청 0건 | ✓ (세션 A, 문서와 Worker Blob URL 외 요청 없음) | 미확인 | 미확인 | 미확인 |
 | IndexedDB | 미확인 (세션 B) | 미확인 | 미확인 | 미확인 |

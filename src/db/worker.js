@@ -137,7 +137,10 @@ export function createDispatcher(options) {
     'engine.exec': async (args) => {
       if (typeof args?.sql !== 'string')
         throw new AppError('E_DB_QUERY', 'engine.exec requires sql');
-      return requireEngine().exec(args.sql, args.params);
+      const active = requireEngine();
+      // 진단·테스트 전용 op이므로 한 문장을 트랜잭션 하나로 감싼다. 이렇게 해야 DDL도 보낼 수 있고
+      // (E2E의 FTS5 검사), 쓰기는 트랜잭션 안에서만이라는 규칙도 그대로 지켜진다(CLAUDE.md 5.3).
+      return active.transaction(() => active.exec(args.sql, args.params));
     },
 
     'db.open': async (args) => {

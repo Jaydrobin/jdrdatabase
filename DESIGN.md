@@ -832,7 +832,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | op | 인자 | 결과 | 취소 |
 |---|---|---|---|
 | `engine.init` | wasm: `{ wasmBinary }` (transfer) / native: `{}` | `{ version, compileOptions, capabilities }` | 불가 |
-| `engine.exec` | `{ sql, params }` | `{ columns, rows }`. 진단·테스트 전용(Step 1 E2E의 `SELECT 1`, `window.__jdrTest`). UI 코드는 이 op를 호출하지 않는다 | 불가 |
+| `engine.exec` | `{ sql, params }` | `{ columns, rows }`. 결과 열이 없는 문장은 `{ columns: [], rows: [] }`. 진단·테스트 전용(Step 1 E2E의 `SELECT 1`과 FTS5 trigram, `window.__jdrTest`). 한 문장을 트랜잭션 하나로 감싸 실행하므로 DDL도 보낼 수 있다. UI 코드는 이 op를 호출하지 않는다 | 불가 |
 | `db.open` | wasm: `{ bytes? }` (transfer) / native: `{ originalPath? }` | `{ meta, tables, dirtyWorkcopy? }` | 불가 |
 | `db.snapshot` | `{ bumpRevision, savedBy }` | `{ bytes }` (transfer). wasm 전용, native는 `E_UNSUPPORTED` | 불가 |
 | `db.save` | `{ originalPath, bumpRevision, savedBy }` | `{ revision, savedAt }`. native 전용, wasm은 `E_UNSUPPORTED` | 불가 |

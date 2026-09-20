@@ -174,14 +174,20 @@ async function boot() {
           sqliteVersion: s.sqliteVersion,
         })),
         /**
-         * 지정한 전송 계층으로 별도 세션을 띄워 SQL 한 문장을 실행한다(E2E: Worker·인라인 각각 SELECT 1).
+         * 지정한 전송 계층으로 별도 세션을 띄워 SQL을 실행하고 마지막 문장의 결과를 돌려준다.
+         * 문장 목록을 주면 같은 세션에서 차례로 실행한다(E2E의 FTS5 준비처럼 DDL → INSERT → SELECT).
          * @param {'auto' | 'inline'} transport
-         * @param {string} sql
+         * @param {string | string[]} sql
          */
         async exec(transport, sql) {
+          const statements = Array.isArray(sql) ? sql : [sql];
           const session = await startEngine({ mode, transport, workerSource, wasmB64 });
           try {
-            const result = await session.client.call('engine.exec', { sql });
+            /** @type {import('./db/engine.js').ExecResult} */
+            let result = { columns: [], rows: [] };
+            for (const statement of statements) {
+              result = await session.client.call('engine.exec', { sql: statement });
+            }
             return { transportKind: session.transportKind, ...result };
           } finally {
             await session.client.call('db.close');
