@@ -456,3 +456,42 @@ test('runSchemaOp: 읽기 전용(다른 탭 점유)이면 실행하지 않고 �
     client.close();
   }
 });
+
+test('열기: 미저장 변경을 버리고 연 파일은 깨끗한 상태로 시작한다', async () => {
+  // 앞의 DB에 미저장 변경이 있고 사용자가 "버리기"를 골랐다면, 새로 연 파일은 dirty가 아니어야 한다.
+  // dirty가 남으면 상태 표시와 이탈 경고가 거짓말을 하고, 다음 열기가 또 확인을 묻는다.
+  const a = await setup();
+  await a.store.saveAs();
+  const bytes = a.fsx.downloads[0]?.bytes ?? new Uint8Array(0);
+  a.client.close();
+
+  const b = await setup({ prompts: { discard: true } });
+  b.store.markDirty();
+  assert.equal(await b.store.openPicked(pickedFile('saved.db', bytes)), true);
+  assert.equal(b.store.getState().dirty, false);
+  assert.deepEqual(b.asked, ['discard']);
+  b.client.close();
+});
+
+test('열기: 저널을 복구하면 복구된 테이블이 스토어 목록에도 보인다', async () => {
+  // 저널 재생은 열기 흐름 안에서 일어나므로, 재생 뒤에 읽은 테이블 목록이 열기 직전의 목록에
+  // 덮어써지면 안 된다. 덮어쓰면 DB에는 있는 테이블이 사이드바에서 사라진다.
+  const idb = createMemoryIdb();
+  const a = await setup({ idb });
+  await a.store.saveAs();
+  const bytes = a.fsx.downloads[0]?.bytes ?? new Uint8Array(0);
+  const created = await a.store.runSchemaOp('schema.create', { name: '주문' });
+  assert.ok(created);
+  a.client.close();
+
+  const b = await setup({ idb, prompts: { journal: 'recover' } });
+  assert.equal(await b.store.openPicked(pickedFile('saved.db', bytes)), true);
+  assert.equal((await b.client.call('schema.list')).tables.length, 1, 'DB에는 복구되어 있다');
+  assert.deepEqual(
+    b.store.getState().tables.map((t) => t.name),
+    ['주문'],
+  );
+  assert.equal(b.store.getState().currentTableId, created.tableId);
+  assert.equal(b.store.getState().dirty, true, '복구한 변경은 아직 저장되지 않았다');
+  b.client.close();
+});

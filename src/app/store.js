@@ -513,11 +513,9 @@ export function createStore(deps) {
         readOnly = 'otherTab';
         notify.info('file.readOnlyTab');
       }
-      if (!(await reconcileRevision(opened.meta))) {
-        await store.newDatabase({ force: true });
-        return false;
-      }
-      const wasDirty = state.dirty;
+      // 새 파일의 상태를 먼저 세운 뒤에 revision을 판정한다. 판정은 저널을 재생할 수 있고, 재생은
+      // dirty와 테이블 목록을 바꾸므로, 순서가 뒤바뀌면 재생 결과가 열기 직전 값에 덮어써진다.
+      // 앞 DB의 dirty도 여기서 끊긴다(버리기를 이미 확인받았다).
       setOpened({
         name: picked.name,
         handle: picked.handle,
@@ -526,7 +524,10 @@ export function createStore(deps) {
         tables: opened.tables,
         readOnly,
       });
-      state.dirty = wasDirty;
+      if (!(await reconcileRevision(opened.meta))) {
+        await store.newDatabase({ force: true });
+        return false;
+      }
       if (picked.handle) await rememberHandle(picked.name, picked.handle);
       emit('file:opened');
       return true;
