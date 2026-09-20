@@ -284,3 +284,21 @@ test('빈 상태: 열을 모두 삭제하면 "열이 없습니다", 테이블을
   );
   await expect(page.locator('.jdr-app__title')).toBeVisible();
 });
+
+test('테이블을 오가도 활성 셀은 하나뿐이다', async ({ page }) => {
+  await seed(page);
+  const active = page.locator('.jdr-grid__cell--active');
+  await expect(active).toHaveCount(1);
+
+  // 다른 테이블을 열면 그리드는 행 요소를 풀로 돌려보내고 커서를 처음으로 되돌린다.
+  await page.click('[data-action="table-create"]');
+  await page.locator('.jdr-dialog input').fill('메모');
+  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
+  await page.locator('.jdr-sidebar__table-name', { hasText: '고객' }).click();
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText(
+    `행 ${ROWS.toLocaleString('ko-KR')}개`,
+  );
+  await expect(active).toHaveCount(1);
+  await expect(page.locator('.jdr-grid__cell[aria-selected="true"]')).toHaveCount(1);
+  await expect(active).toHaveText('이름1');
+});

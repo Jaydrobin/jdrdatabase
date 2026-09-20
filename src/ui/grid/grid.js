@@ -210,6 +210,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {number[]} cellWidths 마지막으로 쓴 width
  * @property {number[]} cellVersions 마지막으로 내용을 그린 데이터 세대
  * @property {boolean[]} cellFrozen 마지막으로 쓴 고정 여부
+ * @property {boolean[]} cellCursor 마지막으로 쓴 활성 셀 여부
  * @property {number} y 마지막으로 쓴 translateY
  */
 
@@ -282,8 +283,6 @@ export function createGrid(deps) {
   const headerCells = [];
   /** @type {{ row: number, col: number }} */
   const cursor = { row: 0, col: 0 };
-  /** @type {HTMLElement | null} */
-  let cursorEl = null;
   let viewportWidth = 0;
   let viewportHeight = 0;
   let rafId = 0;
@@ -420,6 +419,7 @@ export function createGrid(deps) {
       cellWidths: [ROW_NUMBER_WIDTH],
       cellVersions: [-1],
       cellFrozen: [true],
+      cellCursor: [false],
       y: -1,
     };
   }
@@ -428,7 +428,26 @@ export function createGrid(deps) {
   function releaseRow(slot) {
     slot.rowIndex = -1;
     slot.el.hidden = true;
+    for (let k = 0; k < slot.cellCursor.length; k += 1) {
+      if (slot.cellCursor[k]) setCursorCell(slot, k, false);
+    }
     pool.push(slot);
+  }
+
+  /**
+   * 활성 셀 표시. 칸마다 마지막으로 쓴 값을 들고 비교하므로, 풀에서 돌아온 칸이 남의 표시를 달고
+   * 있을 수 없다(전역 포인터 하나로 관리하면 `clearRows()`가 포인터만 비워 표시가 남는다).
+   * @param {RowSlot} slot
+   * @param {number} k
+   * @param {boolean} on
+   */
+  function setCursorCell(slot, k, on) {
+    const cell = slot.cells[k];
+    if (!cell) return;
+    slot.cellCursor[k] = on;
+    cell.classList.toggle('jdr-grid__cell--active', on);
+    if (on) cell.setAttribute('aria-selected', 'true');
+    else cell.removeAttribute('aria-selected');
   }
 
   /**
@@ -470,6 +489,7 @@ export function createGrid(deps) {
       slot.cellWidths.push(-1);
       slot.cellVersions.push(-1);
       slot.cellFrozen.push(false);
+      slot.cellCursor.push(false);
     }
     while (slot.cells.length > needed) {
       slot.cells.pop()?.remove();
@@ -478,6 +498,7 @@ export function createGrid(deps) {
       slot.cellWidths.pop();
       slot.cellVersions.pop();
       slot.cellFrozen.pop();
+      slot.cellCursor.pop();
     }
     const rowVersion = data ? generation : -1;
     for (let k = 1; k < needed; k += 1) {
@@ -516,19 +537,7 @@ export function createGrid(deps) {
         }
       }
       const isCursor = rowIndex === cursor.row && colIndex === cursor.col;
-      if (isCursor) {
-        if (cursorEl !== cell) {
-          cursorEl?.classList.remove('jdr-grid__cell--active');
-          cursorEl?.removeAttribute('aria-selected');
-          cell.classList.add('jdr-grid__cell--active');
-          cell.setAttribute('aria-selected', 'true');
-          cursorEl = cell;
-        }
-      } else if (cursorEl === cell) {
-        cell.classList.remove('jdr-grid__cell--active');
-        cell.removeAttribute('aria-selected');
-        cursorEl = null;
-      }
+      if (slot.cellCursor[k] !== isCursor) setCursorCell(slot, k, isCursor);
     }
   }
 
@@ -792,7 +801,6 @@ export function createGrid(deps) {
   function clearRows() {
     for (const slot of active.values()) releaseRow(slot);
     active.clear();
-    cursorEl = null;
   }
 
   /** @type {Grid} */
