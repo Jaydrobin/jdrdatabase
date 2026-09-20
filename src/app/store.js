@@ -12,6 +12,9 @@ import { AppError, toAppError } from '../util/errors.js';
 /** @typedef {import('../db/engine.js').EngineCapabilities} EngineCapabilities */
 /** @typedef {import('../db/schema.js').Meta} Meta */
 /** @typedef {import('../db/command.js').Command} Command */
+/** @typedef {import('../db/tables.js').TableInfo} TableInfo */
+/** @typedef {import('../db/worker.js').OpMap} OpMap */
+/** @typedef {import('../db/client.js').CallOptions} CallOptions */
 /** @typedef {import('../io/idb.js').Idb} Idb */
 /** @typedef {import('../io/autosave.js').Autosave} Autosave */
 /** @typedef {import('../io/autosave.js').JournalSummary} JournalSummary */
@@ -67,13 +70,19 @@ export const RECENT_HANDLE_KEY = 'recent';
  * @typedef {object} StoreState
  * @property {FileState} file
  * @property {Meta} meta
- * @property {unknown[]} tables Step 3부터 `TableInfo[]`
+ * @property {TableInfo[]} tables
+ * @property {string | null} currentTableId 사이드바에서 고른 테이블
  * @property {boolean} dirty
  * @property {ReadOnlyReason} readOnly
  * @property {boolean} journalFull
  */
 
-/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full'} StoreEvent */
+/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed'} StoreEvent */
+
+/**
+ * 스키마 op 이름(`schema.*` 중 쓰기). 결과는 적용된 커맨드를 담는다.
+ * @typedef {'schema.create' | 'schema.rename' | 'schema.drop' | 'schema.addColumn' | 'schema.renameColumn' | 'schema.reorderColumns' | 'schema.softDeleteColumn' | 'schema.restoreColumn' | 'schema.changeColumnType'} SchemaOp
+ */
 
 /**
  * @typedef {object} StoreDeps
@@ -103,6 +112,9 @@ export const RECENT_HANDLE_KEY = 'recent';
  * @property {() => Promise<boolean>} recoverPending 시작 시 저널에 남은 새 DB 기록을 복구 제안한다
  * @property {() => Promise<{ name: string, handle: FileSystemFileHandle } | null>} recentFile IDB에 남은 최근 파일 핸들(권한은 아직 묻지 않음)
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
+ * @property {(tableId: string | null) => void} selectTable
+ * @property {<K extends SchemaOp>(op: K, args: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result'] | null>} runSchemaOp 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다. 실패는 알리고 null
+ * @property {() => Promise<void>} refreshTables `schema.list`로 테이블 목록을 다시 읽는다
  */
 
 /**
@@ -127,6 +139,7 @@ export function createStore(deps) {
     file: { name: null, handle: null, size: 0 },
     meta: {},
     tables: [],
+    currentTableId: null,
     dirty: false,
     readOnly: 'none',
     journalFull: false,
@@ -179,13 +192,25 @@ export function createStore(deps) {
   }
 
   /**
+   * 테이블 목록을 바꾸고 선택이 사라졌으면 첫 테이블로 옮긴다.
+   * @param {TableInfo[]} tables
+   */
+  function setTables(tables) {
+    state.tables = tables;
+    if (!tables.some((t) => t.id === state.currentTableId)) {
+      state.currentTableId = tables[0]?.id ?? null;
+    }
+  }
+
+  /**
    * 열기·새로 만들기 뒤의 공통 상태 설정.
-   * @param {{ name: string | null, handle: FileSystemFileHandle | null, size: number, meta: Meta, tables: unknown[], readOnly: ReadOnlyReason }} next
+   * @param {{ name: string | null, handle: FileSystemFileHandle | null, size: number, meta: Meta, tables: TableInfo[], readOnly: ReadOnlyReason }} next
    */
   function setOpened(next) {
     state.file = { name: next.name, handle: next.handle, size: next.size };
     state.meta = next.meta;
-    state.tables = next.tables;
+    state.currentTableId = null;
+    setTables(next.tables);
     state.dirty = false;
     state.readOnly = next.readOnly;
     state.journalFull = autosave.isFull();
@@ -202,18 +227,20 @@ export function createStore(deps) {
    * @returns {Promise<boolean>}
    */
   async function replayJournal(journal) {
+    /** @type {boolean} */
+    let ok;
     try {
       const count = await autosave.replay(client, journal.commands);
-      state.dirty = true;
       notify.info('file.recovered', { count });
-      emit('file:dirty');
-      return true;
+      ok = true;
     } catch (err) {
-      state.dirty = true;
       notify.error(toAppError(err));
-      emit('file:dirty');
-      return false;
+      ok = false;
     }
+    state.dirty = true;
+    await store.refreshTables();
+    emit('file:dirty');
+    return ok;
   }
 
   /**
@@ -589,6 +616,44 @@ export function createStore(deps) {
         notify.error(toAppError(err));
         return null;
       }
+    },
+
+    selectTable(tableId) {
+      const next = tableId !== null && state.tables.some((t) => t.id === tableId) ? tableId : null;
+      if (next === state.currentTableId) return;
+      state.currentTableId = next;
+      emit('selection:changed');
+    },
+
+    async refreshTables() {
+      try {
+        const { tables } = await client.call('schema.list');
+        setTables(tables);
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return;
+      }
+      emit('tables:changed');
+    },
+
+    async runSchemaOp(op, args, options) {
+      if (state.readOnly !== 'none') {
+        notify.info('file.readOnlyBlocked');
+        return null;
+      }
+      /** @type {OpMap[typeof op]['result']} */
+      let result;
+      try {
+        result = await client.call(op, args, options);
+      } catch (err) {
+        notify.error(toStoreError(err));
+        // 적용되지 않았으므로 상태를 그대로 두되, 목록이 어긋났을 수 있으니 다시 읽는다(E_DB_QUERY 등).
+        await store.refreshTables();
+        return null;
+      }
+      await store.recordCommand(result.cmd);
+      await store.refreshTables();
+      return result;
     },
 
     async openRecent() {

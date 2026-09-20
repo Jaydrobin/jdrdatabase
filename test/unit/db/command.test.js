@@ -123,3 +123,52 @@ test('applyCommand: 취소 신호가 켜져 있으면 시작 전에 E_IMPORT_CAN
   assert.deepEqual(engine.exec("SELECT count(*) FROM sqlite_master WHERE name = 't'").rows, [[0]]);
   await engine.close();
 });
+
+test('convert 단계: 형태 검증과 정책별 동작, 진행률', async () => {
+  const engine = await openWasmEngine();
+  await engine.transaction(() => {
+    engine.run('CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b INTEGER) STRICT');
+    engine.run("INSERT INTO t (a) VALUES ('1'), ('x'), (NULL), (' 4 ')");
+  });
+  assert.equal(
+    isCommand({
+      type: 'x',
+      tableId: 't',
+      do: [{ convert: { table: 't', from: 'a', to: 'b', type: 'integer', policy: 'null' } }],
+      undo: [],
+      summary: '',
+    }),
+    true,
+  );
+  assert.equal(
+    isCommand({
+      type: 'x',
+      tableId: 't',
+      do: [{ convert: { table: 't', from: 'a', to: 'b', type: 'integer', policy: 'maybe' } }],
+      undo: [],
+      summary: '',
+    }),
+    false,
+  );
+  /** @type {Array<{ done: number, total: number }>} */
+  const progress = [];
+  const result = await applyCommand(
+    engine,
+    {
+      type: 'x',
+      tableId: 't',
+      do: [{ convert: { table: 't', from: 'a', to: 'b', type: 'integer', policy: 'null' } }],
+      undo: [],
+      summary: '',
+    },
+    'do',
+    { progress: (p) => progress.push({ done: p.done, total: p.total }) },
+  );
+  assert.deepEqual(result, { affected: 4, nulled: 1 });
+  assert.deepEqual(progress, [
+    { done: 0, total: 4 },
+    { done: 4, total: 4 },
+  ]);
+  assert.deepEqual(engine.exec('SELECT b FROM t ORDER BY id').rows, [[1], [null], [null], [4]]);
+  await engine.close();
+});

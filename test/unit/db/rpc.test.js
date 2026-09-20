@@ -391,3 +391,30 @@ test('createTransport: 준비 신호가 오면 Worker 전송, 시간 안에 오�
   assert.equal(slow.transport.kind, 'inline');
   assert.match(slow.fallbackError?.message ?? '', /did not start/);
 });
+
+test('schema.*: 테이블 생성·열 추가가 커맨드를 돌려주고 db.open이 tables를 채운다', async () => {
+  const { client } = await readyClient();
+  const created = await client.call('schema.create', { name: 'T' });
+  assert.match(created.tableId, /^t_/);
+  assert.equal(created.cmd.type, 'table.create');
+  const added = await client.call('schema.addColumn', {
+    tableId: created.tableId,
+    name: 'c',
+    type: 'integer',
+  });
+  assert.equal(added.cmd.type, 'column.add');
+  const listed = await client.call('schema.list');
+  assert.deepEqual(
+    listed.tables.map((t) => [t.name, t.columns.map((c) => c.type)]),
+    [['T', ['integer']]],
+  );
+  const { bytes } = await client.call('db.snapshot', {});
+  const reopened = await client.call('db.open', { bytes });
+  assert.equal(reopened.tables.length, 1);
+  assert.equal(reopened.tables[0]?.columns[0]?.id, added.columnId);
+  await assert.rejects(
+    client.call('schema.renameColumn', { tableId: created.tableId, columnId: 'id', name: 'x' }),
+    (err) => err instanceof AppError && err.code === 'E_SYSTEM_COLUMN',
+  );
+  client.close();
+});

@@ -9,6 +9,7 @@
 import { AppError, serializeError } from '../util/errors.js';
 import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
+import * as tables from './tables.js';
 import {
   adoptExternal,
   bumpRevision,
@@ -27,13 +28,18 @@ import {
 /** @typedef {import('../util/errors.js').SerializedError} SerializedError */
 /** @typedef {import('./command.js').Command} Command */
 /** @typedef {import('./command.js').Direction} Direction */
+/** @typedef {import('./command.js').ApplyResult} ApplyResult */
 /** @typedef {import('./schema.js').Meta} Meta */
+/** @typedef {import('./tables.js').TableInfo} TableInfo */
+/** @typedef {import('./values.js').LogicalType} LogicalType */
+/** @typedef {import('./values.js').ColumnOptions} ColumnOptions */
+/** @typedef {import('./values.js').CoercePolicy} CoercePolicy */
 
 /**
- * `db.open`·`schema.adopt`의 결과. `tables`는 Step 3의 `tables.list()`가 채운다.
+ * `db.open`·`schema.adopt`의 결과.
  * @typedef {object} OpenResult
  * @property {Meta} meta
- * @property {unknown[]} tables
+ * @property {TableInfo[]} tables
  * @property {boolean} [unmanaged] `_jdr_meta`가 없는 파일을 등록 없이 연 상태
  * @property {boolean} [readOnly] 앱보다 새로운 `schema_version`
  */
@@ -57,7 +63,17 @@ import {
  *   'db.snapshot': { args: { bumpRevision?: boolean, savedBy?: string }, result: { bytes: Uint8Array<ArrayBuffer>, meta: Meta } },
  *   'db.close': { args: undefined, result: null },
  *   'schema.adopt': { args: undefined, result: OpenResult },
- *   'command.apply': { args: { cmd: Command, direction?: Direction }, result: { affected: number } },
+ *   'schema.list': { args: undefined, result: { tables: TableInfo[] } },
+ *   'schema.create': { args: { name: string }, result: { tableId: string, cmd: Command } },
+ *   'schema.rename': { args: { tableId: string, name: string }, result: { cmd: Command } },
+ *   'schema.drop': { args: { tableId: string }, result: { cmd: Command } },
+ *   'schema.addColumn': { args: { tableId: string, name: string, type: LogicalType, options?: ColumnOptions | null }, result: { columnId: string, columnCount: number, cmd: Command } },
+ *   'schema.renameColumn': { args: { tableId: string, columnId: string, name: string }, result: { cmd: Command } },
+ *   'schema.reorderColumns': { args: { tableId: string, orderedIds: string[] }, result: { cmd: Command } },
+ *   'schema.softDeleteColumn': { args: { tableId: string, columnId: string }, result: { cmd: Command } },
+ *   'schema.restoreColumn': { args: { tableId: string, columnId: string }, result: { cmd: Command } },
+ *   'schema.changeColumnType': { args: { tableId: string, columnId: string, type: LogicalType, policy?: CoercePolicy, options?: ColumnOptions | null }, result: { columnId: string, cmd: Command, result: ApplyResult } },
+ *   'command.apply': { args: { cmd: Command, direction?: Direction }, result: ApplyResult },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -132,16 +148,6 @@ export function createProgressReporter(emit, now = () => Date.now()) {
  */
 
 /**
- * 테이블 목록. Step 3의 `tables.list()`가 채우며 그 전까지는 빈 목록이다.
- * @param {Engine} engine
- * @returns {Promise<unknown[]>}
- */
-async function listTables(engine) {
-  void engine;
-  return [];
-}
-
-/**
  * @param {DispatcherOptions} options
  * @returns {Dispatcher}
  */
@@ -211,12 +217,12 @@ export function createDispatcher(options) {
       }
       if (bytes && !hasMeta(active)) {
         const meta = await adoptExternal(active, { appVersion });
-        return { meta, tables: await listTables(active) };
+        return { meta, tables: tables.list(active) };
       }
       const migrated = await migrate(active, { appVersion, dbId: args?.dbId });
       return {
         meta: migrated.meta,
-        tables: await listTables(active),
+        tables: tables.list(active),
         ...(migrated.readOnly ? { readOnly: true } : {}),
       };
     },
@@ -237,8 +243,45 @@ export function createDispatcher(options) {
     'schema.adopt': async () => {
       const active = requireEngine();
       const meta = await adoptExternal(active, { appVersion });
-      return { meta, tables: await listTables(active) };
+      return { meta, tables: tables.list(active) };
     },
+
+    'schema.list': async () => ({ tables: tables.list(requireEngine()) }),
+
+    'schema.create': async (args) => tables.create(requireEngine(), { name: args.name }),
+
+    'schema.rename': async (args) =>
+      tables.rename(requireEngine(), args.tableId, { name: args.name }),
+
+    'schema.drop': async (args) => tables.drop(requireEngine(), args.tableId),
+
+    'schema.addColumn': async (args) =>
+      tables.addColumn(requireEngine(), args.tableId, {
+        name: args.name,
+        type: args.type,
+        options: args.options,
+      }),
+
+    'schema.renameColumn': async (args) =>
+      tables.renameColumn(requireEngine(), args.tableId, args.columnId, { name: args.name }),
+
+    'schema.reorderColumns': async (args) =>
+      tables.reorderColumns(requireEngine(), args.tableId, { orderedIds: args.orderedIds }),
+
+    'schema.softDeleteColumn': async (args) =>
+      tables.softDeleteColumn(requireEngine(), args.tableId, args.columnId),
+
+    'schema.restoreColumn': async (args) =>
+      tables.restoreColumn(requireEngine(), args.tableId, args.columnId),
+
+    'schema.changeColumnType': async (args, ctx) =>
+      tables.changeColumnType(
+        requireEngine(),
+        args.tableId,
+        args.columnId,
+        { type: args.type, policy: args.policy, options: args.options },
+        { signal: ctx.signal, progress: ctx.progress },
+      ),
 
     'command.apply': async (args, ctx) => {
       const cmd = assertCommand(args?.cmd);

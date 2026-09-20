@@ -858,7 +858,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, seq }` | 불가(짧음) |
 | `query.count` | `{ tableId, viewSpec }` | `{ count }` | |
 | `query.row` | `{ tableId, rowId, colIds }` | `{ row }` (전문) | |
-| `command.apply` | `{ cmd, direction? }` | `{ affected }`. `direction`은 `'do'`(기본) 또는 `'undo'`. 저널 재생과 되돌리기가 쓴다 | 불가 |
+| `command.apply` | `{ cmd, direction? }` | `{ affected, nulled? }`. `direction`은 `'do'`(기본) 또는 `'undo'`. `nulled`는 변환 단계가 NULL로 만든 값의 수. 저널 재생과 되돌리기가 쓴다 | 변환 단계가 있을 때만 |
 | `search.enable` | `{ tableId }` | | 가능 |
 | `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
 | `import.run` | `{ file, mapping, target, policy }` | `{ report }` | 가능 |

@@ -5,6 +5,7 @@
  * 모드 문자열('wasm' | 'native') 판정은 이 파일에서만 한다(D-15). 다른 모듈은 `capabilities()`를 읽는다.
  * 데스크톱 모드는 Step 11에서 채워지며, 그 전까지는 `E_UNSUPPORTED`로 잠긴다(wasm 폴백 없음, D-15).
  */
+import { createSchemaCommands } from './app/commands.js';
 import { createStore } from './app/store.js';
 import { createClient, createTransport } from './db/client.js';
 import { t } from './i18n/index.js';
@@ -13,6 +14,7 @@ import * as filesystem from './io/filesystem.js';
 import { openIdb } from './io/idb.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
+import { mountSidebar } from './ui/sidebar.js';
 import { mountStatusbar } from './ui/statusbar.js';
 import { mountToasts } from './ui/toast.js';
 import { mountToolbar } from './ui/toolbar.js';
@@ -34,6 +36,7 @@ const DEVICE_NAME_KEY = 'device_name';
 /**
  * @typedef {object} Shell
  * @property {HTMLElement} toolbarHost
+ * @property {HTMLElement} body 사이드바와 메인 영역을 담는 가로 배치 컨테이너
  * @property {HTMLElement} main
  * @property {Statusbar} statusbar
  * @property {Toasts} toasts
@@ -62,11 +65,14 @@ function mount(root) {
   subtitle.textContent = t('app.subtitle');
 
   main.append(title, subtitle);
-  root.append(toolbarHost, main);
+  const body = document.createElement('div');
+  body.className = 'jdr-app__body';
+  body.append(main);
+  root.append(toolbarHost, body);
 
   const statusbar = mountStatusbar(root, { version: __JDR_VERSION__ });
   const toasts = mountToasts(root);
-  return { toolbarHost, main, statusbar, toasts };
+  return { toolbarHost, body, main, statusbar, toasts };
 }
 
 /**
@@ -315,6 +321,12 @@ async function start(shell) {
   const active = store;
 
   mountToolbar(shell.toolbarHost, active);
+  const sidebar = mountSidebar(shell.body, {
+    store: active,
+    commands: createSchemaCommands(active),
+    toasts: shell.toasts,
+  });
+  shell.body.prepend(sidebar.el);
 
   /** @param {BeforeUnloadEvent} ev */
   const onBeforeUnload = (ev) => {

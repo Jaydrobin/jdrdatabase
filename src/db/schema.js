@@ -22,6 +22,54 @@ export const SYSTEM_COLUMNS = Object.freeze(['id', '_created_at', '_updated_at']
 
 /** `_jdr_columns.width`의 기본값(px). */
 export const DEFAULT_COLUMN_WIDTH = 160;
+/** SQLite 기본 열 상한(`SQLITE_MAX_COLUMN`). 이 수에 이르면 열 추가를 거부한다. */
+export const MAX_COLUMNS = 2000;
+/** 이 수부터 UI가 경고한다(Step 3 예외 처리). */
+export const WARN_COLUMNS = 1000;
+
+/** @typedef {import('./values.js').LogicalType} LogicalType */
+
+/**
+ * 논리 타입 → STRICT 물리 타입(4.2).
+ * @param {LogicalType} logicalType
+ * @returns {'TEXT' | 'INTEGER' | 'REAL'}
+ */
+export function physicalType(logicalType) {
+  switch (logicalType) {
+    case 'integer':
+    case 'boolean':
+      return 'INTEGER';
+    case 'real':
+      return 'REAL';
+    case 'text':
+    case 'longtext':
+    case 'date':
+    case 'datetime':
+    case 'select':
+      return 'TEXT';
+    default:
+      throw new AppError('E_DB_QUERY', `unknown logical type: ${String(logicalType)}`, {
+        detail: { type: logicalType },
+      });
+  }
+}
+
+/**
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isSystemColumn(name) {
+  return SYSTEM_COLUMNS.includes(name);
+}
+
+/**
+ * 사용자 테이블의 DDL(D-03). 시스템 열만 가진 STRICT 테이블이다.
+ * @param {string} tableId
+ * @returns {string}
+ */
+export function userTableDdl(tableId) {
+  return `CREATE TABLE ${quoteIdent(tableId)} ("id" INTEGER PRIMARY KEY, "_created_at" TEXT, "_updated_at" TEXT) STRICT`;
+}
 
 /**
  * 식별자(테이블·열 이름)를 SQL에 넣을 때는 반드시 이 함수를 거친다(CLAUDE.md 5.3).

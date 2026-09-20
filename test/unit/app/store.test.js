@@ -384,3 +384,75 @@ test('IDB가 없어도 열기·저장은 동작한다(1·2층)', async () => {
   assert.equal(store.getState().meta.revision, '1');
   client.close();
 });
+
+test('runSchemaOp: 커맨드를 저널에 넣고 dirty, 테이블 목록 갱신·선택, 실패는 알리고 null', async () => {
+  const { store, client, autosave, notices } = await setup();
+  const dbId = store.getState().meta.db_id ?? '';
+  /** @type {string[]} */
+  const events = [];
+  store.on('tables:changed', () => events.push('tables'));
+  store.on('selection:changed', () => events.push('selection'));
+
+  const created = await store.runSchemaOp('schema.create', { name: '고객' });
+  assert.ok(created);
+  assert.equal(store.getState().dirty, true);
+  assert.deepEqual(
+    store.getState().tables.map((t) => t.name),
+    ['고객'],
+  );
+  assert.equal(store.getState().currentTableId, created.tableId, '첫 테이블은 자동 선택');
+  assert.equal((await autosave.recoverable(dbId))?.commands[0]?.type, 'table.create');
+
+  const added = await store.runSchemaOp('schema.addColumn', {
+    tableId: created.tableId,
+    name: '이름',
+    type: 'text',
+  });
+  assert.ok(added);
+  assert.deepEqual(
+    store.getState().tables[0]?.columns.map((c) => c.name),
+    ['이름'],
+  );
+  assert.equal((await autosave.recoverable(dbId))?.commands.length, 2);
+
+  const dup = await store.runSchemaOp('schema.addColumn', {
+    tableId: created.tableId,
+    name: '이름',
+    type: 'text',
+  });
+  assert.equal(dup, null);
+  assert.equal(notices.at(-1)?.value, 'E_NAME_INVALID');
+  assert.equal((await autosave.recoverable(dbId))?.commands.length, 2, '실패는 저널에 남지 않음');
+
+  store.selectTable('nope');
+  assert.equal(store.getState().currentTableId, null);
+  store.selectTable(created.tableId);
+  assert.ok(events.includes('tables') && events.includes('selection'));
+
+  // 저장 → 새 세션에서 열면 테이블이 그대로 온다(db.open의 tables).
+  await store.saveAs();
+  assert.equal(store.getState().dirty, false);
+  await client.call('db.close');
+  client.close();
+});
+
+test('runSchemaOp: 읽기 전용(다른 탭 점유)이면 실행하지 않고 안내', async () => {
+  // 같은 채널의 다른 "탭"이 이 db_id를 쥐고 있게 만든다.
+  const { store, fsx, notices, client } = await setup();
+  await store.saveAs();
+  const bytes = fsx.downloads[0]?.bytes ?? new Uint8Array(0);
+  const dbId = store.getState().meta.db_id ?? '';
+  const other = createTabLock();
+  await other.claim(dbId);
+  try {
+    assert.equal(await store.openPicked(pickedFile('a.db', bytes)), true);
+    assert.equal(store.getState().readOnly, 'otherTab');
+    assert.equal(notices.at(-1)?.value, 'file.readOnlyTab');
+    assert.equal(await store.runSchemaOp('schema.create', { name: 'x' }), null);
+    assert.equal(notices.at(-1)?.value, 'file.readOnlyBlocked');
+    assert.equal(await store.save(), false);
+  } finally {
+    other.close();
+    client.close();
+  }
+});
