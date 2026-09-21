@@ -61,7 +61,11 @@ test('buildWindowSQL: 값은 바인딩, 식별자는 인용, id 보조 정렬과
     `SELECT "id", substr("${name}", 1, ${PREVIEW_CHARS}), length("${name}"), "${age}", substr("${body}", 1, ${PREVIEW_CHARS}), length("${body}"), "${table.columns[3]?.id}" FROM "${tableId}" ORDER BY "id" LIMIT ? OFFSET ?`,
   );
   assert.deepEqual(params, [200, 200]);
-  assert.ok(!sql.includes('200'), 'offset·limit 값이 SQL 문자열에 들어가지 않는다');
+  // 물리 식별자(`t_/c_<8hex>`)는 10진 숫자와 같은 글자를 쓰므로 `"c_a200b3f1"` 같은 이름이 나오면
+  // 원본 SQL에서 '200'이 걸린다(이 테스트가 약 0.9% 확률로 실패하던 원인). 인용된 식별자를 뺀
+  // 나머지에서만 값이 섞이지 않았는지 본다.
+  const withoutIdents = sql.replace(/"[^"]*"/g, '""');
+  assert.ok(!withoutIdents.includes('200'), 'offset·limit 값이 SQL 문자열에 들어가지 않는다');
 });
 
 test('buildWindowSQL: limit은 1만 이하, offset은 음수 불가', async () => {
