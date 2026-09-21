@@ -16,7 +16,6 @@
     "grid": {
       "openMs": 893,
       "renderP95Ms": 0.9,
-      "renderMaxMs": 2.5,
       "queryMaxMs": 37.9
     },
     "import-csv": {

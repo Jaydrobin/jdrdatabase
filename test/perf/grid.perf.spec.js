@@ -115,15 +115,23 @@ test('30만 행 스크롤: 프레임 렌더 p95 16 ms 이하, 창 질의 최대 
   expect(renders.length).toBeGreaterThan(50);
   expect(stats?.rowCount).toBe(FIXTURE_ROWS);
   expect(stats?.queries ?? 0).toBeGreaterThan(JUMPS / 2);
+  // 프레임 렌더의 판정값은 p95다(8장, 아래 budget). 프레임 200여 개의 최대값은 표본 하나짜리 바깥값이라
+  // GC·스케줄러 한 번에 좌우되고 기계 속도로 보정되지도 않으므로, 30% 회귀 규칙을 걸 수 없다. 같은 코드에서
+  // 2.5 → 4.8 → 10.6 ms로 움직이는 동안 p95는 0.9 → 1.3 ms였다(세션 H 점검 실측). 참고값(`info`)으로만 남긴다.
   await record(
     'grid',
     {
       openMs,
       renderP95Ms: +p95.toFixed(2),
-      renderMaxMs: +max.toFixed(2),
       queryMaxMs: +(stats?.maxQueryMs ?? 0).toFixed(2),
     },
-    { rows: FIXTURE_ROWS, bytes: size, renderSamples: renders.length, queries: stats?.queries },
+    {
+      rows: FIXTURE_ROWS,
+      bytes: size,
+      renderSamples: renders.length,
+      renderMaxMs: +max.toFixed(2),
+      queries: stats?.queries,
+    },
   );
   budget(openMs, OPEN_BUDGET_MS, '300 MB 파일 열기(ms)');
   budget(p95, RENDER_BUDGET_MS, '스크롤 프레임 렌더 p95(ms)');
