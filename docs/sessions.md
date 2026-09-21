@@ -1173,11 +1173,11 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - **열린 뒤 RSS 841 MB는 파일 버퍼 사본 때문입니다.** 메인이 읽은 314 MB를 transfer로 Worker에 넘기고 deserialize가 wasm 힙에 다시 복사하므로, GC 전까지 사본이 둘입니다. `File`을 Worker로 넘겨 조각으로 wasm에 직접 넣으면 300 MB를 더 줄일 수 있지만 `db.open`의 인자 형식이 바뀌어(6장) 이번 세션에 넣지 않았습니다. 예산 안이라 R2에 메모만 남깁니다.
 - **Worker의 JS 힙은 재지 않습니다.** 전용 Worker에는 Playwright CDP 세션을 붙일 수 없어 RSS(프로세스 전체)로만 봅니다. sql.js 쪽 statement 캐시 누수는 RSS가 평평한 것으로 간접 확인했습니다.
 - **가져오기 대화상자의 ARIA 이름에 열 머리글(사용자 데이터)을 씁니다.** 속성 값이지 마크업이 아니므로 5.5의 `textContent` 규칙과 어긋나지 않습니다.
-- **CI perf 잡은 기준선이 빌 때 회귀를 판정하지 않습니다.** 첫 실행의 summary를 옮겨 적어야 비교가 시작됩니다(아래 미확인).
+- **CI perf 잡은 기준선이 빌 때 회귀를 판정하지 않습니다.** 첫 실행(run 35613225320)은 24개 항목을 건너뛰고 통과했고, 그 summary를 기준선으로 넣은 뒤부터 비교합니다(아래 미확인).
 
 **미확인 (후속 세션에서 이어받음)**
 
-- **`test/perf/perf-baseline.json`이 비어 있습니다.** GitHub `ubuntu-latest` 러너의 `perf` 잡 첫 실행 로그(또는 `perf-results` 아티팩트의 `summary.json`)를 `metrics`에 옮겨 적고 `environment`·`recordedAt`을 채워야 30% 회귀 판정이 켜집니다. 러너에서 절대 예산(특히 렌더 16 ms·창 질의 50 ms·LIKE 1초)이 어떻게 나오는지도 미확인입니다(CI에서는 예산 초과를 기록만 함).
+- ~~`test/perf/perf-baseline.json`이 비어 있습니다.~~ 푸시 `f540c27`의 CI `perf` 잡(run 35613225320, ubuntu-latest)이 7개 spec을 통과했고 그 summary를 기준선에 옮겨 적었습니다(후속 커밋). 러너 실측: 앱 시작 327 ms, 300 MB 열기 909 ms, 렌더 p95 1.3 ms, 창 질의 최대 34.1 ms, 셀 편집 1.3 ms, 스냅샷 135 ms, 저장 시점 RSS 877 MB, CSV 가져오기 18.0초, XLSX 5.9초, CSV 내보내기 20.1초, LIKE 731 ms(짧은 검색어 716 ms), trigram 51 ms, 정렬 74~79 ms, 메모리 사이클 끝 RSS 300 MB — 8장 절대 예산도 전부 안입니다. 기준선을 채운 커밋의 CI에서 24개 항목 비교가 "회귀 없음"으로 끝나는지는 그 실행 결과로 확인합니다(이 기록 시점에는 미확인).
 - 실제 브라우저에서의 Worker 사망(탭 OOM은 렌더러 전체를 죽이므로 `error` 이벤트 경로와 다를 수 있음), 실제 FSA 핸들의 쓰기 실패(디스크 부족·권한 회수), 두 경우의 문구.
 - Firefox·Safari(WebKit): Playwright 브라우저 다운로드가 이 환경의 송신 정책(403)에 막혀 설치하지 못했습니다. `docs/support-matrix.md`에 손으로 확인하는 절차를 적었습니다. `https://` 원점도 미확인.
 - 스크린 리더(NVDA·VoiceOver)의 실제 읽기(axe는 정적 검사), 실제 한글 IME, 한글 파일 이름의 `<a download>`, 저장 중 파일 열기(세션 G 점검), SheetJS 0.20.3 갱신(CVE 2건), 실제 파일 선택기·자동 저장 타이머·백업 복원의 FSA 경로 등 세션 G 점검·F 점검·E 점검·D 점검에서 이어진 항목은 그대로 남습니다.
