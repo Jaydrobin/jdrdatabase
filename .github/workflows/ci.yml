@@ -55,3 +55,41 @@ jobs:
           name: playwright-report
           path: test-results/
           if-no-files-found: ignore
+
+  # 성능(Step 10): 30만 행 픽스처를 러너에서 만들어(캐시) 8장 항목을 재고, 절대 예산 대신
+  # test/perf/perf-baseline.json(같은 러너의 기준선) 대비 30% 회귀를 실패로 본다(CLAUDE.md 6장).
+  # 요약 JSON은 로그와 아티팩트(test-results/perf/summary.json)에 남는다. 기준선 갱신은 그 값을 옮겨 적는다.
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Cache generated fixtures
+        uses: actions/cache@v4
+        with:
+          path: test/fixtures/generated
+          key: perf-fixtures-${{ hashFiles('scripts/gen-fixture.mjs', 'test/perf/fixture.js', 'test/perf/import.perf.spec.js', 'test/perf/import-xlsx.perf.spec.js', 'test/perf/memory.perf.spec.js') }}
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Perf (baseline regression check)
+        run: npm run test:perf
+        env:
+          JDR_PERF_COMPARE: '1'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results
+          path: test-results/perf/
+          if-no-files-found: ignore

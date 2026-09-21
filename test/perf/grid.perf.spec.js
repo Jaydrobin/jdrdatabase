@@ -6,14 +6,14 @@
  */
 import { expect, test } from '@playwright/test';
 import { stat } from 'node:fs/promises';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { PAGE_URL } from '../e2e/page-url.js';
 import { FIXTURE_PATH, FIXTURE_ROWS } from './fixture.js';
+import { budget, record } from './report.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 /** 8장 예산. */
 const RENDER_BUDGET_MS = 16;
 const QUERY_BUDGET_MS = 50;
+const OPEN_BUDGET_MS = 5_000;
 /** 스크롤 시뮬레이션: 무작위 위치 점프와 연속 스크롤. */
 const JUMPS = 40;
 const WHEEL_STEPS = 120;
@@ -114,6 +114,17 @@ test('30만 행 스크롤: 프레임 렌더 p95 16 ms 이하, 창 질의 최대 
   expect(renders.length).toBeGreaterThan(50);
   expect(stats?.rowCount).toBe(FIXTURE_ROWS);
   expect(stats?.queries ?? 0).toBeGreaterThan(JUMPS / 2);
-  expect(p95).toBeLessThanOrEqual(RENDER_BUDGET_MS);
-  expect(stats?.maxQueryMs ?? Infinity).toBeLessThanOrEqual(QUERY_BUDGET_MS);
+  await record(
+    'grid',
+    {
+      openMs,
+      renderP95Ms: +p95.toFixed(2),
+      renderMaxMs: +max.toFixed(2),
+      queryMaxMs: +(stats?.maxQueryMs ?? 0).toFixed(2),
+    },
+    { rows: FIXTURE_ROWS, bytes: size, renderSamples: renders.length, queries: stats?.queries },
+  );
+  budget(openMs, OPEN_BUDGET_MS, '300 MB 파일 열기(ms)');
+  budget(p95, RENDER_BUDGET_MS, '스크롤 프레임 렌더 p95(ms)');
+  budget(stats?.maxQueryMs ?? Infinity, QUERY_BUDGET_MS, '창 질의 최대(ms)');
 });

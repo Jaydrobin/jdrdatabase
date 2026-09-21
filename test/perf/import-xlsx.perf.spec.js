@@ -6,11 +6,11 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import XLSX from '../../vendor/xlsx.full.min.js';
 import { makeRandom } from '../../scripts/gen-fixture.mjs';
+import { PAGE_URL } from '../e2e/page-url.js';
+import { budget, record } from './report.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const ROWS = Number(process.env.JDR_PERF_XLSX_ROWS ?? 50_000);
 const COLS = 20;
 const XLSX_PATH = path.resolve(`test/fixtures/generated/import-${ROWS}.xlsx`);
@@ -95,8 +95,6 @@ test('5만 행 xlsx 가져오기: 대화상자 열기부터 보고서까지 20�
     `행 ${ROWS.toLocaleString('ko-KR')}개`,
   );
 
-  console.log(
-    `[perf] xlsx ${size} bytes: preview ${previewMs} ms, import ${importMs} ms (budget ${IMPORT_BUDGET_MS} ms)`,
-  );
-  expect(importMs).toBeLessThanOrEqual(IMPORT_BUDGET_MS);
+  await record('import-xlsx', { previewMs, importMs }, { rows: ROWS, bytes: size });
+  budget(importMs, IMPORT_BUDGET_MS, 'XLSX 가져오기(ms)');
 });

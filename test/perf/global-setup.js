@@ -1,15 +1,17 @@
 // @ts-check
 /**
  * 테스트 빌드를 만들고, 30만 행 DB 픽스처가 없으면 생성한다(커밋하지 않는 test/fixtures/generated/).
- * `JDR_PERF_ROWS`로 행 수를 바꿀 수 있다(기본 300,000).
+ * `JDR_PERF_ROWS`로 행 수를 바꿀 수 있다(기본 300,000). 지난 실행의 측정 기록(test-results/perf)은 비운다.
  */
-import { stat } from 'node:fs/promises';
+import { rm, stat } from 'node:fs/promises';
 import { writeDist } from '../../build/build.mjs';
 import { generateDb } from '../../scripts/gen-fixture.mjs';
 import { FIXTURE_PATH, FIXTURE_ROWS } from './fixture.js';
+import { REPORT_DIR } from './report.js';
 
 export default async function globalSetup() {
   await writeDist({ test: true });
+  await rm(REPORT_DIR, { recursive: true, force: true });
   const exists = await stat(FIXTURE_PATH).then(
     (s) => s.isFile() && s.size > 0,
     () => false,

@@ -5,11 +5,10 @@
  * 검색 인덱스 생성 시간은 판정 없이 기록만 한다.
  */
 import { expect, test } from '@playwright/test';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { PAGE_URL } from '../e2e/page-url.js';
 import { FIXTURE_PATH, FIXTURE_ROWS } from './fixture.js';
+import { budget, record } from './report.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 /** DESIGN.md Step 6 완료 기준·8장 예산. */
 const LIKE_BUDGET_MS = 1_000;
 const FTS_BUDGET_MS = 200;
@@ -127,10 +126,24 @@ test('30만 행 검색: LIKE 1초 이하, 검색 인덱스 뒤 trigram 200 ms �
   expect(like.count).toBeGreaterThan(0);
   expect(fts.count).toBe(like.count);
   expect(ftsMiss.count).toBe(0);
-  expect(like.elapsedMs).toBeLessThanOrEqual(LIKE_BUDGET_MS);
-  expect(likeShort.elapsedMs).toBeLessThanOrEqual(LIKE_BUDGET_MS);
-  expect(fts.elapsedMs).toBeLessThanOrEqual(FTS_BUDGET_MS);
-  expect(ftsKorean.elapsedMs).toBeLessThanOrEqual(FTS_BUDGET_MS);
-  expect(sortInt.elapsedMs).toBeLessThanOrEqual(SORT_BUDGET_MS);
-  expect(sortText.elapsedMs).toBeLessThanOrEqual(SORT_BUDGET_MS);
+  await record(
+    'search',
+    {
+      likeMs: +like.elapsedMs.toFixed(1),
+      likeShortMs: +likeShort.elapsedMs.toFixed(1),
+      indexBuildMs: indexMs,
+      ftsMs: +fts.elapsedMs.toFixed(1),
+      ftsKoreanMs: +ftsKorean.elapsedMs.toFixed(1),
+      sortIntMs: +sortInt.elapsedMs.toFixed(1),
+      sortTextMs: +sortText.elapsedMs.toFixed(1),
+      filterCountMs: +sortedCount.elapsedMs.toFixed(1),
+    },
+    { rows: FIXTURE_ROWS, likeCount: like.count, ftsCount: fts.count },
+  );
+  budget(like.elapsedMs, LIKE_BUDGET_MS, 'LIKE 검색(ms)');
+  budget(likeShort.elapsedMs, LIKE_BUDGET_MS, 'LIKE 짧은 검색어(ms)');
+  budget(fts.elapsedMs, FTS_BUDGET_MS, 'trigram 검색(ms)');
+  budget(ftsKorean.elapsedMs, FTS_BUDGET_MS, 'trigram 한글 검색(ms)');
+  budget(sortInt.elapsedMs, SORT_BUDGET_MS, '정렬 변경(정수) 첫 창(ms)');
+  budget(sortText.elapsedMs, SORT_BUDGET_MS, '정렬 변경(텍스트) 첫 창(ms)');
 });

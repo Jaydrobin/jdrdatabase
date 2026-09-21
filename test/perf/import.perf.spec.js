@@ -7,11 +7,11 @@
 import { expect, test } from '@playwright/test';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { generate } from '../../scripts/gen-fixture.mjs';
+import { PAGE_URL } from '../e2e/page-url.js';
 import { FIXTURE_ROWS } from './fixture.js';
+import { budget, record } from './report.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const CSV_PATH = path.resolve(`test/fixtures/generated/import-${FIXTURE_ROWS}.csv`);
 /** DESIGN.md Step 7 완료 기준·8장 예산. */
 const IMPORT_BUDGET_MS = 60_000;
@@ -71,8 +71,6 @@ test('30만 행 CSV 가져오기: 대화상자 열기부터 보고서까지 60�
     `행 ${FIXTURE_ROWS.toLocaleString('ko-KR')}개`,
   );
 
-  console.log(
-    `[perf] csv ${size} bytes: preview ${previewMs} ms, import ${importMs} ms (budget ${IMPORT_BUDGET_MS} ms)`,
-  );
-  expect(importMs).toBeLessThanOrEqual(IMPORT_BUDGET_MS);
+  await record('import-csv', { previewMs, importMs }, { rows: FIXTURE_ROWS, bytes: size });
+  budget(importMs, IMPORT_BUDGET_MS, 'CSV 가져오기(ms)');
 });

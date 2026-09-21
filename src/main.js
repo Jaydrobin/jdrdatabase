@@ -478,6 +478,8 @@ async function start(shell) {
 
   await active.newDatabase({ force: true });
   shell.statusbar.setStatus('status.ready');
+  // 8장 "앱 시작(빈 DB)": 문서 시작부터 여기까지. 테스트 빌드의 성능 측정이 읽는다.
+  if (__JDR_TEST__) performance.mark('jdr:app.ready');
   shell.statusbar.setMode(
     session.transportKind === 'worker' ? 'status.mode.worker' : 'status.mode.inline',
   );
