@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.8 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정) |
+| 문서 버전 | 0.9 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정, 0.9: 2026-09-21 세션 G 내보내기 조각 스트림·gzip·자동 저장·백업 복원 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -130,7 +130,7 @@
 | 3. 저널 | 커맨드(D-08)를 IndexedDB `journal` 스토어에 순서대로 기록. 파일 저장 시 비움. 가져오기(Step 7·8)는 커맨드가 아니라 기록할 수 없으므로 그 뒤로는 저장할 때까지 기록을 멈추고 배너로 저장을 재촉한다 | 탭이 죽거나 저장을 잊었을 때 복구 |
 
 - 저장 = `snapshot()` → `Uint8Array` → `writable.write()` → `close()`. `close()`에서 원자적으로 교체된다.
-- 저장 직전에 기존 파일 바이트를 IndexedDB `backups` 스토어에 1세대 보관한다(파일이 200 MB 이하일 때). 그보다 크면 보관을 건너뛰고 사용자에게 알린다.
+- 저장 직전에 기존 파일 바이트를 IndexedDB `backups` 스토어에 1세대 보관한다(파일이 200 MB 이하일 때). 그보다 크면 보관을 건너뛰고 사용자에게 알린다. 보관본은 설정 대화상자의 "직전 저장본 내보내기"로 새 파일에 그대로 쓸 수 있다(Step 9). gzip으로 저장한 파일(`.db.gz`, Step 9)도 바이트 그대로 보관한다.
 - IndexedDB는 기능 감지로 사용하며, 없어도(일부 브라우저의 `file://` 오리진) 1·2층만으로 동작해야 한다.
 - 데스크톱 모드의 영속화(작업 사본, 네이티브 저장, `.bak` 백업)는 D-15를 따른다. `known_revisions`와 설정은 두 모드 모두 IndexedDB에 둔다.
 
@@ -269,6 +269,7 @@ src/
     commands.js                  커맨드 생성 함수(셀 편집, 행 추가·삭제, 열 추가·변경·소프트삭제, 붙여넣기)
     revision.js                  revision 판정표(4.3)의 순수 함수
     shortcuts.js                 키보드 단축키 매핑
+    settings.js                  설정 읽기·쓰기(IDB settings: 기기 이름, 자동 저장 간격, 압축 저장)와 기본값
   ui/
     grid/
       grid.js                    가상 그리드 컨트롤러(뷰포트 계산, 행·열 풀, 스크롤)
@@ -282,13 +283,15 @@ src/
       longtext.js                사이드 패널 장문 편집기
     dialogs/
       dialog.js                  모달 기반(포커스 트랩, Esc, 버튼 행). 다른 대화상자가 이 위에 만들어진다
-      table.js column.js filter.js import.js export.js settings.js conflict.js
+      table.js column.js filter.js import.js conflict.js
+      export.js                  내보내기(형식·CSV 옵션·뷰 적용·행 수 경고·진행률·취소)
+      settings.js                설정(기기 이름, 자동 저장, 압축 저장, 직전 저장본 내보내기)
     toolbar.js sidebar.js statusbar.js toast.js
   io/
-    filesystem.js                File System Access + 폴백 다운로드 + 타우리 dialog/fs 추상화
+    filesystem.js                File System Access + 폴백 다운로드 + 타우리 dialog/fs 추상화, gzip, 바이트 싱크(내보내기 조각 쓰기)
     ipc-bridge.js                메인 스레드에서 Worker의 engine:call 메시지를 타우리 invoke로 중계
     idb.js                       IndexedDB 래퍼(handles, journal, backups, known_revisions, settings)
-    autosave.js                  저널 기록·복구, 자동 저장 타이머
+    autosave.js                  저널 기록·복구, 자동 저장 타이머(createSaveTimer)
     tablock.js                   BroadcastChannel로 같은 db_id를 연 다른 탭 감지(두 번째 탭은 읽기 전용)
   db/
     client.js                    RPC 클라이언트(메인 측), Worker/인라인 전송 선택
@@ -309,7 +312,9 @@ src/
     infer.js                     타입 추론
     pipeline.js                  매핑 적용·트랜잭션 삽입·진행률·취소
   export/
-    csv.js xlsx.js
+    rows.js                      뷰 순서로 5,000행씩 읽는 페이지 이터레이터(정렬·필터 없는 뷰는 id 키셋), 내보낼 열
+    csv.js                       RFC 4180 인용, BOM, 수식 주입 방지, 조각 스트림
+    xlsx.js                      SheetJS 쓰기(타입별 셀, 날짜 서식, 행 상한)
   i18n/
     ko.js en.js index.js
   util/
@@ -333,6 +338,7 @@ build/
   template.html                  산출물 템플릿(자리표시자: CSP_META, CSS, WORKER_JS, WASM_B64, MAIN_JS)
 
 docs/
+  cloud-sync.md                  클라우드 왕복 사용 안내(PC A 저장·동기화 확인 → PC B 열기, 경고 메시지의 의미, 백업 복원)
   sessions.md                    세션별 검증 기록(5.0의 A~I와 점검 세션). 세션마다 절 하나, 미확인 항목은 "미확인"으로 남긴다
   support-matrix.md              브라우저·WebView API 가용성 실측표(R1, R8). 미확인 항목은 "미확인"으로 남긴다
 
@@ -788,26 +794,49 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 ### Step 9. 내보내기, 백업, 압축 저장, 클라우드 사용 안내
 
-**목표**: CSV·XLSX 내보내기, `.db.gz` 저장 옵션, 백업 복원, 클라우드 왕복 사용 설명.
+**목표**: CSV·XLSX 내보내기, `.db.gz` 저장 옵션, 백업 복원, 자동 저장, 클라우드 왕복 사용 설명.
 
-**산출물**: `export/csv.js`, `export/xlsx.js`, `io/filesystem.js`(gzip), `ui/dialogs/export.js`, `ui/dialogs/settings.js`(기기 이름, 자동 저장), `docs/cloud-sync.md`
+**산출물**: `export/rows.js`, `export/csv.js`, `export/xlsx.js`, `io/filesystem.js`(gzip·바이트 싱크·저장 종류), `io/autosave.js`(자동 저장 타이머), `app/settings.js`, `app/store.js`(`exportTable`·`restoreBackup`·`setDeviceName`·저장 뮤텍스·gzip 판별), `ui/dialogs/export.js`, `ui/dialogs/settings.js`(기기 이름, 자동 저장, 압축 저장, 백업 복원), `ui/toolbar.js`(내보내기·설정 버튼), `docs/cloud-sync.md`
+
+**내보내기는 Worker가 조각으로 흘려보낸다**
+- 내보내기는 `export.stream` op 하나다. Worker가 뷰 순서로 5,000행씩 읽어 CSV 조각(`Uint8Array`)을 만들 때마다 `{ id, chunk }` 메시지로 메인에 보내고(transfer), 끝나면 응답으로 `{ rows, bytes, blobCells }`를 돌려준다. 전체를 문자열 하나로 만들지 않으므로 Worker 메모리는 한 페이지 분량이다. XLSX는 SheetJS 쓰기가 메모리 상주라 조각이 하나뿐이다.
+- 메인은 조각을 받은 순서대로 바이트 싱크(`filesystem.openSink`)에 쓴다. FSA 경로의 싱크는 `createWritable()`(임시 파일에 쓰고 `close()`에서 교체. 실패·취소는 `abort()`로 버린다)이고, 폴백 싱크는 조각을 모아 `close()`에서 `<a download>`로 내려받게 한다. 저장 위치 선택기(`showSaveFilePicker`)는 사용자 동작의 활성화가 살아 있는 동안 불러야 하므로 대화상자의 "내보내기" 버튼에서 **먼저** 고른 뒤 op를 보낸다. 역압은 두지 않는다(메인이 조각을 들고 있는 상한은 DB 크기이며 DB는 이미 메모리에 있다).
+- `export.stream`은 배타 op다(6장). 페이지 사이에서 이벤트 루프로 돌아오므로 쓰기 op가 끼어들면 앞뒤 페이지가 다른 상태를 보게 된다. 읽기만 하므로 행 수 캐시는 무효화하지 않는다.
 
 **주요 함수**
-- `exportCsv(tableId, viewSpec?, { encoding: 'utf-8-bom' | 'utf-8', delimiter })`: 창 질의로 5,000행씩 스트리밍하여 `WritableStream`에 쓰기(전체를 문자열로 만들지 않음)
-- `exportXlsx(tableId)`: 10만 행 초과 시 경고(SheetJS 쓰기는 메모리 상주). 100만 행은 XLSX 규격 상한.
-- `filesystem.write(handle, bytes, { gzip })`: `new CompressionStream('gzip')`, 확장자 `.db.gz`. 열기 시 gzip 매직(`1f 8b`)으로 자동 판별
-- `backups.restore()`: 직전 저장본(브라우저 모드는 IDB `backups`, 데스크톱 모드는 `.bak` 파일)을 새 이름으로 내보내기
-- 자동 저장: dirty 후 N초(기본 꺼짐, 30초~5분)마다 `store.save()`. 정본 파일(핸들 또는 경로)이 있을 때만.
+- `rows.readPages(engine, table, viewSpec, columns, { pageSize })` → `AsyncIterable<SqlValue[][]>`. `buildViewClauses`로 정렬·필터·검색을 창 질의와 똑같이 적용하고 `LIMIT 5000 OFFSET n`으로 읽는다. 정렬·필터·검색이 없는 뷰는 `WHERE "id" > ? ORDER BY "id" LIMIT 5000` 키셋으로 읽어 OFFSET 비용(D-06)을 피한다. 페이지 사이에서 `yieldToEventLoop()`로 취소 메시지를 받는다. 값은 `substr` 미리보기가 아니라 전문이다.
+- `rows.exportColumns(table, viewSpec)`: 살아 있고 숨기지 않은 열의 표시 순서(`query.visibleColumns`). 시스템 열은 내보내지 않는다. 헤더는 표시 이름이다(D-03).
+- `csv.cellText(column, value, { formulaGuard })`: 저장값 → CSV 필드 문자열. NULL은 빈 필드, `boolean`은 `true`/`false`, `integer`·`real`은 `String(n)`(소수 자릿수 옵션을 적용하지 않는다. 다시 가져올 때 값이 같아야 한다), `date`·`datetime`은 저장 문자열 그대로(`YYYY-MM-DD`, `YYYY-MM-DDTHH:mm:ss`), BLOB(외부 테이블)은 빈 필드로 쓰고 `blobCells`에 센다. `formulaGuard`가 켜져 있으면 텍스트 계열(`text`·`longtext`·`select`) 값이 `=`, `+`, `-`, `@`로 시작할 때 앞에 `'`를 붙인다(수식 주입 방지. 값을 바꾸는 옵션이므로 대화상자에 표시하고 기본 켜짐).
+- `csv.quoteField(text, delimiter)`: 구분자·`"`·`\r`·`\n`이 있으면 `"…"`로 감싸고 안의 `"`는 `""`(RFC 4180). 레코드 구분은 `\r\n`.
+- `csv.exportCsv(engine, table, viewSpec, options, sink, ctx)` → `{ rows, bytes, blobCells }`. `options = { encoding: 'utf-8-bom' | 'utf-8', delimiter, formulaGuard }`(기본 BOM, `,`, 켜짐). 첫 조각에 BOM(`EF BB BF`)과 헤더, 이후 페이지마다 `TextEncoder`로 인코딩한 조각 하나. `sink.write(bytes)`를 기다린 뒤 다음 페이지를 읽고, `ctx.progress({ phase: 'export', done, total })`을 보낸다. `total`은 `query.count`. 취소는 페이지 사이에서 `E_IMPORT_CANCELLED`.
+- `xlsx.exportXlsx(engine, table, viewSpec, sink, ctx)` → 같은 결과. 행 수가 `XLSX_MAX_ROWS`(1,048,575 = 규격 상한 − 헤더)를 넘으면 시작 전에 `E_FILE_TOO_LARGE`(`detail.format = 'xlsx'`, `rows`, `limit`). 셀은 타입대로 쓴다: `integer`·`real` → 숫자, `boolean` → 불리언, `date`·`datetime` → 로컬 시각으로 만든 `Date`(서식 `yyyy-mm-dd`·`yyyy-mm-dd hh:mm:ss`. Step 8의 어댑터가 로컬 시각 부품으로 읽으므로 왕복이 같다), 텍스트 계열 → 문자열(수식 주입 방지는 CSV에만 있다. XLSX 문자열 셀은 수식으로 해석되지 않는다), NULL → 빈 셀, BLOB → 빈 셀(`blobCells`). 시트 이름은 표시 이름에서 `[]:*?/\`를 `_`로 바꾸고 31자로 자른다. `XLSX_WARN_ROWS`(100,000)를 넘으면 대화상자가 시작 전에 경고한다(메모리 상주).
+- `filesystem.gzip(bytes)` / `filesystem.gunzip(bytes)`: `CompressionStream('gzip')` / `DecompressionStream('gzip')`. `filesystem.isGzip(bytes)`: 매직 `1f 8b`. `filesystem.capabilities().gzip`: 두 스트림 생성자를 try/catch로 감지.
+- `filesystem.pickSaveAs(suggestedName, kind)`: `kind = 'db' | 'csv' | 'xlsx'`(기본 `db`). `db`는 `.db`·`.sqlite`·`.sqlite3`와 `.gz` 종류를 함께 제안한다. 고른 파일 이름이 `.gz`로 끝나면 스토어가 gzip으로 쓴다.
+- `filesystem.openSink(target, mime)` → `{ write, close, abort }`. `target`은 `pickSaveAs`의 결과(`handle` 또는 `download`).
+- 스토어 저장: `writeSnapshot`이 대상 이름이 `.gz`로 끝나는지로 gzip을 정한다. gzip을 지원하지 않는 환경이면 `db.snapshot` 전에 `E_GZIP_UNSUPPORTED`로 멈춘다(revision이 올라간 DB가 남지 않게). 순서는 지원 확인 → 스냅샷 → gzip → 기존 파일 백업 → 쓰기. `state.file.gzip`이 현재 파일의 형식이고 "저장"은 그 형식을 유지한다. 폴백(다운로드) 경로에서는 설정의 "압축 저장"이 제안 이름을 `.db.gz`로 만든다.
+- 스토어 열기: 읽은 바이트가 gzip이면 `gunzip` 뒤 헤더 검사로 간다. 압축 해제 뒤 크기로 `warnFileBytes`·`maxFileBytes` 검사를 한 번 더 한다(압축 파일은 작아 보인다). `DecompressionStream`이 없으면 `E_GZIP_UNSUPPORTED`.
+- `store.restoreBackup()`: 브라우저 모드는 IDB `backups[db_id]`의 `{ name, bytes, at }`를 읽어 `pickSaveAs('backup-<name>')`로 고른 곳에 바이트를 그대로 쓴다(압축 여부도 그대로. 열린 DB는 건드리지 않는다). 데스크톱 모드(`.bak`)는 Step 11에서 채우며 그 전에는 `E_UNSUPPORTED`. 백업이 없으면 안내만 한다.
+- 저장 뮤텍스: 스토어의 `saving` 표식. 저장(사용자·자동)이 진행 중이면 새 저장 요청은 시작하지 않는다. 사용자 저장은 `file.saveBusy`로 알리고, 자동 저장은 조용히 다음 틱으로 미룬다.
+- `autosave.createSaveTimer({ save, intervalMs })` → `{ setInterval(ms), markDirty(), markClean(), dispose() }`. dirty가 되면 `intervalMs` 뒤에 `save()`를 부른다. `save()`가 false(미룸·실패)를 돌려주면 같은 간격 뒤에 다시 시도하고, true면 다음 dirty까지 쉰다. `intervalMs`가 0이면 꺼짐(기본). 선택지는 30초·1분·2분·5분.
+- `store.save({ auto: true })`: 자동 저장 경로. 정본 파일 핸들이 있고 읽기 전용이 아니며 dirty일 때만 쓴다(다운로드 폴백으로는 자동 저장하지 않는다). `E_DB_BUSY`(가져오기·내보내기 진행 중)와 뮤텍스는 알리지 않고 false, 그 밖의 실패는 사용자 저장과 같이 알린다.
+- `store.exportTable({ tableId, viewSpec, format, options }, callOptions)` → `{ name, rows, bytes, blobCells } | null`. `pickSaveAs` → `openSink` → `export.stream`(조각을 싱크에 차례로 씀) → `close()`. 취소·실패는 `abort()`로 싱크를 버리고 원본 파일에는 아무것도 남지 않는다. 취소는 null.
+- `store.setDeviceName(name)`: `_jdr_meta.saved_by`에 쓸 기기 이름을 바꾼다. 저장은 `app/settings.js`가 한다.
+- `settings.load(idb)` / `settings.save(idb, patch)`: IDB `settings` 스토어의 `device_name`, `autosave_seconds`, `save_gzip`. IDB가 없으면 기본값(기기 이름은 실행마다 생성).
+- UI: 도구 모음의 "내보내기…"는 지금 고른 테이블에 대한 것이며(표 도구 줄), 대화상자에서 형식(CSV/XLSX), CSV의 인코딩·구분자·수식 주입 방지, "현재 뷰의 정렬·필터·검색·숨김 적용"(기본 켜짐. 끄면 전체 테이블), 행 수와 XLSX 경고를 보여 주고, 실행 중에는 진행률과 취소를 둔다. "설정…"은 기기 이름, 자동 저장 간격, 압축 저장, 직전 저장본(이름·시각)과 "새 이름으로 내보내기"를 둔다.
 
 **예외 처리**
 - 내보내기 대상 셀에 구분자·개행·따옴표 포함: RFC 4180 인용. 엑셀 호환을 위해 UTF-8 BOM 기본.
-- 수식 주입 방지: `=`, `+`, `-`, `@`로 시작하는 텍스트는 CSV 내보내기 시 앞에 `'`를 붙이는 옵션(기본 켜짐).
-- gzip 파일을 압축 미지원 브라우저에서 열기: `DecompressionStream` 부재 시 `E_GZIP_UNSUPPORTED`.
-- 자동 저장과 사용자 저장이 겹침: 저장 뮤텍스. 진행 중이면 다음 틱으로 미룸.
-- 백업 스토어 용량 부족(`QuotaExceededError`): 백업을 건너뛰고 저장은 진행하되 상태바에 표시.
+- 수식 주입 방지: `=`, `+`, `-`, `@`로 시작하는 텍스트는 CSV 내보내기 시 앞에 `'`를 붙이는 옵션(기본 켜짐). 값을 바꾸므로 대화상자에 표시하고, 왕복이 필요한 사용자는 끌 수 있다.
+- 내보내기 취소·실패: 싱크를 `abort()`하므로 FSA 경로는 임시 파일만 버려지고 폴백 경로는 다운로드가 시작되지 않는다. 문구가 "파일은 만들어지지 않았다"를 명시한다.
+- XLSX 행 수: 100,000행 초과는 시작 전 경고(계속 가능), 1,048,575행 초과는 `E_FILE_TOO_LARGE`로 거부하고 CSV를 안내한다.
+- BLOB 값(다른 도구가 만든 테이블): 빈 값으로 내보내고 결과 문구에 개수를 적는다.
+- gzip 파일을 압축 미지원 브라우저에서 열기·저장: `DecompressionStream`·`CompressionStream` 부재 시 `E_GZIP_UNSUPPORTED`. 저장은 스냅샷 전에 멈춘다.
+- 자동 저장과 사용자 저장이 겹침: 저장 뮤텍스. 진행 중이면 다음 틱으로 미룸. 가져오기·내보내기 도중의 자동 저장은 `E_DB_BUSY`이며 조용히 미룬다.
+- 백업 스토어 용량 부족(`QuotaExceededError` → `E_QUOTA`): 백업을 건너뛰고 저장은 진행하되 상태바에 표시한다(`state.backup`이 `skipped`(200 MB 초과)·`quota`·`failed`를 구분). 다음 저장이 성공하면 지운다.
+- 백업 복원 중 쓰기 실패: 열린 DB와 정본 파일은 그대로다. `E_FILE_WRITE`.
 
 **완료 기준**
-- 왕복 테스트: 내보낸 CSV를 다시 가져오면 타입·값이 동일(날짜, 불리언, NULL, 따옴표 포함 텍스트).
+- 왕복 테스트: 내보낸 CSV를 다시 가져오면 타입·값이 동일(날짜, 불리언, NULL, 따옴표 포함 텍스트). XLSX도 같은 왕복.
 - `.db.gz` 저장 → 열기 왕복.
 - `docs/cloud-sync.md`에 "PC A에서 저장·동기화 완료 확인 → PC B에서 열기" 절차와 경고 메시지 의미를 기술.
 
@@ -887,6 +916,8 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 { id: 17, ok: false, error: { code: 'E_DB_QUERY', message, detail } }
 // 진행 이벤트 (응답 전에 0회 이상)
 { id: 17, progress: { phase: 'insert', done: 120000, total: 300000 } }
+// 조각 이벤트 (export.stream만. 응답 전에 0회 이상, 바이트는 transfer)
+{ id: 17, chunk: Uint8Array }
 // 취소 (main → worker)
 { id: 17, cancel: true }
 ```
@@ -915,11 +946,11 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `views.delete` | `{ viewId }` | `{ cmd }` | 불가 |
 | `import.preview` | `{ file, options }`. `file`은 Blob(File)이며 구조화 복제로 넘긴다(메인은 바이트를 읽지 않는다). `options = { format: 'csv' \| 'xlsx', encoding?, delimiter?, hasHeader?, sheet?, headerRow? }`. 빠진 값은 Worker가 감지한다 | `{ format, encoding, delimiter, hasHeader, sheets?, sheet?, headerRow?, headers, sample, sampleRows, exhausted, inferred, warnings }`. `sample`은 앞 20행, `inferred[i] = { type, confidence, examples }`, `warnings[i] = { kind: 'encoding' \| 'ragged' \| 'unterminated_quote' \| 'merged' \| 'error_cells' \| 'empty_headers', count? }` | 가능 |
 | `import.run` | `{ file, options, mapping, target, policy }`. `target = { kind: 'new', name } \| { kind: 'existing', tableId }`, `mapping = { columns: [{ source, name?, type?, columnId?, policy? }] }`, `policy = 'null' \| 'text' \| 'abort'`(열에 정책이 없을 때의 기본) | `{ report }`. `report = { tableId, inserted, skipped, nulled, errors[], demoted[] }`. 진행 이벤트 `{ phase: 'insert', done, total }`(`total`은 행 수를 미리 알 때만 0보다 큼). 커맨드를 돌려주지 않는다(Step 7 "가져오기는 커맨드가 아니다") | 가능(전체 롤백) |
-| `export.stream` | `{ tableId, viewSpec, format, options }` | 조각 이벤트 `{ chunk }` 후 완료 | 가능 |
+| `export.stream` | `{ tableId, viewSpec, format: 'csv' \| 'xlsx', options? }`. `options = { encoding?: 'utf-8-bom' \| 'utf-8', delimiter?, formulaGuard? }`(CSV) | 조각 이벤트 `{ id, chunk }`(transfer) 0회 이상 뒤 `{ rows, bytes, blobCells }`. 진행 이벤트 `{ phase: 'export', done, total }`. 배타 op(Step 9 "내보내기는 Worker가 조각으로 흘려보낸다") | 가능(페이지 사이, `E_IMPORT_CANCELLED`) |
 
 데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다.
 
-규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`)와 `db.snapshot`·`db.close`는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`, `schema.list`, `views.list`, `import.preview`(파싱만 하고 DB는 읽기만 한다)는 언제나 허용된다(읽기).
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`)와 `db.snapshot`·`db.close`·`export.stream`은 서로 배타적이며 동시에 오면 `E_DB_BUSY`(`export.stream`은 읽기지만 페이지 사이에서 이벤트 루프로 돌아오므로 쓰기가 끼어들면 앞뒤 페이지가 다른 상태를 본다). `query.*`, `schema.list`, `views.list`, `import.preview`(파싱만 하고 DB는 읽기만 한다)는 언제나 허용된다(읽기).
 
 `db.snapshot`·`db.close`가 배타인 이유: 둘 다 트랜잭션 상태를 전제로 한다(스냅샷은 트랜잭션 밖에서만 뜰 수 있고, 닫기는 연결을 없앤다). 쓰기 op는 청크 사이에서 이벤트 루프로 돌아오므로 그 틈에 저장 요청이 끼어들 수 있고, 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨진다. 파일에는 아무것도 쓰이지 않았는데 `revision`·`saved_by`만 올라간 DB가 남는 것이 최악이다. 긴 작업 중의 저장은 큐에 넣지 않고 거절하며, UI가 "작업이 끝난 뒤 다시 저장하세요"로 안내한다.
 
@@ -936,7 +967,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_ENV_NO_IDB` | IndexedDB 사용 불가 | 예 | 저널·백업·최근 파일 비활성 안내 |
 | `E_FILE_NOT_SQLITE` | 헤더 불일치 | 예 | 열기 취소 |
 | `E_FILE_CORRUPT` | integrity_check 실패 | 예 | 열기 취소, sqlite3 `.recover` 안내 |
-| `E_FILE_TOO_LARGE` | 엔진의 `maxFileBytes` 초과(wasm 1.5 GB, native 없음). XLSX 가져오기의 100 MB 상한(`detail.format = 'xlsx'`) | 예 | 열기 거부. XLSX는 CSV로 저장 후 가져오기 안내 |
+| `E_FILE_TOO_LARGE` | 엔진의 `maxFileBytes` 초과(wasm 1.5 GB, native 없음. gzip 파일은 압축 해제 뒤 크기). XLSX 가져오기의 100 MB 상한과 XLSX 내보내기의 행 상한 1,048,575(`detail.format = 'xlsx'`) | 예 | 열기 거부. XLSX는 CSV로 저장 후 가져오기 / CSV로 내보내기 안내 |
 | `E_FILE_NEWER_SCHEMA` | 앱보다 새 schema_version | 예 | 읽기 전용으로 열기 |
 | `E_FILE_PERMISSION` | 핸들 권한 거부 | 예 | 다른 이름으로 저장 유도 |
 | `E_FILE_WRITE` | 쓰기 실패 | 예 | 원본 보존 안내, 재시도·다운로드 대안 |
@@ -952,10 +983,10 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_PASTE_TOO_LARGE` | 100만 셀 초과 | 예 | CSV 가져오기 안내 |
 | `E_UNDO_LIMIT` | 되돌리기 스냅샷 초과 | 예 | 확인 후 히스토리 비움 |
 | `E_IMPORT_ENCODING` | 깨진 문자 비율 초과(미리보기 `warnings`의 `encoding`. 던지지 않고 문구만 쓴다) | 예 | 인코딩 재선택 |
-| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경, 검색 인덱스 생성) | 예 | 롤백 결과 안내(가져오기 전 상태 그대로) |
+| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경, 검색 인덱스 생성, 내보내기) | 예 | 롤백 결과 안내(가져오기 전 상태 그대로 / 내보내기 파일은 만들어지지 않음) |
 | `E_XLSX_ENCRYPTED` / `E_XLSX_CORRUPT` | 파일 문제 | 예 | 거부 |
-| `E_GZIP_UNSUPPORTED` | 압축 스트림 없음 | 예 | 비압축 안내 |
-| `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내 |
+| `E_GZIP_UNSUPPORTED` | `CompressionStream`·`DecompressionStream` 없음(`.db.gz` 저장·열기) | 예 | 비압축 안내. 저장은 스냅샷 전에 멈춰 revision이 오르지 않는다 |
+| `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내. 백업 생략은 다음 저장 성공까지 상태바에 남는다 |
 | `E_UNSUPPORTED` | 현재 엔진이 지원하지 않는 op(`db.snapshot`을 native에, `db.save`를 wasm에) | 아니오(버그) | 콘솔 오류 |
 | `E_NATIVE_IPC` | 데스크톱 모드에서 타우리 IPC 실패 | 아니오 | 앱 잠금, 원인 표시. wasm 폴백 없음 |
 | `E_DISK_FULL` | 작업 사본 복사·저장 중 디스크 부족 | 예 | 원본 무손상 안내, 공간 확보 후 재시도 |
@@ -1017,4 +1048,4 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | R8 | WebView별 차이(WKWebView의 IndexedDB·CompressionStream, WebKitGTK 버전)와 tauri-driver의 macOS 미지원 | 데스크톱 기능 일부가 플랫폼별로 다르고 macOS E2E 자동화 불가 | 기능 감지, 지원 매트릭스에 데스크톱 열 추가, macOS는 수동 점검 목록 |
 | R9 | rusqlite `bundled` 빌드의 컴파일 플래그(FTS5, `VACUUM INTO` 지원 버전)와 JS 쪽 SQLite 버전 불일치 | 같은 SQL이 한 모드에서만 실패 | 두 엔진의 `sqlite_version()`·`compile_options`를 테스트로 고정하고 차이를 문서화 |
 
-미확정: 기본 파일 확장자를 `.db`로 할지 `.jdr.db`로 할지(현재 `.db`). 자동 저장의 기본 켜짐 여부(현재 꺼짐).
+미확정: 기본 파일 확장자를 `.db`로 할지 `.jdr.db`로 할지(현재 `.db`). 자동 저장의 기본값은 세션 G에서 "꺼짐"으로 확정했다(정본 파일이 있어야만 동작하고, 켜면 30초~5분 간격을 설정에서 고른다).
