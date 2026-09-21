@@ -1,8 +1,11 @@
 name: ci
 
+# 작업 브랜치에는 늘 PR이 열려 있으므로(CLAUDE.md 8장) `pull_request` 하나로 덮인다. `push`까지 모든
+# 브랜치에 걸면 같은 커밋에 워크플로가 두 번 돌아, CI 시간이 두 배가 되고 perf 잡이 독립 시행 두 번이
+# 되어 잡음으로 빨강이 날 확률도 두 배가 된다(세션 H 점검 실측). push는 기본 브랜치에만 건다.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 jobs:
