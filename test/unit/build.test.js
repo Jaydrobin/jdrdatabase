@@ -165,6 +165,14 @@ test('verify 검사기: 외부 참조·크기·CSP·테스트 훅을 각각 잡�
     /외부/,
   );
   assert.throws(() => assertNoExternalRefs('body{background:url(//x.y/a.png)}'), /url\(\) 외부/);
+  // SheetJS가 문자열로만 쓰는 XML 네임스페이스 URL은 접두사로 허용하고, 그 밖의 URL은 여전히 막는다.
+  assert.equal(
+    assertNoExternalRefs(
+      'x("http://schemas.openxmlformats.org/spreadsheetml/2006/main","http://www.w3.org/2001/XMLSchema")',
+    ).allowedLiterals,
+    2,
+  );
+  assert.throws(() => assertNoExternalRefs('fetch("https://schemas.example.org/x")'), /외부 URL/);
   assert.throws(() => assertNoExternalRefs('importScripts("https://x.y/w.js")'), /외부/);
   assert.deepEqual(assertNoExternalRefs('<html>"https://sqlite.org:"</html>'), {
     allowedLiterals: 1,

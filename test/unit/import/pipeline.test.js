@@ -160,10 +160,129 @@ test('normalizeOptions·requireTarget: 형태가 틀리면 거부한다', () => 
   assert.throws(() => requireTarget({ kind: 'nope' }), /import target/);
 });
 
-test('openSource: xlsx는 Step 8 전까지 E_UNSUPPORTED', async () => {
-  await assert.rejects(
-    openSource(csv(''), { format: 'xlsx' }),
-    (err) => err instanceof AppError && err.code === 'E_UNSUPPORTED',
+test('openSource·preview: xlsx는 시트 목록·헤더 행·병합·오류 셀 경고를 함께 준다(Step 8)', async () => {
+  const source = await openSource(await fixtureBlob('basic.xlsx'), { format: 'xlsx' });
+  assert.deepEqual(source.sheets, [
+    { name: '데이터', rows: 5, cols: 12 },
+    { name: '둘째', rows: 5, cols: 2 },
+  ]);
+  assert.equal(source.total, 4);
+  const p = await preview(await fixtureBlob('basic.xlsx'), { format: 'xlsx' });
+  assert.equal(p.format, 'xlsx');
+  assert.equal(p.sheet, '데이터');
+  assert.equal(p.headerRow, 1);
+  assert.deepEqual(p.headers, [
+    '이름',
+    '열2',
+    '나이',
+    '이름 (2)',
+    '가입일',
+    '시각',
+    '활성',
+    '수식',
+    '우편번호',
+    '오류',
+    '실수',
+    '윤년',
+  ]);
+  assert.deepEqual(
+    p.inferred.map((i) => i.type),
+    [
+      'text',
+      'text',
+      'integer',
+      'text',
+      'date',
+      'datetime',
+      'boolean',
+      'integer',
+      'text',
+      'text',
+      'real',
+      'date',
+    ],
+  );
+  assert.deepEqual(
+    p.warnings.map((w) => w.kind),
+    ['merged', 'error_cells', 'empty_headers'],
+  );
+  const second = await preview(await fixtureBlob('basic.xlsx'), {
+    format: 'xlsx',
+    sheet: '둘째',
+    headerRow: 3,
+  });
+  assert.deepEqual(second.headers, ['a', 'b']);
+  assert.deepEqual(second.sample, [
+    [1, 2],
+    [3, 4],
+  ]);
+  assert.equal(second.exhausted, true);
+});
+
+test('run: xlsx를 새 테이블로 — 날짜·시각·불리언·수식값·병합·오류 셀(보고서)·1904', async () => {
+  const engine = await setup();
+  const p = await preview(await fixtureBlob('basic.xlsx'), { format: 'xlsx' });
+  const mapping = {
+    columns: p.headers.map((name, i) => ({ source: i, name, type: p.inferred[i]?.type })),
+  };
+  /** @type {Array<{ done: number, total: number }>} */
+  const progress = [];
+  const { report } = await run({
+    engine,
+    file: await fixtureBlob('basic.xlsx'),
+    options: { format: 'xlsx', sheet: '데이터', headerRow: 1 },
+    mapping,
+    target: { kind: 'new', name: '엑셀' },
+    progress: (pr) => progress.push({ done: pr.done, total: pr.total }),
+  });
+  assert.equal(report.inserted, 3);
+  assert.equal(report.skipped, 1, '병합 범위의 빈 행');
+  assert.deepEqual(report.errors, [
+    { rowIndex: 2, column: '오류', reason: 'error_cell' },
+    { rowIndex: 3, column: '오류', reason: 'error_cell' },
+  ]);
+  assert.equal(progress[0]?.total, 4, 'XLSX는 행 수를 미리 안다');
+  const table = tables.requireTable(engine, report.tableId);
+  const ids = table.columns.map((c) => c.id);
+  const rows = rowsOf(engine, table.id, ids);
+  assert.deepEqual(rows[0], [
+    '홍길동',
+    'x',
+    30,
+    'dup',
+    '2024-01-05',
+    '2024-01-05T10:20:30',
+    1,
+    60,
+    '01234',
+    null,
+    1.5,
+    '1900-02-28',
+  ]);
+  assert.deepEqual(rows[1]?.slice(4, 8), ['2024-02-29', '2024-02-29T00:00:00', 0, 50]);
+  assert.equal(rows[1]?.[11], '1900-03-01', '일련번호 61 = 1900-03-01');
+  assert.deepEqual(rows[2]?.slice(0, 2), ['병합', 'b']);
+
+  const d1904 = await run({
+    engine,
+    file: await fixtureBlob('date1904.xlsx'),
+    options: { format: 'xlsx' },
+    mapping: {
+      columns: [
+        { source: 0, name: '날짜', type: 'date' },
+        { source: 1, name: '시각', type: 'datetime' },
+      ],
+    },
+    target: { kind: 'new', name: '1904' },
+  });
+  const t1904 = tables.requireTable(engine, d1904.report.tableId);
+  assert.deepEqual(
+    rowsOf(
+      engine,
+      t1904.id,
+      t1904.columns.map((c) => c.id),
+    ),
+    [['2024-01-05', '2024-01-05T10:20:30']],
   );
 });
 

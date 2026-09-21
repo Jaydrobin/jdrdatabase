@@ -7,11 +7,12 @@
  *   실행 중의 취소(버튼·Esc)는 `beforeCancel`이 가로채 `AbortController`를 당긴다. 모달이라 그리드 편집이 막힌다.
  * - 사용자 데이터(파일 이름, 헤더, 셀 값, 테이블 이름)는 textContent·value로만 넣는다(CLAUDE.md 5.5).
  * - 상한 숫자는 두지 않는다. 메모리 경고는 `store.capabilities()`의 값으로 계산한다.
+ * - 파이프라인·XLSX 모듈을 직접 가져오지 않는다(메인은 Worker RPC로만 가져오기에 닿는다). 필요한 값은 미리보기
+ *   결과와 `import/csv.js`의 상수뿐이다.
  */
 import { LOGICAL_TYPES } from '../../db/values.js';
 import { hasMessage, t } from '../../i18n/index.js';
 import { CSV_ENCODINGS, DELIMITER_CANDIDATES } from '../../import/csv.js';
-import { PREVIEW_ROWS } from '../../import/pipeline.js';
 import { formatBytes } from '../../util/bytes.js';
 import { toAppError } from '../../util/errors.js';
 import { formatInteger } from '../../util/format.js';
@@ -327,12 +328,24 @@ export async function openImportDialog(deps) {
     }
   }
 
-  function renderOptions() {
-    optionsBox.textContent = '';
+  /**
+   * 옵션 컨트롤은 한 번만 만들고, 미리보기가 올 때마다 값만 맞춘다. 요소를 갈아 끼우면 사용자가 입력 중인
+   * 값과 포커스를 잃고, 자동화 도구가 잡은 요소가 떨어져 나간다.
+   * @type {{ encoding: HTMLSelectElement | null, delimiter: HTMLSelectElement | null, hasHeader: HTMLInputElement | null, sheet: HTMLSelectElement | null, headerRow: HTMLInputElement | null }}
+   */
+  const controls = {
+    encoding: null,
+    delimiter: null,
+    hasHeader: null,
+    sheet: null,
+    headerRow: null,
+  };
+
+  function buildOptions() {
     if (format === 'csv') {
       const encoding = makeSelect(
         CSV_ENCODINGS.map((e) => ({ value: e, label: e })),
-        options.encoding ?? preview?.encoding ?? 'utf-8',
+        'utf-8',
       );
       encoding.dataset.field = 'encoding';
       encoding.addEventListener('change', onOptionChange);
@@ -342,7 +355,7 @@ export async function openImportDialog(deps) {
           value: d.value,
           label: t(d.key),
         })),
-        options.delimiter ?? preview?.delimiter ?? ',',
+        ',',
       );
       delimiter.dataset.field = 'delimiter';
       delimiter.addEventListener('change', onOptionChange);
@@ -352,28 +365,20 @@ export async function openImportDialog(deps) {
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.dataset.field = 'hasHeader';
-      box.checked = options.hasHeader ?? preview?.hasHeader ?? true;
+      box.checked = true;
       box.addEventListener('change', onOptionChange);
       const text = document.createElement('span');
       text.textContent = t('import.hasHeader');
       check.append(box, text);
       optionsBox.append(check);
+      controls.encoding = encoding;
+      controls.delimiter = delimiter;
+      controls.hasHeader = box;
       return;
     }
-    const sheets = preview?.sheets ?? [];
-    const sheet = makeSelect(
-      sheets.map((s) => ({
-        value: s.name,
-        label: t('import.sheetOption', {
-          name: s.name,
-          rows: formatInteger(s.rows),
-          cols: formatInteger(s.cols),
-        }),
-      })),
-      options.sheet ?? preview?.sheet ?? sheets[0]?.name ?? '',
-    );
+    const sheet = makeSelect([], '');
     sheet.dataset.field = 'sheet';
-    sheet.disabled = sheets.length === 0;
+    sheet.disabled = true;
     sheet.addEventListener('change', onOptionChange);
     optionsBox.append(labeled(t('import.sheetLabel'), sheet));
     const headerRow = document.createElement('input');
@@ -382,9 +387,50 @@ export async function openImportDialog(deps) {
     headerRow.step = '1';
     headerRow.className = 'jdr-dialog__input';
     headerRow.dataset.field = 'headerRow';
-    headerRow.value = String(options.headerRow ?? preview?.headerRow ?? 1);
+    headerRow.value = '1';
     headerRow.addEventListener('change', onOptionChange);
     optionsBox.append(labeled(t('import.headerRowLabel'), headerRow));
+    controls.sheet = sheet;
+    controls.headerRow = headerRow;
+  }
+
+  /**
+   * 미리보기(감지 결과)와 사용자가 고른 값으로 컨트롤의 값을 맞춘다. 사용자가 고른 값은 `options`에 있어
+   * 그대로 다시 들어가므로 입력 중인 값이 덮이지 않는다.
+   */
+  function syncOptions() {
+    if (controls.encoding) {
+      controls.encoding.value = options.encoding ?? preview?.encoding ?? 'utf-8';
+    }
+    if (controls.delimiter) {
+      controls.delimiter.value = options.delimiter ?? preview?.delimiter ?? ',';
+    }
+    if (controls.hasHeader) {
+      controls.hasHeader.checked = options.hasHeader ?? preview?.hasHeader ?? true;
+    }
+    if (controls.sheet) {
+      const sheets = preview?.sheets ?? [];
+      const selected = options.sheet ?? preview?.sheet ?? sheets[0]?.name ?? '';
+      const current = [...controls.sheet.options].map((o) => o.value);
+      if (current.join('\u0000') !== sheets.map((s2) => s2.name).join('\u0000')) {
+        controls.sheet.textContent = '';
+        for (const s2 of sheets) {
+          const option = document.createElement('option');
+          option.value = s2.name;
+          option.textContent = t('import.sheetOption', {
+            name: s2.name,
+            rows: formatInteger(s2.rows),
+            cols: formatInteger(s2.cols),
+          });
+          controls.sheet.append(option);
+        }
+      }
+      controls.sheet.disabled = sheets.length === 0;
+      controls.sheet.value = selected;
+    }
+    if (controls.headerRow) {
+      controls.headerRow.value = String(options.headerRow ?? preview?.headerRow ?? 1);
+    }
   }
 
   /** @param {Event} ev */
@@ -624,7 +670,7 @@ export async function openImportDialog(deps) {
     }
     previewTitle.textContent = t('import.previewTitle', {
       count: formatInteger(preview.sampleRows),
-      shown: formatInteger(Math.min(PREVIEW_ROWS, preview.sample.length)),
+      shown: formatInteger(preview.sample.length),
     });
     if (preview.sample.length === 0) {
       const empty = document.createElement('p');
@@ -668,7 +714,7 @@ export async function openImportDialog(deps) {
     previewing = false;
     preview = next;
     resetColumns();
-    renderOptions();
+    syncOptions();
     renderWarnings();
     renderColumns();
     renderPreview();
@@ -822,7 +868,7 @@ export async function openImportDialog(deps) {
         previewWrap,
         progressBox,
       );
-      renderOptions();
+      buildOptions();
       renderTarget();
       renderPreview();
       void loadPreview();

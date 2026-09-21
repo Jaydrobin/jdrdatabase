@@ -2,7 +2,8 @@
 /**
  * 산출물 검증(D-01, CLAUDE.md 5.8).
  *
- *  - 외부 참조 0건: http(s) URL, 외부 src=/href=, url(), CSS import 규칙, importScripts()
+ *  - 외부 참조 0건: http(s) URL, 외부 src=/href=, url(), CSS import 규칙, importScripts().
+ *    vendor 코드의 문서 링크 리터럴(정확히 일치)과 XML 네임스페이스 URL(접두사)만 허용한다
  *  - 크기 예산: 6 MiB (DESIGN.md 8장)
  *  - CSP 메타 태그가 정확히 한 번, 첫 스크립트보다 앞에 있고 내용이 D-01과 같음
  *  - 릴리스 산출물에 테스트 훅 이름이 없음
@@ -32,6 +33,32 @@ export const ALLOWED_URL_LITERALS = new Set([
 ]);
 
 /**
+ * XML 네임스페이스 식별자로만 쓰이는 URL 접두사. vendor/xlsx.full.min.js(SheetJS)가 OOXML·ODS·HTML 문서를
+ * 읽고 쓸 때 문자열로 비교할 뿐 네트워크 요청을 만들지 않는다. 접두사 아래의 어떤 경로든 허용한다.
+ * 새 항목을 추가하려면 출처를 함께 적는다.
+ */
+export const ALLOWED_URL_PREFIXES = [
+  // OOXML 패키지·관계·스프레드시트 네임스페이스(ECMA-376)
+  'http://schemas.openxmlformats.org/',
+  // SheetJS가 만드는 관계 URI의 접두사(위와 같은 형태로 자체 네임스페이스를 쓴다)
+  'http://sheetjs.openxmlformats.org/',
+  // Excel 확장 네임스페이스(threadedcomments, richdata, dynamicarray, mac, vbaProject 등)
+  'http://schemas.microsoft.com/',
+  // XML Schema, XLink, XHTML, RDF, MathML, XForms 등 W3C 네임스페이스
+  'http://www.w3.org/',
+  // Dublin Core 메타데이터 네임스페이스(docProps/core.xml)
+  'http://purl.org/',
+  // ISO/IEC 29500 Strict OOXML 네임스페이스
+  'http://purl.oclc.org/ooxml/',
+  // ODS(OpenDocument) 메타데이터 네임스페이스(OASIS)
+  'http://docs.oasis-open.org/ns/office/',
+  // OpenOffice.org 확장 네임스페이스(ODS 읽기·쓰기)
+  'http://openoffice.org/',
+  // VML 스키마 자리표시자 URI(macOS 엑셀). 호스트 이름이 아니라 그대로 쓰이는 식별자다
+  'http://macVmlSchemaUri',
+];
+
+/**
  * @param {string} html
  * @returns {{ allowedLiterals: number }}
  */
@@ -39,7 +66,7 @@ export function assertNoExternalRefs(html) {
   const urlRe = /https?:\/\/[^\s"'`)<>\\]*/g;
   let allowed = 0;
   for (const m of html.matchAll(urlRe)) {
-    if (ALLOWED_URL_LITERALS.has(m[0])) {
+    if (ALLOWED_URL_LITERALS.has(m[0]) || ALLOWED_URL_PREFIXES.some((p) => m[0].startsWith(p))) {
       allowed += 1;
       continue;
     }

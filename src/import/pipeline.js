@@ -25,6 +25,7 @@ import {
   REPLACEMENT_WARN_RATIO,
 } from './csv.js';
 import { column as inferColumn, columnName, sample, SAMPLE_ROWS } from './infer.js';
+import { openXlsx } from './xlsx.js';
 
 /** @typedef {import('../db/engine.js').Engine} Engine */
 /** @typedef {import('../db/engine.js').SqlValue} SqlValue */
@@ -257,11 +258,7 @@ async function openCsv(file, options) {
  * @returns {Promise<Source>}
  */
 export async function openSource(file, options) {
-  if (options.format === 'xlsx') {
-    throw new AppError('E_UNSUPPORTED', 'xlsx import arrives in Step 8', {
-      detail: { format: 'xlsx' },
-    });
-  }
+  if (options.format === 'xlsx') return openXlsx(file, options);
   return openCsv(file, options);
 }
 
@@ -576,6 +573,13 @@ async function attempt(args, planned, demoted) {
   progress?.({ phase: 'insert', done: 0, total });
   for await (const row of source.rows) {
     if (row.cells.length > width) record({ rowIndex: row.rowIndex, reason: 'extra_fields' });
+    if (row.errorCells) {
+      for (const col of planned) {
+        if (row.errorCells.includes(col.source)) {
+          record({ rowIndex: row.rowIndex, column: col.name, reason: 'error_cell' });
+        }
+      }
+    }
     /** @type {SqlValue[]} */
     const params = [];
     let allEmpty = true;

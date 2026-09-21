@@ -5,12 +5,15 @@
  *   node scripts/gen-import-fixtures.mjs
  *
  * CSV(Step 7): 따옴표 안 개행·쉼표, BOM 있는 UTF-8, UTF-16LE, EUC-KR, 빈 줄, CRLF/LF 혼재, 필드 수 불일치,
- * 32 KB 조각 경계에 걸친 따옴표 필드. 모두 1 MB 아래(CLAUDE.md 4장).
- * XLSX(Step 8)는 세션 F의 Step 8 커밋에서 이 파일에 더한다.
+ * 32 KB 조각 경계에 걸친 따옴표 필드. 바이트가 고정된다.
+ * XLSX(Step 8): 날짜·시각·불리언·수식·병합·오류 셀·빈/중복 헤더·선행 0 텍스트, 헤더가 3행에 있는 둘째 시트,
+ * 1904 날짜 체계, 암호화 컨테이너. SheetJS로 쓰므로 zip 메타데이터(시각)는 실행마다 다를 수 있고 내용은 같다.
+ * 모두 1 MB 아래(CLAUDE.md 4장).
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import XLSX from '../vendor/xlsx.full.min.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const OUT_DIR = path.join(ROOT, 'test', 'fixtures', 'import');
@@ -124,6 +127,107 @@ export function boundaryCsv() {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * 날짜·시각·불리언·수식·병합·오류 셀·빈/중복 헤더·선행 0 텍스트가 든 통합 문서. 둘째 시트는 헤더가 3행에 있다.
+ * 날짜는 Date 객체로 넣어 SheetJS가 일련번호(+ 날짜 서식)로 쓰게 한다(엑셀이 저장하는 형태).
+ * @returns {Uint8Array}
+ */
+export function basicXlsx() {
+  const wb = XLSX.utils.book_new();
+  const rows = [
+    [
+      '이름',
+      '',
+      '나이',
+      '이름',
+      '가입일',
+      '시각',
+      '활성',
+      '수식',
+      '우편번호',
+      '오류',
+      '실수',
+      '윤년',
+    ],
+    [
+      '홍길동',
+      'x',
+      30,
+      'dup',
+      new Date(2024, 0, 5),
+      new Date(2024, 0, 5, 10, 20, 30),
+      true,
+      null,
+      '01234',
+      null,
+      1.5,
+    ],
+    [
+      '김영희',
+      'y',
+      25,
+      'dup2',
+      new Date(2024, 1, 29),
+      new Date(2024, 1, 29, 0, 0, 0),
+      false,
+      null,
+      '00042',
+      null,
+      -2,
+    ],
+    ['병합', 'b', 40, 'dup3', new Date(1900, 1, 27), null, true, null, '99999', null, 3e2],
+    ['', '', null, '', null, null, null, null, '', null, null],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  // 수식 셀: 계산값(v)과 수식(f)을 함께 둔다. 가져오기는 v만 쓴다.
+  ws['H2'] = { t: 'n', f: 'C2*2', v: 60 };
+  ws['H3'] = { t: 'n', f: 'C3*2', v: 50 };
+  ws['H4'] = { t: 'n', f: 'C4*2', v: 80 };
+  // 오류 셀: #N/A, #REF!
+  ws['J2'] = { t: 'e', v: 0x2a, w: '#N/A' };
+  ws['J3'] = { t: 'e', v: 0x17, w: '#REF!' };
+  // 1900 윤년 버그: 엑셀의 일련번호 60은 존재하지 않는 1900-02-29, 61은 1900-03-01이다.
+  ws['L2'] = { t: 'n', v: 60, z: 'yyyy-mm-dd' };
+  ws['L3'] = { t: 'n', v: 61, z: 'yyyy-mm-dd' };
+  // 병합: A4:B5 (왼쪽 위 A4에만 값)
+  ws['!merges'] = [{ s: { r: 3, c: 0 }, e: { r: 4, c: 1 } }];
+  XLSX.utils.book_append_sheet(wb, ws, '데이터');
+  const second = XLSX.utils.aoa_to_sheet([['제목 줄'], [], ['a', 'b'], [1, 2], [3, 4]]);
+  XLSX.utils.book_append_sheet(wb, second, '둘째');
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+}
+
+/**
+ * 1904 날짜 체계 통합 문서. 같은 날짜가 1900 체계와 다른 일련번호로 저장되지만 읽으면 같은 날짜여야 한다.
+ * @returns {Uint8Array}
+ */
+export function date1904Xlsx() {
+  const wb = XLSX.utils.book_new();
+  wb.Workbook = { WBProps: { date1904: true } };
+  const ws = XLSX.utils.aoa_to_sheet(
+    [
+      ['날짜', '시각'],
+      [new Date(2024, 0, 5), new Date(2024, 0, 5, 10, 20, 30)],
+    ],
+    // 셀은 날짜 타입으로 두고, 일련번호 변환은 통합 문서의 date1904를 아는 쓰기 단계에 맡긴다.
+    { cellDates: true },
+  );
+  XLSX.utils.book_append_sheet(wb, ws, 'S');
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+}
+
+/**
+ * 암호화된 통합 문서의 컨테이너(CFB에 EncryptedPackage·EncryptionInfo 스트림). 내용은 임의 바이트지만
+ * SheetJS는 스트림 이름만 보고 암호 보호로 판정한다.
+ * @returns {Uint8Array}
+ */
+export function encryptedXlsx() {
+  const cfb = XLSX.CFB.utils.cfb_new();
+  XLSX.CFB.utils.cfb_add(cfb, '/EncryptionInfo', new Uint8Array([4, 0, 4, 0, 0x40, 0, 0, 0]));
+  XLSX.CFB.utils.cfb_add(cfb, '/EncryptedPackage', new Uint8Array(64));
+  return new Uint8Array(XLSX.CFB.write(cfb, { type: 'array' }));
+}
+
 export async function generate() {
   await mkdir(OUT_DIR, { recursive: true });
   /** @type {Record<string, Uint8Array | string>} */
@@ -162,6 +266,10 @@ export async function generate() {
     ].join('\n'),
     // 32 KB 조각 경계에 걸친 따옴표 필드
     'boundary.csv': boundaryCsv(),
+    // XLSX (Step 8)
+    'basic.xlsx': basicXlsx(),
+    'date1904.xlsx': date1904Xlsx(),
+    'encrypted.xlsx': encryptedXlsx(),
   };
   for (const [name, content] of Object.entries(files)) {
     await writeFile(

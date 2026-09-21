@@ -260,3 +260,85 @@ test('취소 버튼은 대화상자를 닫고 아무것도 바꾸지 않는다; 
   expect((await hook(page).state())?.dirty).toBe(false);
   await expect(page.locator('[data-action="import"]')).toBeEnabled();
 });
+
+test('XLSX → 새 테이블: 시트·헤더 행 선택, 날짜·수식·불리언·병합·오류 셀 경고(Step 8)', async ({
+  page,
+}) => {
+  const dialog = await openImport(page, 'basic.xlsx');
+  // 시트 목록과 크기, 경고(병합·오류 셀·빈/중복 헤더).
+  const sheet = dialog.locator('select[data-field="sheet"]');
+  await expect(sheet.locator('option')).toHaveCount(2);
+  await expect(sheet.locator('option').nth(0)).toHaveText('데이터 (5행 × 12열)');
+  await expect(dialog.locator('.jdr-import__warning')).toHaveCount(3);
+  await expect(dialog.locator('.jdr-import__warning').nth(0)).toContainText('병합된 셀 범위 1개');
+  await expect(dialog.locator('.jdr-import__warning').nth(1)).toContainText('오류 셀');
+  const rows = dialog.locator('table[data-role="columns"] tbody tr');
+  await expect(rows).toHaveCount(12);
+  await expect(rows.nth(1).locator('input[data-field="name"]')).toHaveValue('열2');
+  await expect(rows.nth(3).locator('input[data-field="name"]')).toHaveValue('이름 (2)');
+  await expect(rows.nth(4).locator('select[data-field="type"]')).toHaveValue('date');
+  await expect(rows.nth(5).locator('select[data-field="type"]')).toHaveValue('datetime');
+  await expect(rows.nth(6).locator('select[data-field="type"]')).toHaveValue('boolean');
+  await expect(rows.nth(7).locator('select[data-field="type"]')).toHaveValue('integer');
+  await expect(rows.nth(8).locator('select[data-field="type"]')).toHaveValue('text');
+  await expect(
+    dialog.locator('table[data-role="preview"] tbody tr').nth(0).locator('td').nth(7),
+  ).toHaveText('60');
+  // 둘째 시트 + 헤더 행 3.
+  await sheet.selectOption('둘째');
+  await expect(dialog.locator('table[data-role="preview"] thead th').nth(0)).toHaveText('제목 줄');
+  const headerRow = dialog.locator('input[data-field="headerRow"]');
+  await headerRow.fill('3');
+  await headerRow.dispatchEvent('change');
+  await expect(dialog.locator('table[data-role="preview"] thead th')).toHaveText(['a', 'b']);
+  await expect(dialog.locator('table[data-role="preview"] tbody tr')).toHaveCount(2);
+  // 다시 첫 시트로(헤더 행 3이 유지되어 3행이 헤더가 된다) → 헤더 행 1로 되돌린다.
+  await sheet.selectOption('데이터');
+  await expect(dialog.locator('table[data-role="preview"] thead th').nth(0)).toHaveText('김영희');
+  await headerRow.fill('1');
+  await headerRow.dispatchEvent('change');
+  await expect(dialog.locator('table[data-role="preview"] thead th').nth(0)).toHaveText('이름');
+  await expect(dialog.locator('table[data-role="preview"] tbody tr')).toHaveCount(4);
+  await expect(dialog.locator('table[data-role="columns"] tbody tr')).toHaveCount(12);
+  await dialog.locator('input[data-field="tableName"]').fill('엑셀');
+  await dialog.getByRole('button', { name: '가져오기' }).click();
+  const report = page.locator('.jdr-dialog');
+  await expect(report.locator('.jdr-dialog__title')).toHaveText('가져오기 결과');
+  await expect(report.locator('.jdr-dialog__message').nth(0)).toHaveText('넣은 행: 3');
+  await expect(report.locator('.jdr-dialog__message').nth(1)).toHaveText('빈 행이라 건너뜀: 1');
+  await expect(report.locator('.jdr-dialog__message')).toContainText([
+    /2번째 레코드 · 오류 · 오류 셀/,
+  ]);
+  await report.getByRole('button', { name: '확인' }).click();
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 3개');
+  await expect(
+    page.locator('.jdr-grid__row[data-row="0"]:not([hidden]) .jdr-grid__cell[data-col="4"]'),
+  ).toHaveText('2024-01-05');
+  await expect(
+    page.locator('.jdr-grid__row[data-row="0"]:not([hidden]) .jdr-grid__cell[data-col="5"]'),
+  ).toHaveText('2024-01-05T10:20:30');
+  await expect(
+    page.locator('.jdr-grid__row[data-row="0"]:not([hidden]) .jdr-grid__cell[data-col="6"]'),
+  ).toHaveText('✓');
+  // 7번째 열부터는 뷰포트 밖(열 가상화)이라 DB에서 확인한다: 수식은 계산값, 오류 셀은 NULL, 1900 윤년 버그.
+  const table = (await hook(page).state())?.tables.find((tb) => tb.name === '엑셀');
+  const ids = table?.columns.map((c) => c.id) ?? [];
+  const stored = await hook(page).query(
+    `SELECT "${ids[7]}", "${ids[9]}", "${ids[10]}", "${ids[11]}" FROM "${table?.id}" ORDER BY "id" LIMIT 3`,
+  );
+  expect(stored.rows).toEqual([
+    [60, null, 1.5, '1900-02-28'],
+    [50, null, -2, '1900-03-01'],
+    [80, null, 300, null],
+  ]);
+});
+
+test('암호화된 XLSX는 미리보기에서 거부 문구를 보이고 가져오기를 막는다', async ({ page }) => {
+  await page.locator(IMPORT_INPUT).setInputFiles(path.join(FIXTURES, 'encrypted.xlsx'));
+  const dialog = page.locator('.jdr-dialog');
+  await expect(dialog.locator('.jdr-import__warning')).toContainText('암호가 걸린 XLSX');
+  await dialog.getByRole('button', { name: '가져오기' }).click();
+  await expect(dialog.locator('.jdr-dialog__error')).toContainText('암호가 걸린 XLSX');
+  await dialog.getByRole('button', { name: '취소' }).click();
+  expect((await hook(page).state())?.tables).toEqual([]);
+});

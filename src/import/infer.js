@@ -13,7 +13,13 @@ import { isEmpty, previewOf, validate } from '../db/values.js';
 
 /** @typedef {import('../db/values.js').LogicalType} LogicalType */
 /** @typedef {string | number | boolean | null} SourceValue 파서가 주는 값(D-09. XLSX 어댑터가 날짜를 문자열로 바꾼다) */
-/** @typedef {{ rowIndex: number, cells: SourceValue[] }} Row */
+/**
+ * 파서가 주는 행 하나. `errorCells`는 XLSX의 오류 셀(`#N/A` 등)이 있던 열 순번(값은 null로 온다).
+ * @typedef {object} Row
+ * @property {number} rowIndex
+ * @property {SourceValue[]} cells
+ * @property {number[]} [errorCells]
+ */
 
 /**
  * @typedef {object} Inferred
