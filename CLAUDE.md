@@ -28,9 +28,11 @@ npm run verify       # 산출물 검증: 외부 참조 0건, 크기 예산, CSP
 npm run test:e2e     # playwright (dist를 file://로 열어 검사)
 npm run fixture -- --rows 300000   # 벤치마크용 CSV 생성 (--db를 주면 SQLite DB 생성)
 npm run test:perf    # 성능 측정: 30만 행 DB 픽스처를 만들고 Playwright로 렌더·질의 시간 측정 (CI 밖에서 실행)
+npm run test:native  # 실제 rusqlite 엔진(core의 jdr-ipc-stdio)에 대해 엔진 적합성 테스트 (Step 11 이후, Rust 필요)
+npm run test:desktop # tauri-driver E2E (Step 11 이후. Linux: WebKitWebDriver + Xvfb, Windows: Edge Driver)
 npm run tauri:dev    # 데스크톱 개발 실행 (Step 11 이후)
 npm run tauri:build  # 데스크톱 설치본 빌드 (Step 11 이후)
-cargo test --manifest-path src-tauri/Cargo.toml   # 러스트 단위 테스트 (Step 11 이후)
+cargo test --manifest-path src-tauri/Cargo.toml --workspace   # 러스트 단위 테스트 (Step 11 이후. WebKitGTK 없는 환경은 `-p jdr-core`만)
 ```
 
 Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허용된다. 데스크톱 빌드는 Rust stable과 Tauri 2 CLI가 추가로 필요하다.
@@ -44,7 +46,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 | `src/db/*` | Worker에서 실행되는 코드. DOM, `window`, `document`에 접근하지 않는다. `engine-wasm.js`·`engine-native.js` 외의 모듈은 `engine.js` 인터페이스만 호출하고 `sqlite3` 객체나 타우리 invoke를 직접 부르지 않는다 |
 | `src/import/*`, `src/export/*` | Worker에서 실행. `DOMParser` 등 메인 스레드 전용 API 금지 |
 | `src/ui/*`, `src/app/*`, `src/io/*` | 메인 스레드. `sqlite3` 객체를 직접 호출하지 않고 `db/client.js`만 사용한다. 타우리 invoke는 `io/ipc-bridge.js`와 `io/filesystem.js`에서만 부른다 |
-| `src-tauri/` | 러스트 데스크톱 셸. 명령 함수는 `db.rs`·`save.rs`·`workcopy.rs`로 역할을 나누고, 오류는 `error.rs`의 `AppError`로만 돌려준다 |
+| `src-tauri/` | 러스트 데스크톱 셸. 엔진·저장·작업 사본 로직은 타우리에 의존하지 않는 `core/`(`jdr-core`)의 `db.rs`·`save.rs`·`workcopy.rs`에 두고, 앱 크레이트의 `commands.rs`는 그 함수를 `#[tauri::command]`로 감쌀 뿐이다. 오류는 `error.rs`의 `AppError`로만 돌려준다. 타우리 API(`tauri::`, 플러그인)는 앱 크레이트에서만 쓴다 |
 | `src/util/*` | 양쪽에서 쓰는 순수 함수만. 부수효과 금지 |
 | `vendor/` | 서드파티 고정 버전. 수정 금지. 파일마다 LICENSE와 `CHECKSUMS`의 SHA-256 동반 |
 | `build/` | 빌드·검증 스크립트. 런타임 코드 import 금지 |
@@ -116,7 +118,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 
 ### 5.8 의존성 정책
 
-- JS 런타임 서드파티는 공식 SQLite Wasm(`@sqlite.org/sqlite-wasm`)과 SheetJS CE 두 개뿐이다. 러스트 크레이트는 `tauri`(플러그인 dialog, fs, single-instance 포함), `rusqlite`(`bundled`), `serde`, `serde_json`으로 제한한다. 추가하려면 `DESIGN.md` D-12를 먼저 고친다.
+- JS 런타임 서드파티는 공식 SQLite Wasm(`@sqlite.org/sqlite-wasm`)과 SheetJS CE 두 개뿐이다. `@tauri-apps/api`도 런타임 의존이므로 쓰지 않고, `io/ipc-bridge.js`가 `window.__TAURI_INTERNALS__`를 직접 부른다. 러스트 크레이트는 `tauri`·`tauri-build`(플러그인 dialog, single-instance 포함), `rusqlite`(`bundled`), `serde`, `serde_json`으로 제한한다. 추가하려면 `DESIGN.md` D-12를 먼저 고친다.
 - `vendor/` 파일 갱신 시: 버전, 출처 URL, SHA-256, 라이선스를 `vendor/CHECKSUMS`와 PR 설명에 기록한다. `verify.mjs`가 체크섬을 검사한다.
 - 빌드 산출물에 `http://`, `https://`, CDN 참조가 들어가면 `verify`가 실패한다. 우회하지 않는다.
 
@@ -132,7 +134,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 
 - 순수 로직(파서, 타입 추론, 질의 빌더, 값 검증, 커맨드 do/undo, revision 판정)은 `node:test` 단위 테스트가 필수다. SQLite Wasm은 Node에서 동작하므로 DB를 실제로 만들어 검사한다(모킹 금지).
 - 커맨드는 "적용 → 되돌리기 → DB 덤프 동일" 대칭성 테스트를 반드시 가진다.
-- 엔진 구현은 `test/unit/db/engine-contract.test.js`의 적합성 테스트를 모두 통과해야 한다. wasm 엔진은 Node에서, 네이티브 엔진은 tauri-driver 환경에서 같은 파일을 실행한다.
+- 엔진 구현은 `test/unit/db/engine-contract.test.js`의 적합성 테스트를 모두 통과해야 한다. wasm 엔진은 `npm test`에서, 네이티브 엔진은 `npm run test:native`(Node `worker_threads` + `jdr-ipc-stdio`로 실제 rusqlite 엔진)에서 같은 파일을 실행한다.
 - 러스트는 `cargo test`로 저장 원자성(실패 주입 시 원본 무손상), `run_batch` 원자성, `interrupt`, 한글 경로를 검증한다.
 - 파서 테스트는 `test/fixtures/`의 바이트 픽스처를 사용한다. 특히 조각 경계(32 KB) 위에 따옴표 필드가 걸치는 케이스, BOM, EUC-KR, CRLF/LF 혼재.
 - E2E는 빌드된 `dist/jdrdatabase.html`을 `file://`로 연다. 소스를 직접 서빙해 테스트하지 않는다(단일 파일 산출물 자체가 검증 대상).
@@ -154,7 +156,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 - [ ] 설계 결정을 바꿨다면 `DESIGN.md`의 D-항목 갱신이 같은 PR에 포함
 - [ ] `dist/`는 커밋하지 않음(CI 아티팩트로만 배포). 릴리스 태그에서만 첨부
 - [ ] 모드 문자열 비교가 허용 위치 밖에 없음 (`grep -rn "'native'\|'wasm'\|'desktop'" src/` 결과가 `main.js`, `db/engine.js`, 엔진 구현 파일, 테스트에만 있음)
-- [ ] Step 11 이후: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` 통과. 브라우저·타우리 산출물이 CSP 태그 외 동일함을 `verify`가 확인
+- [ ] Step 11 이후: `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, `npm run test:native` 통과. 브라우저·타우리 산출물이 CSP 태그 외 동일함을 `verify`가 확인
 
 ### 7.2 리뷰 관점 (리뷰어, 우선순위 순)
 
