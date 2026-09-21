@@ -7,7 +7,7 @@
 import { expect, test } from '@playwright/test';
 import { stat } from 'node:fs/promises';
 import { PAGE_URL } from '../e2e/page-url.js';
-import { FIXTURE_PATH, FIXTURE_ROWS } from './fixture.js';
+import { FIXTURE_PATH, FIXTURE_ROWS, warmCache } from './fixture.js';
 import { budget, record } from './report.js';
 
 /** 8장 예산. */
@@ -36,6 +36,7 @@ function percentile(values, p) {
 
 test('30만 행 스크롤: 프레임 렌더 p95 16 ms 이하, 창 질의 최대 50 ms 이하', async ({ page }) => {
   const size = (await stat(FIXTURE_PATH)).size;
+  await warmCache(FIXTURE_PATH);
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.addInitScript(() => {
     const w = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window));

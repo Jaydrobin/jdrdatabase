@@ -12,6 +12,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { generate, generateDb } from '../../scripts/gen-fixture.mjs';
 import { PAGE_URL } from '../e2e/page-url.js';
+import { warmCache } from './fixture.js';
 import { jsHeapAfterGc, rendererRss } from './process-memory.js';
 import { record } from './report.js';
 
@@ -57,6 +58,8 @@ test('열기 → 가져오기 → 저장 → 새로 만들기 반복: JS 힙·RS
   await page.goto(PAGE_URL);
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
 
+  await warmCache(DB_PATH);
+  await warmCache(CSV_PATH);
   /** @type {number[]} */
   const heap = [];
   /** @type {number[]} */

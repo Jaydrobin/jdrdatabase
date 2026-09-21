@@ -9,6 +9,7 @@ import path from 'node:path';
 import XLSX from '../../vendor/xlsx.full.min.js';
 import { makeRandom } from '../../scripts/gen-fixture.mjs';
 import { PAGE_URL } from '../e2e/page-url.js';
+import { warmCache } from './fixture.js';
 import { budget, record } from './report.js';
 
 const ROWS = Number(process.env.JDR_PERF_XLSX_ROWS ?? 50_000);
@@ -73,6 +74,7 @@ test('5만 행 xlsx 가져오기: 대화상자 열기부터 보고서까지 20�
   await page.goto(PAGE_URL);
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
   const { size } = await stat(XLSX_PATH);
+  await warmCache(XLSX_PATH);
 
   const previewStarted = Date.now();
   await page.locator('input.jdr-import-input').setInputFiles(XLSX_PATH);

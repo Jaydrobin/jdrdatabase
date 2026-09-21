@@ -7,7 +7,7 @@
 import { expect, test } from '@playwright/test';
 import { stat } from 'node:fs/promises';
 import { PAGE_URL } from '../e2e/page-url.js';
-import { FIXTURE_PATH, FIXTURE_ROWS } from './fixture.js';
+import { FIXTURE_PATH, FIXTURE_ROWS, warmCache } from './fixture.js';
 import { peakRssDuring, rendererRss } from './process-memory.js';
 import { budget, record } from './report.js';
 
@@ -57,6 +57,7 @@ test('30만 행: 셀 편집 30 ms 이하, 스냅샷 저장 5초 이하, 저장 �
 }) => {
   test.setTimeout(900_000);
   const size = (await stat(FIXTURE_PATH)).size;
+  await warmCache(FIXTURE_PATH);
   await hideFsa(page);
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto(PAGE_URL);

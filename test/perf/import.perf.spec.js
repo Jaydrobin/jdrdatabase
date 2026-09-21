@@ -9,7 +9,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { generate } from '../../scripts/gen-fixture.mjs';
 import { PAGE_URL } from '../e2e/page-url.js';
-import { FIXTURE_ROWS } from './fixture.js';
+import { FIXTURE_ROWS, warmCache } from './fixture.js';
 import { budget, record } from './report.js';
 
 const CSV_PATH = path.resolve(`test/fixtures/generated/import-${FIXTURE_ROWS}.csv`);
@@ -48,6 +48,7 @@ test('30만 행 CSV 가져오기: 대화상자 열기부터 보고서까지 60�
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
   await expect(page.locator('.jdr-statusbar__item').nth(1)).toHaveText('Worker 모드');
   const { size } = await stat(CSV_PATH);
+  await warmCache(CSV_PATH);
 
   const previewStarted = Date.now();
   await page.locator('input.jdr-import-input').setInputFiles(CSV_PATH);
