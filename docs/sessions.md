@@ -30,7 +30,7 @@ grep -n 미확인 docs/sessions.md
 | F 점검 후속 | 간헐 실패 E2E 원인 규명과 수정 | 완료 |
 | G | 9 (내보내기·백업·압축·클라우드 안내) | 완료 |
 | G 점검 | 세션 G 산출물 코드 점검과 수정 | 완료 |
-| H | 10 (성능·하드닝·접근성) | 대기 |
+| H | 10 (성능·하드닝·접근성) | 완료 |
 | I | 11 (타우리 셸·네이티브 엔진) | 대기 |
 
 ## 기록
@@ -1105,3 +1105,80 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - 저장 중에 파일 열기가 겹치는 경로(위 "고치지 않은 것")의 실제 결과.
 - `exportXlsx`의 여분 복사를 없앴을 때의 메모리 차이(세션 H에서 측정과 함께).
 - 세션 G의 미확인 목록(30만 행 내보내기 시간·메모리, FSA 경로의 내보내기·백업 복원·자동 저장, 한글 파일 이름의 `<a download>`, 내보내기 취소 버튼 클릭, Firefox·Safari의 `CompressionStream`, 외부 테이블 BLOB 내보내기, 내보내기·설정 대화상자 접근성)과 세션 F 점검·후속, 세션 E 점검·D 점검에서 이어진 항목은 그대로 남습니다.
+
+### 세션 H (Step 10) — 2026-09-21
+
+커밋: `444f1e2` docs(design) 착수 전 확정 → `78c0e06` fix(app) 오류 주입·Worker 종료 잠금·E_MEM → `955ed9d` fix(a11y) → `a227225` perf(export) XLSX 여분 복사 제거 → `77793ca` test(conventions) → `a576132` perf(db) NOCOPY 스냅샷 → `983e012` test(perf) 성능 자동화 → `f665505` test(e2e) http://localhost → `7679b38` ci(release) → `567c2b1` docs(readme) → `f0bed80` fix(test) → 이 기록.
+
+시작 상태: 원격이 강제 갱신되어 있어 로컬 브랜치를 원격 `0fe52ab`로 맞춘 뒤 `npm run check`(335개)가 초록임을 확인하고 시작했습니다. 세션 G 점검의 미확인 항목은 아래 "미확인"에 이어받았습니다.
+
+**설계 변경 (코드보다 먼저 DESIGN.md v0.10에 반영, 리뷰어 확인 필요)**
+
+- **성능 판정을 둘로 나눕니다.** 로컬(`npm run test:perf`)은 8장의 절대 예산으로, CI의 `perf` 잡(`JDR_PERF_COMPARE=1`)은 같은 러너에서 잰 기준선 `test/perf/perf-baseline.json` 대비 30% 회귀를 실패로 봅니다(CLAUDE.md 6장의 기준선 경로를 `test/e2e`에서 `test/perf`로 옮김). 각 spec은 `report.js`의 `record()`로 측정값을 남기고 `global-teardown.js`가 요약과 비교를 합니다. 8장 표에 측정 방법(앱 시작 마크, 스냅샷 왕복, 렌더러 RSS)과 CSV 내보내기 항목(예산 없음)을 더했습니다.
+- **Worker가 기동 뒤에 죽으면 앱을 잠급니다(7장 `E_ENV_NO_WORKER`).** client는 대기 중인 호출뿐 아니라 그 뒤의 모든 호출을 즉시 거부하고(`onFatal`), main.js는 저널 상태(복구 가능 / 정지로 잃음 / IDB 없음 / 변경 없음)를 정확히 알립니다. wasm 폴백은 없습니다.
+- **`SQLITE_NOMEM`은 `E_MEM`입니다(7장).** 직렬화의 NOMEM은 메시지로 판별하고, 롤백 실패가 원래 코드를 가리지 않습니다.
+- **저장 스냅샷은 `SQLITE_SERIALIZE_NOCOPY`(D-02).** deserialize로 연 DB는 wasm 힙의 파일 바이트를 JS로 한 번만 복사합니다. 측정 중 발견해 설계에 반영했습니다(아래).
+- 3.1에 `test/unit/conventions.test.js`, `test/e2e/page-url.js`·`a11y.spec.js`·`fault.spec.js`, `test/perf/report.js`·`global-teardown.js`·`perf-baseline.json`·`process-memory.js`·`app.perf.spec.js`·`memory.perf.spec.js`, `scripts/serve-dist.mjs`, `.github/workflows/release.yml`.
+
+**Step 10 완료 기준**
+
+- [x] 8장 예산 전 항목 통과(`npm run test:perf`, 7개 spec 전부 초록. 이 환경: 4코어, Chromium 141 headless, 30만 행 × 20열 314 MB 픽스처):
+
+  | 항목 | 예산 | 실측 |
+  |---|---|---|
+  | 앱 시작(빈 DB) | 1.5초 | 348 ms(3회 중앙값. 첫 실행 438 ms) |
+  | 300 MB 파일 열기 | 5초 | 1,891 ms |
+  | 스크롤 프레임 렌더 | 16 ms | p95 1.1 ms, 최대 2.7 ms(211 프레임) |
+  | 창 질의(200행) | 50 ms | 최대 17.4 ms(51회) |
+  | 셀 편집 반영 | 30 ms | 최대 1.6 ms(5회) |
+  | 정렬 변경(인덱스 없음) | 1초 | 정수 91 ms, 텍스트 99 ms |
+  | trigram 검색 | 200 ms | 59 ms(한글 30 ms). 인덱스 생성 39.5초(기록만) |
+  | LIKE 폴백(Step 6 기준) | 1초 | 825 ms, 짧은 검색어(`멜`) 998 ms — **예산 경계** |
+  | 300 MB 저장 | 5초 + 디스크 | `db.snapshot` 왕복 242 ms, 도구 모음 저장 → 다운로드 1,255 ms |
+  | 150 MB CSV 가져오기 | 60초 | 209 MB 30만 행 18.0초(미리보기 135 ms). XLSX 5만 행 5.9초 |
+  | 산출물 크기 | 6 MB | 3,744,207 bytes |
+  | 최대 힙(300 MB DB 저장 시점) | 1.2 GB | 렌더러 RSS 최대 1,150,251,008 bytes(1.07 GiB. 대기 173 MB, 열린 뒤 841 MB) |
+  | 30만 행 CSV 내보내기 | 없음 | 14.9초, 306 MB |
+
+  **NOCOPY 전에는 저장 시점 RSS가 1,468,014,592 bytes(1.37 GiB)로 예산을 넘었고 스냅샷이 2,902 ms였습니다.** `sqlite3_js_db_export`가 wasm 안에 314 MB 사본을 만든 뒤 JS로 복사하고, wasm 메모리는 줄어들지 않아 그대로 최대값에 남았습니다. `a576132`가 memdb의 NOCOPY 포인터에서 바로 복사하도록 바꾼 뒤 1.15 GB·242 ms입니다(단위: 왕복·쓰기 뒤 스냅샷·반복 스냅샷 동일).
+- [x] 메모리 프로파일(`memory.perf.spec.js`): 2만 행 DB 열기 → 5천 행 CSV 가져오기 → 저장 → 새로 만들기 6사이클. GC 뒤 메인 JS 힙 7.6 → 7.8 MB(사이클 2→6 +0.2 MB, 상한 10 MB), 렌더러 RSS 299 → 295 MB(−3.5 MB, 상한 15%). 다운로드 Blob URL이 10초 뒤에 해제되므로 그 뒤에 잽니다(그 전에 재면 +65 MB로 누수처럼 보였음).
+- [x] 오류 주입 4종(각 재현 테스트):
+  - Worker 강제 종료: E2E `fault.spec.js`(Worker 인스턴스에 `ErrorEvent` + `terminate()` → 잠금 화면·저널 안내 → 저장 클릭이 5초 안에 `E_ENV_NO_WORKER`로 끝남 → 새로 고침 → 저널 복구 → 테이블 복원. 변경 없는 경우의 문구도) + `rpc.test.js`(죽은 뒤 호출 즉시 거부, `onFatal` 1회, 늦은 구독 즉시 알림). **고친 것**: 죽은 Worker에 보낸 새 요청이 영원히 매달리던 문제.
+  - IDB 열기 실패: E2E(`indexedDB` getter가 던짐 → 상태바 안내 → 새 테이블·다운로드 저장, 페이지 오류 0).
+  - 파일 쓰기 중 예외: E2E(가짜 FSA 핸들의 `write()`가 던짐 → `E_FILE_WRITE` 토스트에 "기존 파일은 그대로", dirty·저널 유지 → 다음 저장이 성공하고 revision 2) + `store.test.js`(`E_FILE_WRITE`·`E_MEM` 주입).
+  - wasm 메모리 한계: `engine-wasm.test.js`가 10 MB 블롭으로 약 2.09 GB까지 채워 실측(약 6초). **고친 것**: 삽입 실패가 `E_DB_QUERY "rollback failed after error"`로, 직렬화 실패(`SQLITE_NOMEM`, 결과 코드 1)가 일반 질의 오류로 가려지던 문제. 지금은 둘 다 `E_MEM`이고 롤백 뒤 DB는 계속 쓸 수 있습니다.
+- [x] Playwright axe 검사 critical 0건(serious도 0건): `a11y.spec.js`가 빈 앱, 테이블 만들기·열 추가·정렬·필터·내보내기·설정·가져오기(미리보기·결과) 대화상자, 그리드, 장문·인라인 편집기에서 WCAG 2.1 A·AA 규칙으로 검사. 실행 출력에 moderate·minor 항목도 찍히지 않았습니다. **고친 것**(처음 실측: critical 3종, serious 2종, moderate 1, minor 2): 인라인 편집기가 `role="grid"` 안에 있어 필수 자식 규칙을 깨뜨림(오버레이로 이동, 편집기 위 휠은 스크롤러로 전달), 가져오기 열 매핑의 입력·선택과 인라인 편집 입력에 이름 없음, 사이드바 listbox/option 안의 버튼(nested-interactive), dirty 표시의 잘못된 `aria-label`(깨끗할 때도 읽힘), 도구 모음 `<header role="toolbar">`가 랜드마크를 잃음, 사이드바 머리글의 `hidden`이 `display: flex`에 덮임(열 없는 상태에서 "…의 열" 머리글이 보이던 실제 버그). 그리드 ARIA(`aria-rowcount` 21·`aria-colcount` 5·활성 셀 `aria-selected`·`aria-rowindex/colindex`), 키보드 포커스 외곽선(2 px), 대화상자 포커스 트랩(Tab 순환·Shift+Tab·Esc 뒤 여는 요소로 복귀)은 같은 spec이 직접 확인.
+- [x] `dist/jdrdatabase.html` 6 MB 이하: 3,744,207 bytes.
+- 보안 점검: `conventions.test.js`가 `innerHTML`·`insertAdjacentHTML`·`document.write` 0건, 모드 문자열 허용 위치, Worker 쪽 SQL 템플릿 리터럴의 값 삽입 없음, 오류 코드 ↔ i18n, 6장 표 ↔ OpMap(문서에만 있는 op는 `db.save`뿐)을 고정. CSP는 `verify`, CSV 수식 주입 옵션은 세션 G의 단위·E2E 그대로.
+- 지원 매트릭스: Chromium 141 `http://localhost`에서 E2E 65개 전부 통과(`JDR_E2E_HTTP=1`). Firefox·WebKit은 아래 미확인.
+- 세션 G 점검이 남긴 `exportXlsx` 여분 복사 제거(`a227225`).
+
+**검증 결과**
+
+- [x] `npm run check`: eslint 0건, prettier 통과, tsc 0오류, 단위 테스트 **344개 통과**(세션 G 점검 335 + `conventions.test.js` 5 + `engine-wasm.test.js` 2 + `store.test.js` 2). `rpc.test.js`의 Worker 사망 테스트는 확장.
+- [x] `npm run build && npm run verify`: `verify OK`, 외부 참조 0건(허용 vendor URL 리터럴 160건), vendor 체크섬 6개 일치, 두 변형 CSP 외 동일.
+- [x] `npm run test:e2e`: Chromium `file://`에서 **65개 통과**(57 + `fault.spec.js` 4 + `a11y.spec.js` 4). `JDR_E2E_HTTP=1`로도 65개 통과.
+- [x] `npm run test:perf`: 7개 spec 통과(위 표). 로컬 요약은 `test-results/perf/summary.json`.
+- [x] 7.1 grep은 `conventions.test.js`가 대신합니다(0건). 새 오류 코드·RPC op 없음. i18n 키 6개 추가(`lock.engineStopped*`), ko/en 동일.
+- [x] `DESIGN.md` v0.10 갱신이 `444f1e2`(착수 전)와 `a576132`(NOCOPY)에 포함. `CLAUDE.md` 6장 기준선 경로 갱신.
+
+**산출물 크기 (`verify` 출력)**
+
+- `dist/jdrdatabase.html` 3,744,207 bytes (3.57 MiB / 예산 6 MiB). 세션 G 점검(3,740,050) 대비 **+4,157 bytes**(잠금 문구 6개, client 죽음 처리, NOCOPY 내보내기, 그리드 오버레이, 접근성 속성).
+- `dist/tauri/index.html` 3,744,015 bytes.
+
+**점검했지만 고치지 않은 것 (판단 근거와 함께)**
+
+- **LIKE 짧은 검색어가 998 ms로 예산(1초) 경계입니다.** 두 글자 `멜`은 trigram이 안 되어 LIKE 폴백이 30만 행 × 텍스트·장문 열을 훑습니다. 세션 E가 정한 대로 인덱스를 켜면 200 ms 아래이고(같은 spec), 8장 표의 항목은 trigram이라 예산 위반은 아닙니다. CI 기준선에서는 30% 여유가 있습니다.
+- **열린 뒤 RSS 841 MB는 파일 버퍼 사본 때문입니다.** 메인이 읽은 314 MB를 transfer로 Worker에 넘기고 deserialize가 wasm 힙에 다시 복사하므로, GC 전까지 사본이 둘입니다. `File`을 Worker로 넘겨 조각으로 wasm에 직접 넣으면 300 MB를 더 줄일 수 있지만 `db.open`의 인자 형식이 바뀌어(6장) 이번 세션에 넣지 않았습니다. 예산 안이라 R2에 메모만 남깁니다.
+- **Worker의 JS 힙은 재지 않습니다.** 전용 Worker에는 Playwright CDP 세션을 붙일 수 없어 RSS(프로세스 전체)로만 봅니다. sql.js 쪽 statement 캐시 누수는 RSS가 평평한 것으로 간접 확인했습니다.
+- **가져오기 대화상자의 ARIA 이름에 열 머리글(사용자 데이터)을 씁니다.** 속성 값이지 마크업이 아니므로 5.5의 `textContent` 규칙과 어긋나지 않습니다.
+- **CI perf 잡은 기준선이 빌 때 회귀를 판정하지 않습니다.** 첫 실행의 summary를 옮겨 적어야 비교가 시작됩니다(아래 미확인).
+
+**미확인 (후속 세션에서 이어받음)**
+
+- **`test/perf/perf-baseline.json`이 비어 있습니다.** GitHub `ubuntu-latest` 러너의 `perf` 잡 첫 실행 로그(또는 `perf-results` 아티팩트의 `summary.json`)를 `metrics`에 옮겨 적고 `environment`·`recordedAt`을 채워야 30% 회귀 판정이 켜집니다. 러너에서 절대 예산(특히 렌더 16 ms·창 질의 50 ms·LIKE 1초)이 어떻게 나오는지도 미확인입니다(CI에서는 예산 초과를 기록만 함).
+- 실제 브라우저에서의 Worker 사망(탭 OOM은 렌더러 전체를 죽이므로 `error` 이벤트 경로와 다를 수 있음), 실제 FSA 핸들의 쓰기 실패(디스크 부족·권한 회수), 두 경우의 문구.
+- Firefox·Safari(WebKit): Playwright 브라우저 다운로드가 이 환경의 송신 정책(403)에 막혀 설치하지 못했습니다. `docs/support-matrix.md`에 손으로 확인하는 절차를 적었습니다. `https://` 원점도 미확인.
+- 스크린 리더(NVDA·VoiceOver)의 실제 읽기(axe는 정적 검사), 실제 한글 IME, 한글 파일 이름의 `<a download>`, 저장 중 파일 열기(세션 G 점검), SheetJS 0.20.3 갱신(CVE 2건), 실제 파일 선택기·자동 저장 타이머·백업 복원의 FSA 경로 등 세션 G 점검·F 점검·E 점검·D 점검에서 이어진 항목은 그대로 남습니다.
+- 30만 행 내보내기의 메모리(시간은 14.9초로 쟀지만 RSS 최대값은 저장 시점만 쟀음), XLSX 내보내기 30만 행(행 상한 경고 문구 포함).
