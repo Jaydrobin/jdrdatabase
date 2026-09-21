@@ -381,6 +381,30 @@ test('run: 정책 null은 NULL로 넣고 보고, abort는 E_VALUE_INVALID로 롤
   assert.equal(tables.list(engine).length, 2, '강등 재시도가 테이블을 두 번 만들지 않는다');
 });
 
+test('run: 상한 길이 헤더가 겹쳐도 새 테이블 가져오기가 성공한다', async () => {
+  const engine = await setup();
+  const long = '가'.repeat(210);
+  const { headers } = await preview(csv(`${long},${long}\n1,2\n`), { format: 'csv' });
+  const { report } = await run({
+    engine,
+    file: csv(`${long},${long}\n1,2\n`),
+    options: { format: 'csv' },
+    mapping: {
+      columns: headers.map((name, source) => ({
+        source,
+        name,
+        type: /** @type {const} */ ('text'),
+      })),
+    },
+    target: { kind: 'new', name: '긴헤더' },
+  });
+  assert.equal(report.inserted, 1);
+  const table = tables.requireTable(engine, report.tableId);
+  assert.equal(table.columns.filter((c) => c.deletedAt === null).length, 2);
+  for (const col of table.columns)
+    assert.ok(col.name.length <= 200, `열 이름 ${col.name.length}자`);
+});
+
 test('run: 기존 테이블에 추가 — 이름 자동 대응은 UI 몫이고 Worker는 columnId로 넣는다, select 항목 자동 추가', async () => {
   const engine = await setup();
   const { tableId } = await tables.create(engine, { name: '고객' });

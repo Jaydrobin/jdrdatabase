@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { MAX_NAME_LENGTH } from '../../../src/db/tables.js';
 import { column, columnName, LONGTEXT_THRESHOLD, sample } from '../../../src/import/infer.js';
 
 test('column: 우선순위 boolean → integer → real → date → datetime → text', () => {
@@ -74,4 +75,20 @@ test('columnName: 비어 있으면 열N, 겹치면 (2)·(3), 앞뒤 공백 제�
   assert.equal(columnName(42, 5, taken), '42');
   assert.equal(columnName('x'.repeat(300), 6, taken).length, 200);
   assert.deepEqual([...taken].length, 7);
+});
+
+test('columnName: 상한 길이 헤더가 겹쳐도 접미사까지 상한 안에 든다', () => {
+  // 자동으로 만든 이름은 그대로 `addColumn`에 간다. 접미사를 덧붙여 상한을 넘기면
+  // 가져오기 전체가 `E_NAME_INVALID`로 실패한다(사용자가 고칠 수 없는 이름이다).
+  const taken = new Set();
+  const long = '가'.repeat(210);
+  const first = columnName(long, 0, taken);
+  const second = columnName(long, 1, taken);
+  const third = columnName(long, 2, taken);
+  assert.equal(first.length, MAX_NAME_LENGTH);
+  assert.ok(second.length <= MAX_NAME_LENGTH, `두 번째 이름이 ${second.length}자`);
+  assert.ok(third.length <= MAX_NAME_LENGTH, `세 번째 이름이 ${third.length}자`);
+  assert.ok(second.endsWith(' (2)'));
+  assert.ok(third.endsWith(' (3)'));
+  assert.equal(new Set([first, second, third]).size, 3, '이름은 서로 다르다');
 });

@@ -71,7 +71,12 @@ export function columnName(raw, index, taken) {
   if (!base) base = t('import.columnDefault', { n: index + 1 });
   if (base.length > MAX_NAME_LENGTH) base = base.slice(0, MAX_NAME_LENGTH).trim();
   let name = base;
-  for (let k = 2; taken.has(name); k += 1) name = `${base} (${k})`;
+  for (let k = 2; taken.has(name); k += 1) {
+    // 접미사까지 상한 안에 들어야 한다. 자동으로 만든 이름은 그대로 `addColumn`에 가므로
+    // 여기서 넘기면 가져오기 전체가 `E_NAME_INVALID`로 실패한다.
+    const suffix = ` (${k})`;
+    name = `${base.slice(0, MAX_NAME_LENGTH - suffix.length).trim()}${suffix}`;
+  }
   taken.add(name);
   return name;
 }
