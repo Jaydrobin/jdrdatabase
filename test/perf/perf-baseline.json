@@ -1,5 +1,5 @@
 {
-  "environment": "GitHub Actions ubuntu-latest, Chromium 141 (Playwright 1.56.0), ci.yml perf 잡 run 35613225320 (커밋 f540c27)",
+  "environment": "GitHub Actions ubuntu-latest, Chromium 141 (Playwright 1.56.0), ci.yml perf 잡 run 35613225320 (커밋 f540c27). likeShortMs는 측정 방식이 바뀌어(3개 검색어 중앙값) 다음 실행에서 채운다",
   "recordedAt": "2026-09-21T14:40:20Z",
   "metrics": {
     "app-300k": {
@@ -32,7 +32,6 @@
     },
     "search": {
       "likeMs": 731,
-      "likeShortMs": 716.3,
       "indexBuildMs": 34769,
       "ftsMs": 50.8,
       "ftsKoreanMs": 23.6,

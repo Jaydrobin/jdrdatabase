@@ -21,6 +21,15 @@ const SORT_BUDGET_MS = 1_000;
  */
 
 /**
+ * @param {number[]} values
+ * @returns {number}
+ */
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor((sorted.length - 1) / 2)] ?? 0;
+}
+
+/**
  * @param {import('@playwright/test').Page} page
  * @param {string} op
  * @param {unknown} args
@@ -70,7 +79,12 @@ test('30만 행 검색: LIKE 1초 이하, 검색 인덱스 뒤 trigram 200 ms �
 
   // 1) 인덱스 없음: LIKE 폴백. 검색어는 텍스트·장문 열에 고루 있는 단어.
   const like = await countSearch('grape 7');
-  const likeShort = await countSearch('멜');
+  // 짧은 검색어(trigram 불가)의 LIKE 폴백은 한 번 재면 700~1,000 ms 사이에서 흔들린다(CI 실측 713·716·968).
+  // 행 수 캐시가 같은 검색어를 다시 재지 않으므로 서로 다른 무일치 두 글자 검색어 3개의 중앙값으로 잰다.
+  /** @type {Array<{ count: number, elapsedMs: number }>} */
+  const likeShorts = [];
+  for (const term of ['멜', '팥', '쑥']) likeShorts.push(await countSearch(term));
+  const likeShortMs = median(likeShorts.map((r) => r.elapsedMs));
 
   // 2) 인덱스 생성(판정 없이 기록).
   const indexStarted = Date.now();
@@ -110,7 +124,11 @@ test('30만 행 검색: LIKE 1초 이하, 검색 인덱스 뒤 trigram 200 ms �
       {
         rows: FIXTURE_ROWS,
         like: { count: like.count, ms: +like.elapsedMs.toFixed(1) },
-        likeShort: { count: likeShort.count, ms: +likeShort.elapsedMs.toFixed(1) },
+        likeShort: {
+          counts: likeShorts.map((r) => r.count),
+          samplesMs: likeShorts.map((r) => +r.elapsedMs.toFixed(1)),
+          ms: +likeShortMs.toFixed(1),
+        },
         indexBuildMs: indexMs,
         fts: { count: fts.count, ms: +fts.elapsedMs.toFixed(1) },
         ftsKorean: { count: ftsKorean.count, ms: +ftsKorean.elapsedMs.toFixed(1) },
@@ -130,7 +148,7 @@ test('30만 행 검색: LIKE 1초 이하, 검색 인덱스 뒤 trigram 200 ms �
     'search',
     {
       likeMs: +like.elapsedMs.toFixed(1),
-      likeShortMs: +likeShort.elapsedMs.toFixed(1),
+      likeShortMs: +likeShortMs.toFixed(1),
       indexBuildMs: indexMs,
       ftsMs: +fts.elapsedMs.toFixed(1),
       ftsKoreanMs: +ftsKorean.elapsedMs.toFixed(1),
@@ -141,7 +159,7 @@ test('30만 행 검색: LIKE 1초 이하, 검색 인덱스 뒤 trigram 200 ms �
     { rows: FIXTURE_ROWS, likeCount: like.count, ftsCount: fts.count },
   );
   budget(like.elapsedMs, LIKE_BUDGET_MS, 'LIKE 검색(ms)');
-  budget(likeShort.elapsedMs, LIKE_BUDGET_MS, 'LIKE 짧은 검색어(ms)');
+  budget(likeShortMs, LIKE_BUDGET_MS, 'LIKE 짧은 검색어 중앙값(ms)');
   budget(fts.elapsedMs, FTS_BUDGET_MS, 'trigram 검색(ms)');
   budget(ftsKorean.elapsedMs, FTS_BUDGET_MS, 'trigram 한글 검색(ms)');
   budget(sortInt.elapsedMs, SORT_BUDGET_MS, '정렬 변경(정수) 첫 창(ms)');
