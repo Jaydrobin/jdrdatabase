@@ -411,3 +411,17 @@ test('정렬 대상 열을 삭제하면 뷰에서 그 정렬 항목이 빠지고
   await expect(page.locator('.jdr-grid__hsort')).toHaveCount(0);
   await expect(cell(page, 0, 0)).toHaveText('이름1');
 });
+
+test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
+  const { table, name } = await seed(page);
+  // 그리드가 다시 마운트되며 편집기를 닫는 경로다. 닫히기 전에 blur 확정이 먼저 일어나야
+  // Step 5의 "다른 곳 클릭 → 확정 시도"가 지켜진다(입력이 조용히 사라지지 않는다).
+  await cell(page, 0, 0).dblclick();
+  await expect(page.locator('.jdr-editor input')).toBeVisible();
+  await page.locator('.jdr-editor input').fill('머리글클릭확정');
+  await header(page, '나이').click();
+  await expect(header(page, '나이')).toHaveAttribute('aria-sort', 'ascending');
+  await expect(page.locator('.jdr-editor')).toBeHidden();
+  const stored = await hook(page).query(`SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`);
+  expect(stored.rows[0]?.[0]).toBe('머리글클릭확정');
+});
