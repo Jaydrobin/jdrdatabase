@@ -57,7 +57,8 @@ import { formatInteger } from './util/format.js';
 function mount(root) {
   root.textContent = '';
 
-  const toolbarHost = document.createElement('div');
+  // 문서 최상위의 <header>는 banner 랜드마크다(접근성: 모든 내용이 랜드마크 안에 있어야 한다).
+  const toolbarHost = document.createElement('header');
   toolbarHost.className = 'jdr-app__toolbar';
 
   const main = document.createElement('main');

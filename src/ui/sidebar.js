@@ -63,9 +63,10 @@ export function mountSidebar(parent, deps) {
   const addTable = makeButton(t('sidebar.addTable'), 'table-create');
   tablesHeader.append(tablesTitle, addTable);
 
+  // 항목마다 선택·이름 바꾸기·삭제 버튼이 있으므로 listbox/option(안에 상호작용 요소를 둘 수 없다)이 아니라
+  // 보통 목록이다. 고른 테이블은 선택 버튼의 aria-current로 드러낸다.
   const tableList = document.createElement('ul');
   tableList.className = 'jdr-sidebar__list';
-  tableList.setAttribute('role', 'listbox');
   tableList.setAttribute('aria-label', t('sidebar.tables'));
 
   const columnsHeader = document.createElement('div');
@@ -157,11 +158,11 @@ export function mountSidebar(parent, deps) {
     for (const table of state.tables) {
       const li = document.createElement('li');
       li.className = 'jdr-sidebar__table';
-      li.setAttribute('role', 'option');
-      li.setAttribute('aria-selected', String(table.id === state.currentTableId));
-      if (table.id === state.currentTableId) li.classList.add('jdr-sidebar__table--active');
+      const current = table.id === state.currentTableId;
+      if (current) li.classList.add('jdr-sidebar__table--active');
       const select = makeButton(table.name, 'table-select', { tableId: table.id });
       select.className = 'jdr-sidebar__table-name';
+      if (current) select.setAttribute('aria-current', 'true');
       if (!table.strict) {
         const badge = document.createElement('span');
         badge.className = 'jdr-sidebar__badge';

@@ -214,9 +214,9 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {() => ColumnInfo[]} columns 지금 그리는 열(살아 있고 숨기지 않은 열, 표시 순서)
  * @property {() => number} rowCount
  * @property {(row: number, col: number) => CellInfo | null} cellInfo 캐시에 있는 셀의 값·행 id. 아직 읽지 않았으면 null
- * @property {(row: number, col: number) => { left: number, top: number, width: number, height: number }} cellRect 캔버스 기준 셀 위치
+ * @property {(row: number, col: number) => { left: number, top: number, width: number, height: number }} cellRect 편집 오버레이(머리글 아래 보이는 영역) 기준 셀 위치
  * @property {(rowId: number, colId: string, value: SqlValue) => void} patchCell 캐시의 셀 값을 고쳐 다시 그린다(편집 확정 직후)
- * @property {HTMLElement} editorHost 인라인 편집기를 붙이는 요소(캔버스)
+ * @property {HTMLElement} editorHost 인라인 편집기를 붙이는 요소(스크롤러 밖의 오버레이. 접근성 트리의 grid 구조를 지킨다)
  * @property {() => void} focus 스크롤 영역(role=grid)에 포커스
  */
 
@@ -315,6 +315,13 @@ export function createGrid(deps) {
   header.setAttribute('aria-rowindex', '1');
   const canvas = div('jdr-grid__canvas', 'rowgroup');
   scroller.append(header, canvas);
+  // 인라인 편집기는 role="grid" 바깥의 오버레이에 둔다. grid의 자식은 row·rowgroup뿐이어야 하는데(ARIA 필수
+  // 자식), 편집기(textbox)를 캔버스 안에 두면 보조 기술이 그리드 구조를 잃는다(axe aria-required-children).
+  // 오버레이는 머리글 아래(`HEADER_HEIGHT`, grid.css의 top과 같은 값)를 덮고 넘친 부분을 잘라, 편집기가
+  // 스크롤러 안에 있을 때와 같은 클리핑을 준다. 포인터는 통과시키고(pointer-events: none) 편집기만 받는다.
+  const viewport = div('jdr-grid__viewport');
+  const overlay = div('jdr-grid__overlay');
+  viewport.append(scroller, overlay);
   // 필터·검색 결과가 0건일 때의 빈 상태(Step 6 예외 처리). 정렬만 있는 빈 테이블에는 보이지 않는다.
   const noMatch = div('jdr-grid__nomatch');
   noMatch.setAttribute('role', 'status');
@@ -327,7 +334,7 @@ export function createGrid(deps) {
   clearFiltersButton.textContent = t('grid.clearFilters');
   noMatch.append(noMatchText, clearFiltersButton);
   noMatch.hidden = true;
-  el.append(bar, scroller, noMatch);
+  el.append(bar, viewport, noMatch);
 
   /** @type {TableInfo | null} */
   let table = null;
@@ -1106,11 +1113,21 @@ export function createGrid(deps) {
   const onRowDeleteClick = () => hooks?.onRowDelete(selection.getRange());
 
   /**
+   * 편집기 위에서 굴린 휠은 오버레이(스크롤러 밖)에 떨어진다. 스크롤러에 넘겨 편집 중에도 스크롤되게 한다.
+   * @param {WheelEvent} ev
+   */
+  function onOverlayWheel(ev) {
+    scroller.scrollTop += ev.deltaY;
+    scroller.scrollLeft += ev.deltaX;
+  }
+
+  /**
    * 리스너는 마운트에서 한 번에 걸고 언마운트에서 한 번에 뗀다(CLAUDE.md 5.5). 등록을 `createGrid`에
    * 두면 `unmount()` → `mount()`를 거친 그리드에서 스크롤 외의 상호작용이 모두 죽는다.
    */
   function addListeners() {
     scroller.addEventListener('scroll', onScroll, { passive: true });
+    overlay.addEventListener('wheel', onOverlayWheel, { passive: true });
     frozenSelect.addEventListener('change', onFrozenChange);
     header.addEventListener('pointerdown', onHeaderPointerDown);
     header.addEventListener('pointermove', onHeaderPointerMove);
@@ -1131,6 +1148,7 @@ export function createGrid(deps) {
 
   function removeListeners() {
     scroller.removeEventListener('scroll', onScroll);
+    overlay.removeEventListener('wheel', onOverlayWheel);
     frozenSelect.removeEventListener('change', onFrozenChange);
     header.removeEventListener('pointerdown', onHeaderPointerDown);
     header.removeEventListener('pointermove', onHeaderPointerMove);
@@ -1321,12 +1339,14 @@ export function createGrid(deps) {
     cellRect(row, col) {
       const c = clamp(col, 0, Math.max(0, columns.length - 1));
       const scrollLeft = scroller.scrollLeft;
-      const range = computeRange(scroller.scrollTop, viewportHeight, layout());
+      const scrollTop = scroller.scrollTop;
+      const range = computeRange(scrollTop, viewportHeight, layout());
       const top = range.offsetY + (row - range.first) * ROW_HEIGHT;
       const isFrozen = c < frozen;
+      // 오버레이 기준: 캔버스 좌표에서 스크롤만큼 뺀다. 고정 열은 스크롤과 무관하게 제자리다.
       return {
-        left: (lefts[c] ?? 0) + (isFrozen ? scrollLeft : 0),
-        top,
+        left: (lefts[c] ?? 0) - (isFrozen ? 0 : scrollLeft),
+        top: top - scrollTop,
         width: widths[c] ?? 0,
         height: ROW_HEIGHT,
       };
@@ -1355,7 +1375,7 @@ export function createGrid(deps) {
       }
     },
 
-    editorHost: canvas,
+    editorHost: overlay,
 
     focus() {
       scroller.focus();

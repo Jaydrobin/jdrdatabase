@@ -322,6 +322,10 @@ body {
   background: var(--jdr-bg-muted);
 }
 
+.jdr-sidebar__header[hidden] {
+  display: none;
+}
+
 .jdr-sidebar__header {
   display: flex;
   align-items: center;
@@ -482,7 +486,8 @@ body {
   border-top: 1px dashed var(--jdr-border);
 }
 
-.jdr-toolbar__tools[hidden] {
+.jdr-toolbar__tools[hidden],
+.jdr-toolbar__dirty[hidden] {
   display: none;
 }
 

@@ -89,6 +89,7 @@ export function createInlineEditor() {
     if (column.type === 'select') {
       const select = document.createElement('select');
       select.className = 'jdr-editor__field jdr-editor__field--select';
+      select.setAttribute('aria-label', column.name);
       const empty = document.createElement('option');
       empty.value = '';
       empty.textContent = t('editor.emptyChoice');
@@ -105,6 +106,8 @@ export function createInlineEditor() {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'jdr-editor__field';
+    // 이름 없는 입력은 보조 기술에 "편집 가능 텍스트"로만 읽힌다. 열 이름을 붙인다(사용자 데이터는 속성 값으로만).
+    input.setAttribute('aria-label', column.name);
     input.autocomplete = 'off';
     input.spellcheck = false;
     input.value = text;

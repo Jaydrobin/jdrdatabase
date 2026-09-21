@@ -56,7 +56,8 @@ function makeButton(label, action) {
  */
 export function mountToolbar(parent, store, history, deps) {
   const { toasts } = deps;
-  const el = document.createElement('header');
+  // 랜드마크(banner)는 main.js의 <header> 호스트가 맡는다. 여기는 도구 모음 위젯이므로 div + role="toolbar".
+  const el = document.createElement('div');
   el.className = 'jdr-toolbar';
   el.setAttribute('role', 'toolbar');
   el.setAttribute('aria-label', t('toolbar.label'));
@@ -74,9 +75,12 @@ export function mountToolbar(parent, store, history, deps) {
 
   const fileName = document.createElement('span');
   fileName.className = 'jdr-toolbar__file';
+  // 표시 기호(●)는 role="img"로 이름을 붙이고, 깨끗할 때는 숨겨 보조 기술이 "변경 있음"을 읽지 않게 한다.
   const dirtyMark = document.createElement('span');
   dirtyMark.className = 'jdr-toolbar__dirty';
+  dirtyMark.setAttribute('role', 'img');
   dirtyMark.setAttribute('aria-label', t('file.dirtyLabel'));
+  dirtyMark.hidden = true;
   const readOnlyMark = document.createElement('span');
   readOnlyMark.className = 'jdr-toolbar__readonly';
 
@@ -179,6 +183,7 @@ export function mountToolbar(parent, store, history, deps) {
     const state = store.getState();
     fileName.textContent = state.file.name ?? t('file.untitled');
     dirtyMark.textContent = state.dirty ? t('file.dirtyMark') : '';
+    dirtyMark.hidden = !state.dirty;
     readOnlyMark.textContent = state.readOnly === 'none' ? '' : t('status.readOnly');
     saveButton.disabled = state.readOnly !== 'none';
     saveAsButton.disabled = state.readOnly !== 'none';

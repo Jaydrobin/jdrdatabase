@@ -51,6 +51,26 @@
   font: inherit;
 }
 
+.jdr-grid__viewport {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 인라인 편집기 오버레이. top은 grid.js의 HEADER_HEIGHT와 같다(머리글 아래만 덮고 잘라 낸다). */
+.jdr-grid__overlay {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .jdr-grid__scroller {
   position: relative;
   outline: none;

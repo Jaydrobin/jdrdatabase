@@ -598,6 +598,7 @@ export async function openImportDialog(deps) {
         nameInput.type = 'text';
         nameInput.className = 'jdr-dialog__input';
         nameInput.dataset.field = 'name';
+        nameInput.setAttribute('aria-label', `${col.header}: ${t('import.col.name')}`);
         nameInput.value = col.name;
         nameInput.addEventListener('input', () => {
           col.name = nameInput.value;
@@ -608,6 +609,7 @@ export async function openImportDialog(deps) {
           col.type,
         );
         typeSelect.dataset.field = 'type';
+        typeSelect.setAttribute('aria-label', `${col.header}: ${t('import.col.type')}`);
         typeSelect.addEventListener('change', () => {
           col.type = /** @type {LogicalType} */ (typeSelect.value);
         });
@@ -622,6 +624,7 @@ export async function openImportDialog(deps) {
           col.columnId,
         );
         targetSelect.dataset.field = 'target';
+        targetSelect.setAttribute('aria-label', `${col.header}: ${t('import.col.target')}`);
         targetSelect.addEventListener('change', () => {
           col.columnId = targetSelect.value;
           const chosen = live.find((c) => c.id === col.columnId);
@@ -642,6 +645,7 @@ export async function openImportDialog(deps) {
         col.policy === 'text' && targetKind === 'existing' ? 'null' : col.policy,
       );
       policySelect.dataset.field = 'policy';
+      policySelect.setAttribute('aria-label', `${col.header}: ${t('import.col.policy')}`);
       policySelect.addEventListener('change', () => {
         col.policy = /** @type {ImportPolicy} */ (policySelect.value);
       });
