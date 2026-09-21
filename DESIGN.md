@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.7 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정) |
+| 문서 버전 | 0.8 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -127,7 +127,7 @@
 |---|---|---|
 | 1. 정본 | File System Access API(`showOpenFilePicker`, `showSaveFilePicker`, `createWritable`). 파일 핸들을 IndexedDB에 저장해 다음 실행 때 "최근 파일"로 재개 | 사용자가 지정한 `.db` 파일 |
 | 2. 폴백 | `<input type="file">` 읽기 + `<a download>` 쓰기 | Firefox, Safari, API가 막힌 환경 |
-| 3. 저널 | 커맨드(D-08)를 IndexedDB `journal` 스토어에 순서대로 기록. 파일 저장 시 비움 | 탭이 죽거나 저장을 잊었을 때 복구 |
+| 3. 저널 | 커맨드(D-08)를 IndexedDB `journal` 스토어에 순서대로 기록. 파일 저장 시 비움. 가져오기(Step 7·8)는 커맨드가 아니라 기록할 수 없으므로 그 뒤로는 저장할 때까지 기록을 멈추고 배너로 저장을 재촉한다 | 탭이 죽거나 저장을 잊었을 때 복구 |
 
 - 저장 = `snapshot()` → `Uint8Array` → `writable.write()` → `close()`. `close()`에서 원자적으로 교체된다.
 - 저장 직전에 기존 파일 바이트를 IndexedDB `backups` 스토어에 1세대 보관한다(파일이 200 MB 이하일 때). 그보다 크면 보관을 건너뛰고 사용자에게 알린다.
@@ -174,6 +174,7 @@
 - 메인 스레드는 undo/redo 스택(최대 200개)을 유지하고, 같은 커맨드를 저널(D-04)에 기록한다.
 - 대량 붙여넣기·행 다중 삭제는 하나의 복합 커맨드다. 되돌리기용 스냅샷이 10,000행을 넘으면 사용자에게 "되돌릴 수 없는 작업"임을 확인받고 히스토리를 비운다.
 - 열 삭제는 **소프트 삭제**다. `_jdr_columns.deleted_at`만 설정하고 물리 열은 남긴다. 되돌리기가 가능하고 비용이 0이다. 물리 `DROP COLUMN`은 "데이터베이스 정리(VACUUM)" 메뉴에서만 수행한다.
+- 예외: 가져오기(Step 7·8)는 커맨드가 아니다. 수십만 행을 커맨드 객체로 만들면 저널·되돌리기 상한을 모두 넘고 재생에 원본 파일이 필요하기 때문이다. `import.run`이 트랜잭션 하나로 직접 삽입하고, 성공 뒤 메인이 되돌리기 스택을 비우고 저널 기록을 멈춘 채 "지금 저장하세요"를 띄운다(Step 7 "가져오기는 커맨드가 아니다").
 
 ### D-09. 가져오기는 파서·추론·매핑·삽입의 4단계 파이프라인이며 파서는 행 이터레이터로 통일한다
 
@@ -323,7 +324,7 @@ src/
 
 vendor/
   sqlite3.mjs sqlite3.wasm sqlite3.d.mts LICENSE.sqlite-wasm CHECKSUMS
-  xlsx.full.min.js LICENSE.sheetjs
+  xlsx.full.min.js xlsx.full.min.d.ts LICENSE.sheetjs
 
 build/
   build.mjs                      단일 HTML 생성(브라우저·타우리·테스트 세 변형)
@@ -348,9 +349,10 @@ test/
   unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드)
   e2e/                           Playwright(브라우저), 같은 시나리오를 tauri-driver로 재사용
   perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. CI 밖에서 실행
-  fixtures/                      CSV·XLSX·DB 표본. generated/는 gen-fixture 산출물(커밋하지 않음)
+  fixtures/                      CSV·XLSX·DB 표본. import/는 Step 7·8 파서 픽스처. generated/는 gen-fixture 산출물(커밋하지 않음)
 scripts/
   gen-fixture.mjs                벤치마크용 대용량 CSV·DB 생성(`--db`는 wasm 엔진으로 표준 SQLite 파일을 만든다)
+  gen-import-fixtures.mjs        test/fixtures/import/의 CSV·XLSX 픽스처를 다시 만든다(바이트가 고정된 생성기)
 ```
 
 ### 3.2 실행 시 구조
@@ -719,51 +721,64 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 수백 MB CSV를 새 테이블 또는 기존 테이블에 추가로 가져온다.
 
-**산출물**: `import/csv.js`, `import/infer.js`, `import/pipeline.js`, `ui/dialogs/import.js`
+**산출물**: `import/csv.js`, `import/infer.js`, `import/pipeline.js`, `ui/dialogs/import.js`, `ui/toolbar.js`(가져오기 버튼과 숨은 파일 입력), `app/store.js`(`importPreview`·`importRun`), `io/autosave.js`(`suspend`)
+
+**가져오기는 커맨드가 아니다 (D-08의 예외)**
+- 30만 행 CSV를 커맨드 하나로 만들면 그 객체(수백 MB)가 저널 상한(50 MB)과 되돌리기 스냅샷 상한(1만 행)을 모두 넘고, 재생하려면 원본 파일이 다시 필요하다. 그래서 가져오기는 `import.run` op가 트랜잭션 하나로 직접 삽입하며 히스토리·저널에 들어가지 않는다.
+- 성공한 뒤 메인은 (1) 되돌리기 스택을 비우고(앞선 `column.add`를 되돌리면 `DROP COLUMN`이 가져온 값을 지우므로), (2) 저널 기록을 멈추고(`autosave.suspend()`: 이후 커맨드도 기록하지 않고 재생 시 "뒤쪽 변경 일부는 남지 않았다"로 표시), (3) dirty로 표시하고 "지금 저장하세요" 배너를 띄운다. 저장이 성공하면 저널이 비워지며 기록이 다시 시작된다. 탭이 죽으면 가져오기와 그 뒤의 변경은 복구되지 않는다. 그 사실을 배너가 알린다.
+- 가져오기 전체는 트랜잭션 하나다. 취소·오류·`abort` 정책은 롤백이므로 새 테이블이든 기존 테이블이든 DB는 시작 전과 같다. 청크마다 커밋하지 않는 이유: 기존 테이블에 "절반만 들어간" 상태는 사용자가 어디까지 들어갔는지 알 수 없고, 커맨드가 아니어서 되돌릴 수도 없다.
 
 **주요 함수**
-- `csv.detectEncoding(headBytes)` → `'utf-8' | 'utf-16le' | 'utf-16be' | 'euc-kr'`(BOM → UTF-8 `fatal` 시도 → EUC-KR 추정, 사용자 재지정 가능)
-- `csv.detectDelimiter(headText)`(후보별 행 간 필드 수 분산이 최소인 것)
-- `csv.parse(file, { encoding, delimiter, hasHeader })` → 행 이터레이터. `file.stream().pipeThrough(new TextDecoderStream(encoding))`에 상태 기계(필드 안/따옴표 안/따옴표 뒤) 적용, 조각 경계에 걸친 레코드는 다음 조각으로 이월
-- `infer.sample(iterator, 1000)`, `infer.column(values)` → `{ type, confidence, examples }`(우선순위 boolean → integer → real → date → datetime → text; 최대 길이 2,000자 초과가 하나라도 있으면 longtext)
-- `pipeline.run({ source, mapping, target, policy, onProgress, signal })`: 1,000행 단위 `runBatch`(하나의 트랜잭션, prepared statement 재사용), `_created_at` 일괄, 종료 시 `{ inserted, skipped, errors[] }` 보고서
+- `csv.detectEncoding(headBytes)` → `'utf-8' | 'utf-16le' | 'utf-16be' | 'euc-kr'`. BOM → BOM 없는 UTF-16(NUL 바이트가 홀수·짝수 위치에 몰림) → UTF-8 `fatal` 디코딩(`stream: true`라 끝에 잘린 다중 바이트는 오류가 아님) → EUC-KR 추정. 사용자 재지정 가능.
+- `csv.detectDelimiter(headText)`: 후보 `,`·탭·`;`·`|`를 각각 상태 기계로 앞 20행까지 파싱해 행 간 필드 수 분산이 최소인 것. 동률이면 필드 수가 많은 쪽.
+- `csv.createParser({ delimiter })` → `{ push(text): Record[], end(): { records, unterminatedQuote } }`. 필드 안/따옴표 안/따옴표 뒤 상태를 조각 사이에 유지하므로 조각 경계에 걸친 레코드는 다음 조각으로 이월된다. `\r`, `\n`, `\r\n`이 섞여도 되고 조각 경계에서 `\r\n`이 갈라져도 된다. 완전히 빈 줄은 레코드가 아니다. 레코드는 `{ rowIndex, cells: string[] }`이며 `rowIndex`는 파일 안의 레코드 순번(1부터, 헤더 포함)이다.
+- `csv.parse(blob, { encoding, delimiter })` → `AsyncIterable<Record>`. `blob.stream().pipeThrough(new TextDecoderStream(encoding))`을 조각마다 `createParser`에 넣는다. BOM은 디코더가 뗀다. 소비자가 일찍 멈추면(`return()`) 스트림을 취소한다(미리보기는 앞 1,000레코드만 읽는다).
+- `pipeline.openSource(file, options)` → `{ header: string[] | null, rows: AsyncIterable<Row>, total: number | null }`. CSV·XLSX의 차이를 여기서 흡수한다(`options.format`). `hasHeader`면 첫 레코드가 헤더다. `Row = { rowIndex, cells: (string | number | boolean | null)[] }`(D-09. XLSX 어댑터가 날짜를 문자열로 바꾸므로 Date는 오지 않는다). `total`은 XLSX처럼 행 수를 미리 알 때만 있다.
+- `infer.sample(rows, 1000)` → `{ rows, exhausted }`. `infer.columnName(raw, index, taken)`: 비어 있으면 `열{index+1}`, 겹치면 ` (2)`, ` (3)` 접미사(i18n 키 `import.columnDefault`. Step 8의 규칙을 CSV에도 적용). `infer.column(values)` → `{ type, confidence, examples }`. 빈 값을 뺀 표본 전부가 맞는 첫 타입을 우선순위 boolean → integer → real → date → datetime → text로 고르되, 2,000자 초과가 하나라도 있으면 longtext, `0`으로 시작하는 두 자리 이상 숫자 문자열(우편번호)이 있으면 text, `date`는 시각 부분이 없는 값만(있으면 datetime). `confidence`는 표본 중 비어 있지 않은 값의 비율.
+- `pipeline.run({ engine, file, options, mapping, target, policy, signal, progress })` → `{ report }`. 트랜잭션 하나 안에서: 새 테이블이면 `tables.create`·`addColumn`(D-08 커맨드를 즉시 적용하되 돌려주지 않는다. 롤백이 함께 되돌린다) → 행을 읽어 `values.validate`로 변환 → 1,000행 또는 직렬화 32 MB마다 `runBatch`(prepared statement 재사용, `_created_at`은 시작 시각 하나) → 청크 사이에서 취소 확인과 이벤트 루프 양보 → `progress({ phase: 'insert', done, total })`. 보고서 `{ tableId, inserted, skipped, nulled, errors[], demoted[] }`: `errors[i] = { rowIndex, column?, reason }`(앞 100건), `demoted`는 `text` 정책으로 강등한 열.
+- `mapping.columns[i] = { source, name?, type?, columnId?, policy? }`. 새 테이블이면 `name`·`type`(추론 결과를 사용자가 고친 것), 기존 테이블이면 `columnId`(살아 있는 사용자 열). 목록에 없는 원본 열은 건너뛴다. `policy`가 없으면 op의 `policy`.
+- 스토어: `importPreview(file, options, callOptions)`, `importRun(args, callOptions)`. 성공 시 위의 세 가지 처리 후 `import:done`을 낸다(히스토리가 이 이벤트로 스택을 비운다). 새 테이블이면 그 테이블을 고른다.
+- UI: 도구 모음의 "가져오기…"가 숨은 `<input type="file" accept=".csv,.tsv,.txt,.xlsx">`를 연다(폴백 열기와 같은 방식이라 자동화 도구가 파일을 넣을 수 있다). 대화상자는 한 창에서 (1) 파싱 옵션(인코딩·구분자·헤더 / 시트·헤더 행) → (2) 미리보기 20행과 열마다 이름·타입·정책 → (3) 대상(새 테이블 이름 / 기존 테이블과 열 대응) → (4) 진행률·취소 → (5) 보고서를 보여 준다. 옵션을 바꾸면 `import.preview`를 다시 부른다. 실행 중에는 대화상자가 모달로 남아 그리드 편집을 막고(`import.run`은 배타 op라 Worker도 `E_DB_BUSY`로 거절한다), 취소 버튼이 `AbortSignal`을 당긴다.
 
 **예외 처리**
-- 인코딩 오판(깨진 문자(U+FFFD) 비율 1% 초과): 미리보기 단계에서 경고하고 인코딩 재선택 유도.
-- 행마다 필드 수가 다른 경우: 부족한 필드는 NULL, 넘치는 필드는 버리고 보고서에 행 번호 기록. 헤더보다 필드가 많은 행이 10% 넘으면 구분자 재감지 제안.
-- 따옴표가 끝나지 않은 채 파일이 끝남: 남은 텍스트를 마지막 필드로 처리하고 경고.
-- 값 변환 실패 정책(열 단위): `null`(기본), `text`(그 열 전체를 text로 강등하고 처음부터 재시도), `abort`.
-- 셀 값 길이 상한 10 MB 초과: 건너뛰고 보고서에 기록.
-- 기존 테이블에 추가 시 열 매핑 불일치: 매핑 UI에서 반드시 대응시키게 하고, 대응 없는 원본 열은 "건너뜀".
-- 취소: 현재 트랜잭션 롤백, 새 테이블이었으면 테이블 삭제, 기존 테이블이면 지금까지 커밋된 행은 유지되었음을 명시.
-- 메모리: 파서는 조각 단위지만 wasm DB는 메모리에 있으므로 예상 결과 크기(파일 크기 × 1.2)가 남은 예산을 넘으면 시작 전에 경고.
-- 가져오기 도중에는 그리드 편집을 잠근다(같은 DB에 두 트랜잭션 불가).
+- 인코딩 오판(깨진 문자(U+FFFD) 비율 1% 초과): 미리보기 결과의 `warnings`에 `encoding`으로 담고 대화상자가 `E_IMPORT_ENCODING` 문구로 인코딩 재선택을 유도한다. 실행 자체는 막지 않는다.
+- 행마다 필드 수가 다른 경우: 부족한 필드는 NULL, 넘치는 필드는 버리고 보고서에 행 번호 기록(`reason: 'extra_fields'`). 표본에서 헤더보다 필드가 많은 행이 10%를 넘으면 `warnings`에 `ragged`를 담아 구분자 재감지를 제안한다.
+- 따옴표가 끝나지 않은 채 파일이 끝남: 남은 텍스트를 마지막 필드로 처리하고 `warnings`에 `unterminated_quote`.
+- 값 변환 실패 정책(열 단위): `null`(기본. NULL로 넣고 `nulled`와 `errors`에 기록), `text`(그 열의 타입을 text로 바꿔 처음부터 재시도. 새 테이블에서만 허용하며 기존 테이블에 주면 `E_DB_QUERY`), `abort`(`E_VALUE_INVALID`에 행 번호·열을 담고 롤백).
+- 셀 값 길이 10 MB 초과: NULL로 넣고 `errors`에 `reason: 'too_long'`.
+- 기존 테이블에 추가: 대상은 STRICT 테이블(R7의 외부 테이블은 거부)의 살아 있는 사용자 열이어야 한다. 매핑 UI는 헤더와 같은 이름의 열을 자동으로 잇고, 대응 없는 원본 열은 "건너뜀"이다. `select` 열에 없는 값은 4.2대로 `options.choices`에 자동 추가한다(`_jdr_columns.options` 갱신).
+- 취소: `E_IMPORT_CANCELLED`. 트랜잭션 전체가 롤백되어 새 테이블은 사라지고 기존 테이블에는 한 행도 남지 않는다. 문구가 "가져오기 전 상태 그대로"임을 명시한다.
+- 메모리: 파서는 조각 단위지만 wasm DB는 메모리에 있으므로 예상 결과 크기(파일 크기 × 1.2)가 `capabilities().warnFileBytes`에서 지금 DB 크기를 뺀 값을 넘으면 시작 전에 경고한다(숫자는 UI에 두지 않는다).
+- 가져오기 도중에는 그리드 편집을 잠근다(모달 + 배타 op).
+- 읽기 전용 상태(다른 탭, 새 스키마)에서는 시작하지 않는다.
 
 **완료 기준**
-- 단위 픽스처: 따옴표 안 개행·쉼표, BOM 있는 UTF-8, UTF-16LE, EUC-KR 바이트, 빈 줄, CRLF/LF 혼재, 필드 수 불일치, 32 KB 조각 경계에 걸친 따옴표 필드.
+- 단위 픽스처(`test/fixtures/import/`): 따옴표 안 개행·쉼표, BOM 있는 UTF-8, UTF-16LE, EUC-KR 바이트, 빈 줄, CRLF/LF 혼재, 필드 수 불일치, 32 KB 조각 경계에 걸친 따옴표 필드.
 - 30만 행 × 20열 CSV(약 150 MB) 가져오기 60초 이하(Chromium, Worker 모드).
-- 취소 후 DB에 잔여물이 없음을 확인하는 테스트.
+- 취소 후 DB에 잔여물이 없음을 확인하는 테스트(새 테이블·기존 테이블 모두 덤프 동일).
 
 ### Step 8. XLSX 가져오기
 
 **목표**: 엑셀·구글 스프레드시트에서 내려받은 `.xlsx`를 시트 단위로 가져온다.
 
-**산출물**: `import/xlsx.js`, `vendor/xlsx.full.min.js`, `ui/dialogs/import.js`(시트 선택 단계)
+**산출물**: `import/xlsx.js`, `vendor/xlsx.full.min.js`(+ `xlsx.full.min.d.ts`, `LICENSE.sheetjs`, `CHECKSUMS`), `ui/dialogs/import.js`(시트 선택 단계), `scripts/gen-import-fixtures.mjs`(픽스처 생성기), `test/fixtures/import/*.xlsx`
 
 **주요 함수**
-- `xlsx.listSheets(bytes)` → `[{ name, rows, cols }]`(`bookSheets`, `sheetRows` 옵션으로 가볍게)
-- `xlsx.parse(bytes, { sheet, headerRow, range })` → 행 이터레이터. `XLSX.read(bytes, { type: 'array', dense: true, cellDates: true })` 후 셀 타입 `n/s/b/d/e`를 논리값으로 변환. 수식 셀은 `v`(계산값)만 사용
-- 날짜: SheetJS의 `cellDates`로 Date 객체를 받아 `date`/`datetime` 판정(시각이 00:00:00이면 `date`)
-- 추론·매핑·삽입은 Step 7의 `infer`·`pipeline`을 그대로 사용
+- `xlsx.listSheets(bytes)` → `[{ name, rows, cols }]`. `XLSX.read(bytes, { type: 'array', sheetRows: 1, dense: true })`로 시트마다 첫 행까지만 파싱하고 `!fullref`(잘리지 않은 범위)에서 행·열 수를 읽는다.
+- `xlsx.parse(bytes, { sheet, headerRow })` → 행 이터레이터. `XLSX.read(bytes, { type: 'array', dense: true, cellDates: true, sheets: [sheet] })` 후 셀 타입을 `n` → 숫자, `s` → 문자열, `b` → 불리언, `d` → 날짜 문자열, `e` → NULL(+ 보고), 비어 있음 → NULL로 바꾼다. 수식 셀은 `v`(계산값)만 쓴다. `headerRow`(1부터)보다 앞의 행은 건너뛴다.
+- 날짜: `cellDates`가 준 Date의 **로컬 시각 부품**(SheetJS는 일련번호를 로컬 시각으로 만든다)으로 `YYYY-MM-DD`(시각이 00:00:00) 또는 `YYYY-MM-DDTHH:mm:ss` 문자열을 만든다. 그래서 Step 7의 `infer`가 CSV와 같은 규칙으로 `date`/`datetime`을 판정하고, `values.validate`의 UTC 해석과 시간대 차이가 생기지 않는다.
+- `xlsx.readWorkbook(bytes, opts)`: SheetJS 예외를 `E_XLSX_ENCRYPTED`(메시지에 `password`) / `E_XLSX_CORRUPT`(그 밖)로 바꾸는 유일한 자리. `XLSX_MAX_FILE_BYTES`(100 MB)를 넘는 입력은 `E_FILE_TOO_LARGE`(`detail.format = 'xlsx'`)로 거부한다.
+- 추론·매핑·삽입은 Step 7의 `infer`·`pipeline`을 그대로 쓴다(`openSource`가 `options.format === 'xlsx'`에서 이 어댑터를 고른다). `import.preview`는 `sheets`와 고른 `sheet`를 함께 돌려주고, 대화상자가 시트를 바꾸면 미리보기를 다시 부른다.
+- 번들: `xlsx.full.min.js`는 UMD라 esbuild가 CommonJS로 접어 Worker 번들에 넣는다(`import * as XLSX from '../../vendor/xlsx.full.min.js'`). 안의 OOXML 네임스페이스 URL 문자열(`http://schemas.openxmlformats.org/…` 등)은 네트워크 요청이 아니므로 `verify.mjs`가 접두사 목록으로 허용한다.
 
 **예외 처리**
 - 암호화된 통합 문서: `E_XLSX_ENCRYPTED`로 거부하고 안내.
-- 파일 크기 상한 100 MB(전체를 메모리에 올려야 함). 초과 시 "CSV로 저장 후 가져오기" 안내.
-- 병합 셀: 좌상단 값만 사용, 나머지는 NULL. 미리보기에 표시.
-- 오류 셀(`#N/A`, `#REF!`): NULL 처리 후 보고서 기록.
-- 헤더 행이 비어 있거나 중복: `열1`, `열2` 자동 이름과 중복 접미사 `(2)`.
+- 파일 크기 상한 100 MB(전체를 메모리에 올려야 함). 초과 시 `E_FILE_TOO_LARGE`와 "CSV로 저장 후 가져오기" 안내.
+- 병합 셀: 좌상단 값만 사용, 나머지는 NULL. `warnings`에 `merged`(범위 수)로 미리보기에 표시.
+- 오류 셀(`#N/A`, `#REF!`): NULL 처리 후 보고서에 `reason: 'error_cell'`.
+- 헤더 행이 비어 있거나 중복: `열1`, `열2` 자동 이름과 중복 접미사 `(2)`(Step 7의 `infer.columnName`).
 - 1900 윤년 버그(1900-02-29)와 1904 날짜 체계(`Workbook.WBProps.date1904`): SheetJS 처리에 위임하되 픽스처로 검증.
-- 숫자 서식이 텍스트인 열(예: 우편번호 `01234`): 추론이 integer로 판정하면 선행 0이 사라지므로, 표본에 선행 0 문자열이 있으면 text로 판정.
+- 숫자 서식이 텍스트인 열(예: 우편번호 `01234`): 추론이 integer로 판정하면 선행 0이 사라지므로, 표본에 선행 0 문자열이 있으면 text로 판정(Step 7의 `infer.column`).
 - SheetJS 파싱 중 예외(손상 zip): `E_XLSX_CORRUPT`.
 
 **완료 기준**
@@ -897,13 +912,13 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `views.list` | `{ tableId }` | `{ views }`. `views[i] = { id, tableId, name, spec }`(`spec`은 파싱된 JSON) | |
 | `views.save` | `{ tableId, name, spec, viewId? }` | `{ viewId, cmd }`. `viewId`가 있으면 그 뷰를 덮어쓰고(되돌리면 옛 이름·스펙), 없으면 새 뷰 | 불가 |
 | `views.delete` | `{ viewId }` | `{ cmd }` | 불가 |
-| `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
-| `import.run` | `{ file, mapping, target, policy }` | `{ report }` | 가능 |
+| `import.preview` | `{ file, options }`. `file`은 Blob(File)이며 구조화 복제로 넘긴다(메인은 바이트를 읽지 않는다). `options = { format: 'csv' \| 'xlsx', encoding?, delimiter?, hasHeader?, sheet?, headerRow? }`. 빠진 값은 Worker가 감지한다 | `{ format, encoding, delimiter, hasHeader, sheets?, sheet?, headerRow?, headers, sample, sampleRows, exhausted, inferred, warnings }`. `sample`은 앞 20행, `inferred[i] = { type, confidence, examples }`, `warnings[i] = { kind: 'encoding' \| 'ragged' \| 'unterminated_quote' \| 'merged' \| 'error_cells' \| 'empty_headers', count? }` | 가능 |
+| `import.run` | `{ file, options, mapping, target, policy }`. `target = { kind: 'new', name } \| { kind: 'existing', tableId }`, `mapping = { columns: [{ source, name?, type?, columnId?, policy? }] }`, `policy = 'null' \| 'text' \| 'abort'`(열에 정책이 없을 때의 기본) | `{ report }`. `report = { tableId, inserted, skipped, nulled, errors[], demoted[] }`. 진행 이벤트 `{ phase: 'insert', done, total }`(`total`은 행 수를 미리 알 때만 0보다 큼). 커맨드를 돌려주지 않는다(Step 7 "가져오기는 커맨드가 아니다") | 가능(전체 롤백) |
 | `export.stream` | `{ tableId, viewSpec, format, options }` | 조각 이벤트 `{ chunk }` 후 완료 | 가능 |
 
 데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다.
 
-규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`)와 `db.snapshot`·`db.close`는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`, `schema.list`, `views.list`는 언제나 허용된다(읽기).
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`)와 `db.snapshot`·`db.close`는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`, `schema.list`, `views.list`, `import.preview`(파싱만 하고 DB는 읽기만 한다)는 언제나 허용된다(읽기).
 
 `db.snapshot`·`db.close`가 배타인 이유: 둘 다 트랜잭션 상태를 전제로 한다(스냅샷은 트랜잭션 밖에서만 뜰 수 있고, 닫기는 연결을 없앤다). 쓰기 op는 청크 사이에서 이벤트 루프로 돌아오므로 그 틈에 저장 요청이 끼어들 수 있고, 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨진다. 파일에는 아무것도 쓰이지 않았는데 `revision`·`saved_by`만 올라간 DB가 남는 것이 최악이다. 긴 작업 중의 저장은 큐에 넣지 않고 거절하며, UI가 "작업이 끝난 뒤 다시 저장하세요"로 안내한다.
 
@@ -920,7 +935,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_ENV_NO_IDB` | IndexedDB 사용 불가 | 예 | 저널·백업·최근 파일 비활성 안내 |
 | `E_FILE_NOT_SQLITE` | 헤더 불일치 | 예 | 열기 취소 |
 | `E_FILE_CORRUPT` | integrity_check 실패 | 예 | 열기 취소, sqlite3 `.recover` 안내 |
-| `E_FILE_TOO_LARGE` | 엔진의 `maxFileBytes` 초과(wasm 1.5 GB, native 없음) | 예 | 열기 거부 |
+| `E_FILE_TOO_LARGE` | 엔진의 `maxFileBytes` 초과(wasm 1.5 GB, native 없음). XLSX 가져오기의 100 MB 상한(`detail.format = 'xlsx'`) | 예 | 열기 거부. XLSX는 CSV로 저장 후 가져오기 안내 |
 | `E_FILE_NEWER_SCHEMA` | 앱보다 새 schema_version | 예 | 읽기 전용으로 열기 |
 | `E_FILE_PERMISSION` | 핸들 권한 거부 | 예 | 다른 이름으로 저장 유도 |
 | `E_FILE_WRITE` | 쓰기 실패 | 예 | 원본 보존 안내, 재시도·다운로드 대안 |
@@ -935,8 +950,8 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_VALUE_INVALID` | 타입 검증 실패 | 예 | 편집기 유지 |
 | `E_PASTE_TOO_LARGE` | 100만 셀 초과 | 예 | CSV 가져오기 안내 |
 | `E_UNDO_LIMIT` | 되돌리기 스냅샷 초과 | 예 | 확인 후 히스토리 비움 |
-| `E_IMPORT_ENCODING` | 깨진 문자 비율 초과 | 예 | 인코딩 재선택 |
-| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경) | 예 | 롤백 결과 안내 |
+| `E_IMPORT_ENCODING` | 깨진 문자 비율 초과(미리보기 `warnings`의 `encoding`. 던지지 않고 문구만 쓴다) | 예 | 인코딩 재선택 |
+| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경, 검색 인덱스 생성) | 예 | 롤백 결과 안내(가져오기 전 상태 그대로) |
 | `E_XLSX_ENCRYPTED` / `E_XLSX_CORRUPT` | 파일 문제 | 예 | 거부 |
 | `E_GZIP_UNSUPPORTED` | 압축 스트림 없음 | 예 | 비압축 안내 |
 | `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내 |
