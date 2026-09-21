@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.9 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정, 0.9: 2026-09-21 세션 G 내보내기 조각 스트림·gzip·자동 저장·백업 복원 확정) |
+| 문서 버전 | 0.10 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정, 0.9: 2026-09-21 세션 G 내보내기 조각 스트림·gzip·자동 저장·백업 복원 확정, 0.10: 2026-09-21 세션 H 성능 회귀 판정·오류 주입·Worker 종료 잠금·접근성 검사 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -353,13 +353,17 @@ src-tauri/
   tests/                         cargo test(저장 원자성, 배치, 인터럽트, 한글 경로)
 
 test/
-  unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드)
-  e2e/                           Playwright(브라우저), 같은 시나리오를 tauri-driver로 재사용
-  perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. CI 밖에서 실행
+  unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드). conventions.test.js는 CLAUDE.md 7.1의 grep 항목(innerHTML, 모드 문자열, SQL 문자열 연결)을 소스 검사로 고정한다
+  e2e/                           Playwright(브라우저), 같은 시나리오를 tauri-driver로 재사용. page-url.js가 산출물 URL을 정한다(기본 file://, `JDR_E2E_HTTP=1`이면 scripts/serve-dist.mjs의 http://localhost). a11y.spec.js는 axe 검사, fault.spec.js는 오류 주입(Step 10)
+  perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. report.js가 측정값을 test-results/perf/에 모으고 global-teardown.js가 perf-baseline.json(CI 러너 실측)과 비교해 30% 회귀를 실패로 본다. CI의 perf 잡이 푸시마다 돌린다
   fixtures/                      CSV·XLSX·DB 표본. import/는 Step 7·8 파서 픽스처. generated/는 gen-fixture 산출물(커밋하지 않음)
 scripts/
   gen-fixture.mjs                벤치마크용 대용량 CSV·DB 생성(`--db`는 wasm 엔진으로 표준 SQLite 파일을 만든다)
   gen-import-fixtures.mjs        test/fixtures/import/의 CSV(바이트 고정)·XLSX(SheetJS로 씀. 내용 고정) 픽스처를 다시 만든다
+  serve-dist.mjs                 dist/를 http://localhost로 서빙하는 정적 서버(지원 매트릭스의 http 열 실측용. 런타임 코드 아님)
+.github/workflows/
+  ci.yml                         푸시·PR마다 check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정)
+  release.yml                    `v*` 태그에서 build·verify 뒤 dist/jdrdatabase.html을 GitHub 릴리스에 첨부(CLAUDE.md 7.1: dist/는 릴리스 태그에서만 배포)
 ```
 
 ### 3.2 실행 시 구조
@@ -846,19 +850,26 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 성능 예산(8장)을 측정으로 확인하고, 오류 경로를 점검하며, 키보드만으로 모든 기능을 쓸 수 있게 한다.
 
-**산출물**: `test/e2e/perf.spec.js`, `docs/support-matrix.md`, README 갱신, 릴리스 빌드
+**산출물**: `test/perf/*.perf.spec.js`(app·grid·search·import·import-xlsx·memory), `test/perf/report.js`, `test/perf/global-teardown.js`, `test/perf/perf-baseline.json`, `test/e2e/a11y.spec.js`, `test/e2e/fault.spec.js`, `test/e2e/page-url.js`, `test/unit/conventions.test.js`, `scripts/serve-dist.mjs`, `.github/workflows/release.yml`, `docs/support-matrix.md` 갱신, README 갱신
 
 **작업**
-- 성능 트레이스 자동화: 30만 행 픽스처로 열기·스크롤·검색·저장·가져오기 시간을 CI에서 기록(회귀 감지, 임계 초과 시 실패).
-- 메모리 프로파일: 열기 → 가져오기 → 저장 순으로 힙 스냅샷을 비교하여 누수 확인(캐시·행 풀·statement 캐시).
-- 오류 주입 테스트: Worker 강제 종료, IDB 열기 실패, 파일 쓰기 중 예외, wasm 메모리 한계 근접.
-- 접근성: 그리드에 `role="grid"`, `aria-rowcount`, `aria-colcount`, 활성 셀 `aria-selected`, 포커스 가시성, 대화상자 포커스 트랩, 명도 대비 4.5:1.
-- 보안 점검: 셀 값은 항상 `textContent`로만 렌더링(`innerHTML` 금지), CSP 검증, CSV 수식 주입 옵션 확인.
-- 지원 매트릭스 실측 기록(Chromium/Firefox/Safari × `file://`/`http://localhost`).
+- 성능 트레이스 자동화: 30만 행 픽스처로 8장의 항목을 `npm run test:perf`가 잰다. 각 spec은 측정값을 `report.js`의 `record(name, metrics)`로 `test-results/perf/<name>.json`에 남기고, 로컬에서는 8장의 절대 예산으로 판정한다. CI(`JDR_PERF_COMPARE=1`)에서는 절대 예산 대신 `perf-baseline.json`(GitHub `ubuntu-latest` 러너의 실측)과 비교해 낮을수록 좋은 항목이 기준선의 1.3배를 넘으면 `global-teardown.js`가 실패시킨다(CLAUDE.md 6장). 기준선은 CI 로그의 요약 JSON을 그대로 옮겨 적고 갱신은 PR 설명에 사유를 남긴다. `ci.yml`의 `perf` 잡이 푸시마다 돌리며 픽스처는 러너에서 만들고 `actions/cache`로 재사용한다.
+- 메모리 프로파일: `memory.perf.spec.js`가 2만 행 DB 열기 → CSV 가져오기 → 저장(다운로드) → 새로 만들기를 한 사이클로 여러 번 반복하고, 사이클마다 CDP `HeapProfiler.collectGarbage` 뒤 메인 스레드 JS 힙(`Performance.getMetrics`의 `JSHeapUsedSize`)과 렌더러 프로세스 RSS(Linux `/proc/<pid>/status`. Worker의 wasm 메모리는 같은 프로세스에 있다)를 기록한다. 두 번째 사이클 대비 마지막 사이클의 증가가 JS 힙 10 MB 또는 RSS 15%를 넘으면 실패(캐시·행 풀·statement 캐시 누수).
+- 오류 주입 테스트(`fault.spec.js` + 단위):
+  - Worker 강제 종료: 기동 뒤 Worker의 `error` 이벤트(처리되지 않은 예외)는 전송 계층의 치명적 오류다. `client`는 대기 중인 호출뿐 아니라 **그 뒤의 모든 호출**을 즉시 `E_ENV_NO_WORKER`로 거부하고(죽은 Worker에 보낸 요청은 영원히 응답이 없다) `onFatal` 구독자에게 알린다. `main.js`는 앱을 잠그고(`lock.engineStopped`) 저널 상태를 알린다: 미저장 변경이 저널에 있으면 "새로 고친 뒤 같은 파일을 열면 복구", 저널이 멈춘 상태(가져오기·상한)면 "그 변경은 잃음", 미저장 변경이 없으면 "잃은 변경 없음". 새로 고치면 저널 복구 제안이 뜬다. wasm 폴백은 없다(D-15와 같은 이유로 조용히 모드가 바뀌면 안 된다).
+  - IDB 열기 실패: `E_ENV_NO_IDB`. 상태바 안내만 하고 저널·백업·최근 파일 없이 새 테이블·저장(다운로드)이 동작한다.
+  - 파일 쓰기 중 예외(`createWritable`·`write`·`close`): `E_FILE_WRITE`. 원본은 그대로(임시 파일 교체 방식), dirty·저널 유지, 다음 저장 성공 시 모든 변경이 파일에 들어간다. 스냅샷이 올린 revision은 메모리에만 남고 다음 저장에서 한 번 더 오른다(파일 revision은 단조 증가만 보장하면 된다).
+  - wasm 메모리 한계 근접: sqlite가 `SQLITE_NOMEM`을 내면 `E_MEM`이다. 직렬화(`sqlite3_js_db_export`)의 NOMEM은 결과 코드 없이 메시지로만 오므로 메시지도 본다. 트랜잭션 롤백이 함께 실패해도 원래 오류의 코드를 유지한다(그전에는 `E_DB_QUERY "rollback failed"`로 가려졌다). 단위 테스트가 wasm 엔진을 2 GB까지 채워 실측한다.
+- 접근성: `a11y.spec.js`가 axe(`@axe-core/playwright`, WCAG 2.1 A·AA 규칙)를 빈 앱, 그리드, 테이블·열·정렬·필터·가져오기·내보내기·설정 대화상자, 장문 편집기에서 돌려 `critical`·`serious` 0건을 확인한다. 그리드의 `role="grid"`, `aria-rowcount`, `aria-colcount`, 활성 셀 `aria-selected`, 포커스 가시성, 대화상자 포커스 트랩, 명도 대비 4.5:1(axe `color-contrast`).
+- 보안 점검: `conventions.test.js`가 소스를 읽어 `innerHTML`·`insertAdjacentHTML`·`document.write` 0건, 모드 문자열 비교가 허용 위치 밖에 없음, `src/db`·`src/import`·`src/export`의 SQL 템플릿 리터럴이 식별자·절 조립뿐임을 고정한다. CSP는 `verify`, CSV 수식 주입 옵션은 세션 G의 단위·E2E.
+- 지원 매트릭스 실측: Chromium은 `file://`와 `http://localhost`(`JDR_E2E_HTTP=1 npm run test:e2e`) 둘 다 E2E 전체로 잰다. Firefox·Safari(WebKit)는 Playwright 브라우저 다운로드가 이 실행 환경의 정책에 막혀 미확인으로 남기고 손으로 확인하는 절차를 적는다.
+- 세션 G가 남긴 `exportXlsx`의 여분 복사를 없앤다(SheetJS의 `type: 'array'` 결과를 그대로 transfer).
 
 **완료 기준**
-- 8장 예산 전 항목 통과.
-- Playwright axe 검사에서 critical 0건.
+- 8장 예산 전 항목 통과(`npm run test:perf`). CI에서는 기준선 대비 30% 이내.
+- 메모리 프로파일 사이클 반복에서 증가 없음(위 상한).
+- 오류 주입 4종이 위의 기대 동작으로 끝나고, 각각 재현 테스트가 있다.
+- Playwright axe 검사에서 critical 0건(serious도 0건).
 - `dist/jdrdatabase.html` 6 MB 이하.
 
 ### Step 11. 타우리 데스크톱 셸과 네이티브 엔진
@@ -965,7 +976,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | 코드 | 상황 | 복구 가능 | UI 행동 |
 |---|---|---|---|
 | `E_ENV_NO_WASM` | wasm 지원 없음 | 아니오 | 시작 화면에서 잠금, 지원 브라우저 안내 |
-| `E_ENV_NO_WORKER` | Worker 생성 실패 | 예 | 인라인 모드로 계속, 상태바 표시 |
+| `E_ENV_NO_WORKER` | Worker 생성 실패 / 기동 뒤 Worker 종료(처리되지 않은 예외) | 생성 실패: 예. 기동 뒤 종료: 아니오 | 생성 실패: 인라인 모드로 계속, 상태바 표시. 기동 뒤 종료: 이후 모든 RPC를 즉시 거부하고 앱 잠금, 저널 상태 안내(새로 고친 뒤 같은 파일을 열면 복구). wasm 폴백 없음 |
 | `E_ENV_NO_IDB` | IndexedDB 사용 불가 | 예 | 저널·백업·최근 파일 비활성 안내 |
 | `E_FILE_NOT_SQLITE` | 헤더 불일치 | 예 | 열기 취소 |
 | `E_FILE_CORRUPT` | integrity_check 실패 | 예 | 열기 취소, sqlite3 `.recover` 안내 |
@@ -978,7 +989,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_DB_BUSY` | 배타 작업 충돌 | 예 | "가져오기 진행 중" 안내 |
 | `E_RESULT_TOO_LARGE` | 1만 행 초과 결과 | 아니오(버그) | 콘솔 오류, 개발 중 발견 대상 |
 | `E_BATCH_TOO_LARGE` | `runBatch` 파라미터 1만 건 또는 직렬화 64 MB 초과 | 아니오(버그) | 콘솔 오류, 호출자가 나눠 보내야 함 |
-| `E_MEM` | 메모리 부족 | 부분 | 작업 중단, 저장 유도 |
+| `E_MEM` | 메모리 부족(`RangeError`, sqlite `SQLITE_NOMEM`. 직렬화의 NOMEM은 메시지로 판별) | 부분 | 작업 중단, 저장 유도. 트랜잭션은 롤백되고 DB는 계속 쓸 수 있다 |
 | `E_NAME_INVALID` | 빈·중복 이름 | 예 | 폼 오류 |
 | `E_SYSTEM_COLUMN` | 시스템 열 변경 시도 | 예 | 거부 |
 | `E_VALUE_INVALID` | 타입 검증 실패 | 예 | 편집기 유지 |
@@ -1009,17 +1020,18 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 | 항목 | 목표 | 측정 방법 |
 |---|---|---|
-| 앱 시작(빈 DB) | 1.5초 이하 | Playwright 첫 렌더 시간 |
-| 300 MB 파일 열기 | 5초 이하 | `db.open` 응답 시간 |
+| 앱 시작(빈 DB) | 1.5초 이하 | 테스트 빌드의 `performance.mark('jdr:app.ready')`(문서 시작 → 상태바 "준비됨") |
+| 300 MB 파일 열기 | 5초 이하 | `<input type="file">` 선택 → 행 수 표시까지(`db.open` 포함) |
 | 스크롤 프레임 렌더 | 16 ms 이하 | 성능 트레이스 `render` 마크 |
 | 창 질의(200행) | 50 ms 이하 | Worker 측 타이머 |
-| 셀 편집 반영 | 30 ms 이하 | `command.apply` 왕복 |
+| 셀 편집 반영 | 30 ms 이하 | `command.apply` 왕복(테스트 훅에서 호출, 30만 행 테이블) |
 | 정렬 변경(인덱스 없음) | 1초 이하 | `query.window` 첫 응답 |
 | trigram 검색 | 200 ms 이하 | `query.count` |
-| 300 MB 저장 | 5초 이하 + 디스크 시간 | `db.snapshot` + write |
+| 300 MB 저장 | 5초 이하 + 디스크 시간 | `db.snapshot` 왕복 + Blob 생성(헤드리스는 다운로드 폴백이라 디스크 시간 제외) |
 | 150 MB CSV 가져오기 | 60초 이하 | `import.run` |
 | 산출물 크기 | 6 MB 이하 | `verify.mjs` |
-| 최대 힙(300 MB DB 저장 시점) | 1.2 GB 이하 | 힙 스냅샷 |
+| 최대 힙(300 MB DB 저장 시점) | 1.2 GB 이하 | 렌더러 프로세스 RSS 최대값(Linux `/proc`. Worker의 wasm 메모리 포함) |
+| 30만 행 CSV 내보내기 | 예산 없음(기록만) | `export.stream` 시작 → 다운로드 완료 |
 
 데스크톱 모드(Step 11)는 같은 UI 예산에 아래를 더한다. 측정 환경은 위와 같고, 픽스처는 500만 행 × 20열(약 5 GB DB)이다.
 
@@ -1033,6 +1045,8 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | 최대 상주 메모리(5 GB DB) | 500 MB 이하 | OS 프로세스 측정 |
 
 예산을 넘기면 원인을 기록하고 설계(D-05, D-06, D-15)를 재검토한다. 예산을 낮추는 것으로 해결하지 않는다.
+
+위 표의 예산은 로컬 측정(`npm run test:perf`)의 판정 기준이다. CI 러너는 환경이 다르고 흔들리므로 절대 예산 대신 `test/perf/perf-baseline.json`(같은 러너에서 잰 기준선) 대비 30% 이상 회귀를 실패로 본다(CLAUDE.md 6장). 기준선 갱신은 원인과 함께 PR 설명에 적는다.
 
 ---
 

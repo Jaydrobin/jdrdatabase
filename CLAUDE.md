@@ -137,7 +137,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 - 파서 테스트는 `test/fixtures/`의 바이트 픽스처를 사용한다. 특히 조각 경계(32 KB) 위에 따옴표 필드가 걸치는 케이스, BOM, EUC-KR, CRLF/LF 혼재.
 - E2E는 빌드된 `dist/jdrdatabase.html`을 `file://`로 연다. 소스를 직접 서빙해 테스트하지 않는다(단일 파일 산출물 자체가 검증 대상).
 - E2E에서 네이티브 파일 선택기는 자동화할 수 없으므로 폴백 경로(`setInputFiles`, 다운로드 이벤트)를 사용한다. 테스트 빌드는 `window.__jdrTest` 훅을 노출하고 릴리스 빌드는 노출하지 않는다.
-- 성능 테스트는 절대 시간이 아니라 CI 기준선 대비 30% 이상 회귀를 실패로 본다. 기준선은 `test/e2e/perf-baseline.json`.
+- 성능 테스트는 로컬에서는 `DESIGN.md` 8장의 절대 예산으로, CI에서는 기준선 대비 30% 이상 회귀를 실패로 본다. 기준선은 `test/perf/perf-baseline.json`(CI 러너 실측)이며 갱신 사유를 PR 설명에 적는다.
 - 버그 수정 PR은 재현 테스트를 먼저 추가한다(빨강 → 초록).
 
 ## 7. 코드 점검 체크리스트
