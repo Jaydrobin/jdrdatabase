@@ -9,8 +9,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../../../src/app/store.js';
+import { AppError } from '../../../src/util/errors.js';
 import { createClient, createInlineTransport } from '../../../src/db/client.js';
 import { createAutosave } from '../../../src/io/autosave.js';
+import { gunzip, gzip, gzipSupported, isGzip } from '../../../src/io/filesystem.js';
 import { createMemoryIdb } from '../../../src/io/idb.js';
 import { createTabLock } from '../../../src/io/tablock.js';
 import { loadWasmBinary } from '../db/helpers.js';
@@ -56,10 +58,47 @@ function fakeFs() {
   const written = new Map();
   /** @type {SaveTarget} */
   let nextSaveTarget = { kind: 'download', name: 'database.db' };
+  /** @type {Array<{ name: string, kind: string }>} */
+  const picks = [];
+  /** 싱크가 받은 조각(내보내기). `closed`·`aborted`로 마감 방식을 남긴다. */
+  /** @type {Array<{ name: string, mime: string, parts: Uint8Array[], closed: boolean, aborted: boolean }>} */
+  const sinks = [];
   /** @type {FileSystemLike} */
   const fs = {
     pickOpen: async () => null,
-    pickSaveAs: async () => nextSaveTarget,
+    pickSaveAs: async (name, kind = 'db') => {
+      picks.push({ name, kind });
+      // 다운로드 대상은 제안 이름을 그대로 쓴다(브라우저의 폴백과 같다).
+      if (nextSaveTarget.kind === 'download') return { kind: 'download', name };
+      return nextSaveTarget;
+    },
+    openSink: async (target, mime) => {
+      const name = target.kind === 'handle' ? target.handle.name : target.name;
+      const sink = {
+        name,
+        mime,
+        parts: /** @type {Uint8Array[]} */ ([]),
+        closed: false,
+        aborted: false,
+      };
+      sinks.push(sink);
+      return {
+        write: async (chunk) => {
+          if (sink.aborted) throw new Error('sink aborted');
+          sink.parts.push(chunk);
+        },
+        close: async () => {
+          sink.closed = true;
+        },
+        abort: async () => {
+          sink.aborted = true;
+        },
+      };
+    },
+    gzip,
+    gunzip,
+    isGzip,
+    gzipSupported,
     readAll: async (source) => {
       if (source instanceof File) return new Uint8Array(await source.arrayBuffer());
       const h = /** @type {{ name: string }} */ (/** @type {unknown} */ (source));
@@ -78,6 +117,8 @@ function fakeFs() {
     fs,
     downloads,
     written,
+    picks,
+    sinks,
     /** @param {SaveTarget} t */
     setSaveTarget: (t) => {
       nextSaveTarget = t;
@@ -786,5 +827,285 @@ test('importRun: 읽기 전용이면 실행하지 않고 안내, 실패는 던�
   await roClient.call('db.close');
   roClient.close();
   await client.call('db.close');
+  client.close();
+});
+
+// ---- Step 9 ----
+
+test('gzip 저장(.db.gz) → 열기 왕복: 매직으로 판별하고 압축 해제 뒤 같은 db_id·데이터', async () => {
+  const { store, client, fsx } = await setup();
+  const dbId = store.getState().meta.db_id ?? '';
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  store.setSaveGzip(true);
+  assert.equal(await store.saveAs(), true);
+  assert.deepEqual(fsx.picks.at(-1), { name: 'database.db.gz', kind: 'db' });
+  const download = fsx.downloads[0];
+  assert.ok(download);
+  assert.equal(download.name, 'database.db.gz');
+  assert.equal(isGzip(download.bytes), true);
+  assert.equal(store.getState().file.gzip, true);
+  assert.equal(store.getState().file.size, download.bytes.byteLength);
+  assert.equal(store.getState().meta.revision, '1');
+
+  await store.newDatabase({ force: true });
+  assert.equal(await store.openPicked(pickedFile('saved.db.gz', download.bytes)), true);
+  const reopened = store.getState();
+  assert.equal(reopened.meta.db_id, dbId);
+  assert.equal(reopened.meta.revision, '1');
+  assert.equal(reopened.file.gzip, true, '열 때 판별한 형식');
+  assert.deepEqual((await client.call('engine.exec', { sql: 'SELECT s FROM t' })).rows, [['하나']]);
+  // "저장"은 형식을 유지한다(다운로드 폴백이라 saveAs로 가고 제안 이름이 .gz).
+  await client.call('command.apply', {
+    cmd: { ...CREATE_T, type: 'row', do: [{ sql: "INSERT INTO t (s) VALUES ('둘')" }], undo: [] },
+  });
+  store.markDirty();
+  assert.equal(await store.save(), true);
+  assert.equal(fsx.downloads.at(-1)?.name, 'saved.db.gz');
+  assert.equal(isGzip(fsx.downloads.at(-1)?.bytes ?? new Uint8Array(0)), true);
+  client.close();
+});
+
+test('gzip: 압축 해제 뒤 크기로 상한을 다시 검사하고, 손상된 gzip은 E_FILE_CORRUPT', async () => {
+  const { store, fsx, notices } = await setup({ caps: { maxFileBytes: 100_000 } });
+  store.setSaveGzip(true);
+  await store.saveAs();
+  const gz = fsx.downloads[0]?.bytes ?? new Uint8Array(0);
+  assert.ok(gz.byteLength < 100_000);
+  const tight = await setup({ caps: { maxFileBytes: gz.byteLength + 1 } });
+  assert.equal(await tight.store.openPicked(pickedFile('x.db.gz', gz)), false);
+  assert.equal(
+    tight.notices.at(-1)?.value,
+    'E_FILE_TOO_LARGE',
+    '압축 파일은 작아 보여도 풀면 넘는다',
+  );
+  tight.client.close();
+
+  const broken = gz.slice();
+  for (let i = 10; i < 40; i += 1) broken[i] = 0;
+  assert.equal(await store.openPicked(pickedFile('broken.db.gz', broken)), false);
+  assert.equal(notices.at(-1)?.value, 'E_FILE_CORRUPT');
+  assert.ok(store.getState().meta.db_id, '새 DB로 돌아온다');
+});
+
+test('gzip 미지원 환경: 저장은 스냅샷 전에 E_GZIP_UNSUPPORTED로 멈추고(revision 그대로), 열기도 거부', async () => {
+  const { store, client, fsx, notices } = await setup();
+  const before = store.getState().meta.revision;
+  fsx.fs.gzipSupported = () => false;
+  store.setSaveGzip(true);
+  assert.equal(await store.saveAs(), false);
+  assert.equal(notices.at(-1)?.value, 'E_GZIP_UNSUPPORTED');
+  assert.equal(store.getState().meta.revision, before, 'revision이 오르지 않았다');
+  assert.equal(fsx.downloads.length, 0);
+  const gz = await gzip(new Uint8Array([1, 2, 3]));
+  assert.equal(await store.openPicked(pickedFile('x.db.gz', gz)), false);
+  assert.equal(notices.at(-1)?.value, 'E_GZIP_UNSUPPORTED');
+  client.close();
+});
+
+test('저장 뮤텍스: 저장 중의 두 번째 저장은 사용자면 file.saveBusy, 자동이면 조용히 false', async () => {
+  const { store, client, fsx, notices } = await setup();
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true);
+  store.markDirty();
+  /** @type {(() => void) | null} */
+  let release = null;
+  const original = fsx.fs.write;
+  fsx.fs.write = async (h, bytes) => {
+    await new Promise((resolve) => {
+      release = () => resolve(undefined);
+    });
+    return original(h, bytes);
+  };
+  const first = store.save();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(store.getState().saving, true);
+  assert.equal(await store.save(), false);
+  assert.equal(notices.at(-1)?.value, 'file.saveBusy');
+  const count = notices.length;
+  assert.equal(await store.save({ auto: true }), false);
+  assert.equal(notices.length, count, '자동 저장은 알리지 않는다');
+  assert.ok(release);
+  /** @type {() => void} */ (release)();
+  assert.equal(await first, true);
+  assert.equal(store.getState().saving, false);
+  assert.equal(store.getState().dirty, false);
+  client.close();
+});
+
+test('자동 저장: 핸들이 없거나 dirty가 아니면 false, 핸들이 있으면 조용히 저장하고 dirty 해제', async () => {
+  const { store, client, fsx, notices } = await setup();
+  assert.equal(
+    await store.save({ auto: true }),
+    false,
+    '핸들 없음(다운로드 폴백으로는 자동 저장하지 않는다)',
+  );
+  assert.equal(fsx.downloads.length, 0);
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true);
+  assert.equal(await store.save({ auto: true }), false, 'dirty가 아니면 쓰지 않는다');
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  // 가짜 핸들은 IDB에 복제되지 않아 최근 파일 기록 오류(E_UNKNOWN)가 매번 난다. 안내(info)만 센다.
+  const infos = () => notices.filter((n) => n.kind === 'info').length;
+  const count = infos();
+  assert.equal(await store.save({ auto: true }), true);
+  assert.equal(infos(), count, '자동 저장 성공은 토스트가 없다');
+  assert.equal(store.getState().dirty, false);
+  assert.equal(store.getState().meta.revision, '2');
+  client.close();
+});
+
+test('backupInfo·restoreBackup: 직전 저장본을 바이트 그대로 새 이름으로 내보내고 열린 DB는 그대로', async () => {
+  const { store, client, fsx, notices } = await setup();
+  assert.equal(await store.backupInfo(), null);
+  assert.equal(await store.restoreBackup(), false);
+  assert.equal(notices.at(-1)?.value, 'backup.none');
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true);
+  const first = fsx.written.get('h.db');
+  assert.ok(first);
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  assert.equal(await store.save(), true);
+  const info = await store.backupInfo();
+  assert.equal(info?.name, 'h.db');
+  assert.equal(info?.bytes, first.byteLength);
+  assert.ok((info?.at ?? 0) > 0);
+
+  fsx.setSaveTarget({ kind: 'download', name: 'ignored' });
+  const revision = store.getState().meta.revision;
+  assert.equal(await store.restoreBackup(), true);
+  assert.deepEqual(fsx.picks.at(-1), { name: 'backup-h.db', kind: 'db' });
+  assert.deepEqual(fsx.downloads.at(-1)?.bytes, first, '저장 직전 파일 그대로');
+  assert.equal(store.getState().meta.revision, revision, '열린 DB는 그대로');
+  assert.equal(store.getState().dirty, false);
+  assert.equal(notices.at(-1)?.value, 'backup.restored');
+  client.close();
+});
+
+test('backupNote: 백업 실패는 저장을 막지 않고 상태에 남으며 다음 저장 성공이 지운다', async () => {
+  const { store, client, fsx, idb } = await setup();
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true);
+  store.markDirty();
+  const put = idb?.put;
+  assert.ok(idb && put);
+  idb.put = async (storeName, key, value) => {
+    if (storeName === 'backups') throw new AppError('E_QUOTA', 'full');
+    return put.call(idb, storeName, key, value);
+  };
+  assert.equal(await store.save(), true, '백업이 실패해도 저장된다');
+  assert.equal(store.getState().backupNote, 'quota');
+  idb.put = put;
+  store.markDirty();
+  assert.equal(await store.save(), true);
+  assert.equal(store.getState().backupNote, 'none');
+  client.close();
+});
+
+test('exportTable: 저장 위치 선택 → 조각을 싱크에 순서대로 쓰고 close, 취소는 null, 실패는 abort', async () => {
+  const { store, client, fsx } = await setup();
+  const { report } = await client.call('import.run', {
+    file: new Blob(['이름,나이\n홍길동,30\n김영희,25\n']),
+    options: { format: 'csv' },
+    mapping: {
+      columns: [
+        { source: 0, name: '이름', type: 'text' },
+        { source: 1, name: '나이', type: 'integer' },
+      ],
+    },
+    target: { kind: 'new', name: '고객' },
+  });
+  const outcome = await store.exportTable({
+    tableId: report.tableId,
+    viewSpec: {},
+    format: 'csv',
+    options: { encoding: 'utf-8' },
+    suggestedName: '고객.csv',
+  });
+  assert.deepEqual(fsx.picks.at(-1), { name: '고객.csv', kind: 'csv' });
+  assert.equal(outcome?.name, '고객.csv');
+  assert.equal(outcome?.rows, 2);
+  const sink = fsx.sinks.at(-1);
+  assert.ok(sink);
+  assert.equal(sink.mime, 'text/csv');
+  assert.equal(sink.closed, true);
+  assert.equal(sink.aborted, false);
+  assert.equal(
+    new TextDecoder().decode(new Uint8Array(sink.parts.flatMap((p) => [...p]))),
+    '이름,나이\r\n홍길동,30\r\n김영희,25\r\n',
+  );
+  assert.equal(store.getState().dirty, false, '내보내기는 DB를 바꾸지 않는다');
+
+  fsx.setSaveTarget({ kind: 'cancelled' });
+  assert.equal(
+    await store.exportTable({
+      tableId: report.tableId,
+      viewSpec: {},
+      format: 'xlsx',
+      suggestedName: 'x.xlsx',
+    }),
+    null,
+  );
+  fsx.setSaveTarget({ kind: 'download', name: 'x' });
+  await assert.rejects(
+    store.exportTable({ tableId: 'nope', viewSpec: {}, format: 'csv', suggestedName: 'x.csv' }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+  );
+  assert.equal(fsx.sinks.at(-1)?.aborted, true, '실패한 싱크는 버린다');
+  assert.equal(fsx.sinks.at(-1)?.closed, false);
+
+  // 이미 취소된 신호: 파일이 만들어지지 않는다.
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    store.exportTable(
+      { tableId: report.tableId, viewSpec: {}, format: 'csv', suggestedName: 'y.csv' },
+      { signal: controller.signal },
+    ),
+    (err) => err instanceof AppError && err.code === 'E_IMPORT_CANCELLED',
+  );
+  assert.equal(fsx.sinks.at(-1)?.aborted, true);
+  client.close();
+});
+
+test('setDeviceName: 다음 저장의 saved_by에 반영된다', async () => {
+  const { store, client } = await setup();
+  store.setDeviceName('  노트북  ');
+  await store.saveAs();
+  assert.equal(store.getState().meta.saved_by, '노트북');
+  store.setDeviceName('');
+  store.markDirty();
+  await store.save();
+  assert.equal(store.getState().meta.saved_by, '노트북', '빈 이름은 무시');
   client.close();
 });

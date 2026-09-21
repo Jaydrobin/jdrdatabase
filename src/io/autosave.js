@@ -5,7 +5,7 @@
  *
  * 저널은 가장 최근에 편집한 DB 하나의 기록만 담는다. 다른 `db_id`의 기록이 시작되면 이전 기록은 지운다.
  * 50 MB를 넘으면 기록을 멈추고 `onFull`을 부른다(UI가 "지금 저장하세요" 배너를 띄운다).
- * 자동 저장 타이머는 Step 9에서 이 파일에 추가된다.
+ * 자동 저장 타이머(`createSaveTimer`, Step 9)도 여기 있다: dirty가 된 뒤 간격마다 저장을 시도한다.
  */
 import { estimateCloneBytes, MB } from '../util/bytes.js';
 import { AppError } from '../util/errors.js';
@@ -207,5 +207,98 @@ export function createAutosave(options) {
 
     isFull: () => full,
     context: () => (ctx ? { ...ctx } : null),
+  };
+}
+
+/** 자동 저장 간격 선택지(초). 0은 꺼짐(기본, DESIGN.md 9장). */
+export const AUTOSAVE_INTERVALS_SECONDS = Object.freeze([0, 30, 60, 120, 300]);
+
+/**
+ * @typedef {object} SaveTimer
+ * @property {(ms: number) => void} setInterval 0이면 끈다. 바꾸면 대기 중인 틱을 다시 잡는다
+ * @property {() => void} markDirty 미저장 변경이 생겼다. 간격이 켜져 있으면 틱을 잡는다
+ * @property {() => void} markClean 저장됐다. 대기 중인 틱을 지운다
+ * @property {() => boolean} armed 틱이 잡혀 있는가(테스트용)
+ * @property {() => void} dispose
+ */
+
+/**
+ * @typedef {object} SaveTimerOptions
+ * @property {() => Promise<boolean>} save 저장 시도. true면 저장됐고, false면 미뤘거나 실패했다(같은 간격 뒤 다시)
+ * @property {number} [intervalMs] 기본 0(꺼짐)
+ * @property {(fn: () => void, ms: number) => unknown} [setTimer] 테스트용 주입. 기본 `setTimeout`
+ * @property {(handle: unknown) => void} [clearTimer] 테스트용 주입. 기본 `clearTimeout`
+ */
+
+/**
+ * 자동 저장 타이머(Step 9). dirty가 되면 `intervalMs` 뒤에 `save()`를 부르고, 저장되지 않았으면(미룸·실패)
+ * 같은 간격 뒤에 다시 시도한다. 저장되면 다음 dirty까지 쉰다. 저장 자체의 뮤텍스·조건(정본 핸들, 읽기 전용)은
+ * 스토어의 몫이고, 이 타이머는 시점만 정한다.
+ * @param {SaveTimerOptions} options
+ * @returns {SaveTimer}
+ */
+export function createSaveTimer(options) {
+  const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = options.clearTimer ?? ((h) => clearTimeout(/** @type {number} */ (h)));
+  let intervalMs = options.intervalMs ?? 0;
+  let dirty = false;
+  /** dirty가 된 횟수. 저장 중에 들어온 변경을 저장 성공으로 지우지 않기 위해 센다. */
+  let generation = 0;
+  let ticking = false;
+  /** @type {unknown} */
+  let handle = null;
+  let disposed = false;
+
+  function clear() {
+    if (handle !== null) clearTimer(handle);
+    handle = null;
+  }
+
+  function arm() {
+    clear();
+    if (disposed || !dirty || intervalMs <= 0) return;
+    handle = setTimer(() => {
+      handle = null;
+      void tick();
+    }, intervalMs);
+  }
+
+  async function tick() {
+    if (disposed || !dirty) return;
+    const before = generation;
+    ticking = true;
+    let saved = false;
+    try {
+      saved = await options.save();
+    } catch {
+      // save()는 실패를 알리고 false를 돌려주는 계약이다. 그래도 던지면 다음 틱에 다시 시도한다.
+      saved = false;
+    }
+    ticking = false;
+    // 저장 중에 들어온 변경은 이번 저장에 담기지 않았을 수 있으므로 dirty로 남긴다.
+    if (saved && generation === before) dirty = false;
+    // 저장이 실패·미뤄졌거나(dirty 유지), 저장 중에 다시 dirty가 됐으면 다음 간격을 잡는다.
+    arm();
+  }
+
+  return {
+    setInterval(ms) {
+      intervalMs = Math.max(0, ms);
+      arm();
+    },
+    markDirty() {
+      dirty = true;
+      generation += 1;
+      if (handle === null && !ticking) arm();
+    },
+    markClean() {
+      dirty = false;
+      clear();
+    },
+    armed: () => handle !== null,
+    dispose() {
+      disposed = true;
+      clear();
+    },
   };
 }

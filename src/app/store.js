@@ -22,6 +22,10 @@ import { AppError, toAppError } from '../util/errors.js';
 /** @typedef {import('../io/tablock.js').TabLock} TabLock */
 /** @typedef {import('../io/filesystem.js').PickedFile} PickedFile */
 /** @typedef {import('../io/filesystem.js').SaveTarget} SaveTarget */
+/** @typedef {import('../io/filesystem.js').SaveKind} SaveKind */
+/** @typedef {import('../io/filesystem.js').ByteSink} ByteSink */
+/** @typedef {import('../export/csv.js').CsvExportOptions} CsvExportOptions */
+/** @typedef {import('../export/csv.js').ExportResult} ExportResult */
 /** @typedef {import('../i18n/index.js').MessageKey} MessageKey */
 /** @typedef {import('../i18n/index.js').MessageParams} MessageParams */
 /** @typedef {import('../db/query.js').ViewSpec} ViewSpec */
@@ -48,11 +52,16 @@ export const MIN_COLUMN_WIDTH = 40;
  * 파일 접근 함수 묶음. `io/filesystem.js`의 export와 같은 형태이며 테스트가 가짜를 넣는다.
  * @typedef {object} FileSystemLike
  * @property {() => Promise<PickedFile | null>} pickOpen
- * @property {(suggestedName: string) => Promise<SaveTarget>} pickSaveAs
+ * @property {(suggestedName: string, kind?: SaveKind) => Promise<SaveTarget>} pickSaveAs
  * @property {(source: File | FileSystemFileHandle) => Promise<Uint8Array>} readAll
  * @property {(handle: FileSystemFileHandle, bytes: Uint8Array<ArrayBuffer>) => Promise<void>} write
  * @property {(name: string, bytes: Uint8Array<ArrayBuffer> | Blob) => void} download
  * @property {(handle: FileSystemFileHandle, mode: 'read' | 'readwrite') => Promise<void>} ensurePermission
+ * @property {(target: { kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string }, mime: string) => Promise<ByteSink>} openSink 내보내기 조각을 받을 싱크(Step 9)
+ * @property {(bytes: Uint8Array) => Promise<Uint8Array<ArrayBuffer>>} gzip
+ * @property {(bytes: Uint8Array) => Promise<Uint8Array<ArrayBuffer>>} gunzip
+ * @property {(bytes: Uint8Array) => boolean} isGzip
+ * @property {() => boolean} gzipSupported
  */
 
 /**
@@ -76,8 +85,33 @@ export const MIN_COLUMN_WIDTH = 40;
  * @typedef {object} FileState
  * @property {string | null} name 저장한 적 없는 새 DB면 null
  * @property {FileSystemFileHandle | null} handle FSA 핸들. 없으면 저장은 다운로드 폴백
- * @property {number} size 마지막으로 읽거나 쓴 바이트 수
+ * @property {number} size 마지막으로 읽거나 쓴 바이트 수(gzip이면 압축된 크기)
+ * @property {boolean} gzip 현재 파일이 gzip(`.db.gz`)인가. "저장"은 이 형식을 유지한다(Step 9)
  */
+
+/**
+ * 마지막 저장의 백업 결과(Step 9 예외 처리: 상태바에 표시). `skipped`는 200 MB 초과, `quota`는 IDB 용량 부족.
+ * @typedef {'none' | 'skipped' | 'quota' | 'failed'} BackupNote
+ */
+
+/**
+ * 직전 저장본 요약(설정 대화상자용).
+ * @typedef {object} BackupInfo
+ * @property {string} name 백업이 만들어질 때의 파일 이름
+ * @property {number} bytes
+ * @property {number} at 백업 시각(epoch ms)
+ */
+
+/**
+ * @typedef {object} ExportArgs
+ * @property {string} tableId
+ * @property {ViewSpec} viewSpec
+ * @property {'csv' | 'xlsx'} format
+ * @property {CsvExportOptions} [options]
+ * @property {string} suggestedName 저장 대화상자의 제안 이름
+ */
+
+/** @typedef {ExportResult & { name: string }} ExportOutcome */
 
 /** @typedef {'none' | 'newerSchema' | 'otherTab'} ReadOnlyReason */
 /** 저널이 기록을 멈춘 이유. `limit`은 50 MB 상한, `import`는 가져오기(Step 7). */
@@ -105,6 +139,8 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {ReadOnlyReason} readOnly
  * @property {boolean} journalFull 저널이 기록을 멈췄다(`journalStop !== 'none'`)
  * @property {JournalStop} journalStop
+ * @property {BackupNote} backupNote 마지막 저장의 백업 결과. 다음 저장이 성공하면 `none`
+ * @property {boolean} saving 저장(사용자·자동)이 진행 중(저장 뮤텍스)
  */
 
 /** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done'} StoreEvent */
@@ -131,8 +167,9 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {TabLock} tablock
  * @property {Prompts} prompts
  * @property {Notifier} notify
- * @property {string} deviceName `_jdr_meta.saved_by`
+ * @property {string} deviceName `_jdr_meta.saved_by`. `setDeviceName`으로 바꾼다
  * @property {string} defaultFileName 새 DB를 처음 저장할 때의 제안 이름
+ * @property {boolean} [saveGzip] 다운로드 폴백의 제안 이름을 `.db.gz`로 만들지(설정). `setSaveGzip`으로 바꾼다
  */
 
 /**
@@ -142,8 +179,14 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(options?: { force?: boolean, dbId?: string }) => Promise<boolean>} newDatabase
  * @property {() => Promise<boolean>} openFile FSA 선택기로 고른 뒤 `openPicked`. 폴백 입력 요소는 UI가 `openPicked`를 직접 부른다
  * @property {(picked: PickedFile) => Promise<boolean>} openPicked 미저장 변경 확인 → 크기 검사 → 열기 → revision 판정
- * @property {() => Promise<boolean>} save
+ * @property {(options?: { auto?: boolean }) => Promise<boolean>} save `auto`면 자동 저장: 정본 핸들이 있고 dirty일 때만, 뮤텍스·`E_DB_BUSY`는 조용히 false
  * @property {() => Promise<boolean>} saveAs
+ * @property {(name: string) => void} setDeviceName `saved_by`에 쓸 기기 이름
+ * @property {(on: boolean) => void} setSaveGzip 폴백 저장의 제안 이름을 `.db.gz`로
+ * @property {() => Promise<BackupInfo | null>} backupInfo 직전 저장본 요약(IDB `backups`). 없으면 null
+ * @property {() => Promise<boolean>} restoreBackup 직전 저장본을 새 이름으로 내보낸다(열린 DB는 그대로)
+ * @property {(tableId: string, viewSpec: ViewSpec) => Promise<number>} countRows 뷰 조건을 포함한 행 수(`query.count`). 실패는 알리고 0
+ * @property {(args: ExportArgs, callOptions?: CallOptions) => Promise<ExportOutcome | null>} exportTable 저장 위치 선택 → `export.stream` 조각을 싱크에 쓰기. 취소는 null, 실패는 던진다(싱크는 버린다)
  * @property {() => void} markDirty
  * @property {(cmd: Command, options?: RecordOptions) => Promise<void>} recordCommand 적용된 커맨드를 저널에 넣고 dirty로 표시한다. 히스토리가 부른 것이 아니면 `onCommand` 구독자에게 알린다
  * @property {(handler: (cmd: Command) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
@@ -191,10 +234,12 @@ function toStoreError(err) {
  */
 export function createStore(deps) {
   const { client, caps, fs, idb, autosave, tablock, prompts, notify } = deps;
+  let deviceName = deps.deviceName;
+  let saveGzip = deps.saveGzip === true;
 
   /** @type {StoreState} */
   const state = {
-    file: { name: null, handle: null, size: 0 },
+    file: { name: null, handle: null, size: 0, gzip: false },
     meta: {},
     tables: [],
     currentTableId: null,
@@ -202,6 +247,8 @@ export function createStore(deps) {
     readOnly: 'none',
     journalFull: false,
     journalStop: 'none',
+    backupNote: 'none',
+    saving: false,
   };
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
@@ -318,10 +365,10 @@ export function createStore(deps) {
 
   /**
    * 열기·새로 만들기 뒤의 공통 상태 설정.
-   * @param {{ name: string | null, handle: FileSystemFileHandle | null, size: number, meta: Meta, tables: TableInfo[], readOnly: ReadOnlyReason }} next
+   * @param {{ name: string | null, handle: FileSystemFileHandle | null, size: number, gzip: boolean, meta: Meta, tables: TableInfo[], readOnly: ReadOnlyReason }} next
    */
   function setOpened(next) {
-    state.file = { name: next.name, handle: next.handle, size: next.size };
+    state.file = { name: next.name, handle: next.handle, size: next.size, gzip: next.gzip };
     state.meta = next.meta;
     state.currentTableId = null;
     views.clear();
@@ -429,10 +476,10 @@ export function createStore(deps) {
 
   /**
    * 저장 뒤의 공통 처리: 메타 갱신, 저널 비움, known 갱신, dirty 해제.
-   * @param {{ name: string, handle: FileSystemFileHandle | null, size: number, meta: Meta }} saved
+   * @param {{ name: string, handle: FileSystemFileHandle | null, size: number, gzip: boolean, meta: Meta }} saved
    */
   async function setSaved(saved) {
-    state.file = { name: saved.name, handle: saved.handle, size: saved.size };
+    state.file = { name: saved.name, handle: saved.handle, size: saved.size, gzip: saved.gzip };
     state.meta = saved.meta;
     state.dirty = false;
     await autosave.clear();
@@ -472,56 +519,105 @@ export function createStore(deps) {
       const previous = await fs.readAll(handle);
       if (previous.byteLength === 0) return;
       if (previous.byteLength > BACKUP_MAX_BYTES) {
+        state.backupNote = 'skipped';
         notify.info('file.backupSkipped');
         return;
       }
-      await idb.put('backups', dbId, { name: state.file.name, bytes: previous, at: Date.now() });
+      await idb.put('backups', dbId, {
+        name: state.file.name ?? handle.name,
+        bytes: previous,
+        at: Date.now(),
+      });
+      state.backupNote = 'none';
     } catch (err) {
       const appErr = toStoreError(err);
+      // 백업은 저장을 막지 않는다(Step 9 예외 처리). 상태바가 다음 저장 성공까지 표시한다.
+      state.backupNote = appErr.code === 'E_QUOTA' ? 'quota' : 'failed';
       notify.info('file.backupFailed', { code: appErr.code });
     }
   }
 
   /**
+   * gzip 형식으로 저장할 대상인가(이름이 `.gz`로 끝난다).
+   * @param {string} name
+   */
+  function wantsGzip(name) {
+    return /\.gz$/i.test(name);
+  }
+
+  /**
    * 스냅샷을 만들고 대상에 쓴다. 실패 시 원본은 그대로다(`createWritable`의 원자성).
+   * 순서는 gzip 지원 확인 → 스냅샷(revision+1) → gzip → 기존 파일 백업 → 쓰기다. 지원 확인을 먼저 하는 이유는
+   * 파일에는 아무것도 쓰이지 않았는데 revision만 오른 DB가 남지 않게 하기 위해서다.
+   * 저장 뮤텍스(Step 9): 진행 중이면 사용자 저장은 알리고, 자동 저장은 조용히 미룬다.
    * @param {{ kind: 'handle', handle: FileSystemFileHandle, name: string } | { kind: 'download', name: string }} target
+   * @param {{ auto?: boolean }} [options]
    * @returns {Promise<boolean>}
    */
-  async function writeSnapshot(target) {
+  async function writeSnapshot(target, options = {}) {
     if (state.readOnly !== 'none') {
-      notify.info('file.readOnlyBlocked');
+      if (!options.auto) notify.info('file.readOnlyBlocked');
       return false;
     }
+    if (state.saving) {
+      if (!options.auto) notify.info('file.saveBusy');
+      return false;
+    }
+    const gzip = wantsGzip(target.name);
+    if (gzip && !fs.gzipSupported()) {
+      notify.error(new AppError('E_GZIP_UNSUPPORTED', 'CompressionStream is missing'));
+      return false;
+    }
+    state.saving = true;
+    emit('state:changed');
     try {
       const snap = await client.call('db.snapshot', {
         bumpRevision: true,
-        savedBy: deps.deviceName,
+        savedBy: deviceName,
       });
+      const bytes = gzip ? await fs.gzip(snap.bytes) : snap.bytes;
       if (target.kind === 'handle') {
         await backupBefore(target.handle, snap.meta.db_id ?? '');
-        await fs.write(target.handle, snap.bytes);
+        await fs.write(target.handle, bytes);
         await setSaved({
           name: target.name,
           handle: target.handle,
-          size: snap.bytes.byteLength,
+          size: bytes.byteLength,
+          gzip,
           meta: snap.meta,
         });
-        notify.info('file.saved', { name: target.name });
+        if (!options.auto) notify.info('file.saved', { name: target.name });
       } else {
-        fs.download(target.name, snap.bytes);
+        fs.download(target.name, bytes);
         await setSaved({
           name: target.name,
           handle: null,
-          size: snap.bytes.byteLength,
+          size: bytes.byteLength,
+          gzip,
           meta: snap.meta,
         });
         notify.info('file.downloaded', { name: target.name });
       }
       return true;
     } catch (err) {
-      notify.error(toStoreError(err));
+      const appErr = toStoreError(err);
+      // 자동 저장이 가져오기·내보내기(배타 op)와 겹친 것은 오류가 아니라 미룸이다.
+      if (!(options.auto && appErr.code === 'E_DB_BUSY')) notify.error(appErr);
       return false;
+    } finally {
+      state.saving = false;
+      emit('state:changed');
     }
+  }
+
+  /**
+   * 파일 이름에서 `.gz`를 붙이거나 뗀다.
+   * @param {string} name
+   * @param {boolean} gzip
+   */
+  function withGzipName(name, gzip) {
+    const base = name.replace(/\.gz$/i, '');
+    return gzip ? `${base}.gz` : base;
   }
 
   /** @type {Store} */
@@ -554,6 +650,7 @@ export function createStore(deps) {
           name: null,
           handle: null,
           size: 0,
+          gzip: false,
           meta: opened.meta,
           tables: opened.tables,
           readOnly: 'none',
@@ -582,21 +679,39 @@ export function createStore(deps) {
     async openPicked(picked) {
       if (!(await confirmDiscard())) return false;
       const size = picked.file.size;
-      if (size > caps.maxFileBytes) {
-        notify.error(
-          new AppError('E_FILE_TOO_LARGE', `file is ${size} bytes, limit ${caps.maxFileBytes}`, {
-            detail: { bytes: size, limit: caps.maxFileBytes },
-          }),
-        );
-        return false;
-      }
-      if (size > caps.warnFileBytes) {
-        if (!(await prompts.largeFile({ size, warn: caps.warnFileBytes }))) return false;
-      }
+      /**
+       * 크기 검사. gzip 파일은 압축 해제 뒤 크기로 한 번 더 한다(압축 파일은 작아 보인다).
+       * @param {number} bytes
+       * @returns {Promise<boolean>} 계속하는가
+       */
+      const checkSize = async (bytes) => {
+        if (bytes > caps.maxFileBytes) {
+          notify.error(
+            new AppError('E_FILE_TOO_LARGE', `file is ${bytes} bytes, limit ${caps.maxFileBytes}`, {
+              detail: { bytes, limit: caps.maxFileBytes },
+            }),
+          );
+          return false;
+        }
+        if (bytes > caps.warnFileBytes) {
+          return prompts.largeFile({ size: bytes, warn: caps.warnFileBytes });
+        }
+        return true;
+      };
+      if (!(await checkSize(size))) return false;
       /** @type {import('../db/worker.js').OpenResult} */
       let opened;
+      let gzip = false;
       try {
-        const bytes = await fs.readAll(picked.handle ?? picked.file);
+        let bytes = await fs.readAll(picked.handle ?? picked.file);
+        if (fs.isGzip(bytes)) {
+          gzip = true;
+          if (!fs.gzipSupported()) {
+            throw new AppError('E_GZIP_UNSUPPORTED', 'DecompressionStream is missing');
+          }
+          bytes = await fs.gunzip(bytes);
+          if (!(await checkSize(bytes.byteLength))) return false;
+        }
         opened = await client.call('db.open', { bytes }, { transfer: [bytes.buffer] });
       } catch (err) {
         // 이전 DB는 이미 닫혔다. 사용 가능한 상태로 돌아가기 위해 새 DB를 연다.
@@ -636,6 +751,7 @@ export function createStore(deps) {
         name: picked.name,
         handle: picked.handle,
         size,
+        gzip,
         meta: opened.meta,
         tables: opened.tables,
         readOnly,
@@ -649,21 +765,36 @@ export function createStore(deps) {
       return true;
     },
 
-    async save() {
+    async save(options = {}) {
+      if (options.auto) {
+        // 자동 저장은 정본 파일(핸들)이 있을 때만이고, 다운로드 폴백으로는 하지 않는다(Step 9).
+        if (!state.file.handle || !state.dirty || state.readOnly !== 'none') return false;
+        return writeSnapshot(
+          {
+            kind: 'handle',
+            handle: state.file.handle,
+            name: state.file.name ?? deps.defaultFileName,
+          },
+          { auto: true },
+        );
+      }
       if (!state.file.handle) return store.saveAs();
       return writeSnapshot({
         kind: 'handle',
         handle: state.file.handle,
-        name: state.file.name ?? deps.defaultFileName,
+        // "저장"은 현재 파일의 형식(gzip 여부)을 유지한다. 이름은 열 때 판별한 형식을 따른다.
+        name: withGzipName(state.file.name ?? deps.defaultFileName, state.file.gzip),
       });
     },
 
     async saveAs() {
-      const suggested = state.file.name ?? deps.defaultFileName;
+      const current = state.file.name ?? deps.defaultFileName;
+      // 폴백(다운로드) 경로에서는 설정의 "압축 저장"이 제안 이름을 정한다. 핸들이 있는 파일은 그 형식을 제안한다.
+      const suggested = withGzipName(current, state.file.handle ? state.file.gzip : saveGzip);
       /** @type {SaveTarget} */
       let target;
       try {
-        target = await fs.pickSaveAs(suggested);
+        target = await fs.pickSaveAs(suggested, 'db');
       } catch (err) {
         notify.error(toStoreError(err));
         return false;
@@ -673,6 +804,156 @@ export function createStore(deps) {
         return writeSnapshot({ kind: 'handle', handle: target.handle, name: target.handle.name });
       }
       return writeSnapshot({ kind: 'download', name: target.name });
+    },
+
+    setDeviceName(name) {
+      const next = typeof name === 'string' ? name.trim() : '';
+      if (next) deviceName = next;
+    },
+
+    setSaveGzip(on) {
+      saveGzip = on === true;
+    },
+
+    async backupInfo() {
+      if (!idb) return null;
+      const dbId = state.meta.db_id ?? '';
+      if (!dbId) return null;
+      try {
+        const stored = await idb.get('backups', dbId);
+        if (!stored || typeof stored !== 'object') return null;
+        const b = /** @type {{ name?: unknown, bytes?: unknown, at?: unknown }} */ (stored);
+        if (!(b.bytes instanceof Uint8Array)) return null;
+        return {
+          name: typeof b.name === 'string' ? b.name : deps.defaultFileName,
+          bytes: b.bytes.byteLength,
+          at: typeof b.at === 'number' ? b.at : 0,
+        };
+      } catch (err) {
+        notify.error(toAppError(err));
+        return null;
+      }
+    },
+
+    async restoreBackup() {
+      if (caps.persistence !== 'snapshot') {
+        notify.error(new AppError('E_UNSUPPORTED', 'backup restore is Step 11 in this mode'));
+        return false;
+      }
+      if (!idb) {
+        notify.info('backup.none');
+        return false;
+      }
+      const dbId = state.meta.db_id ?? '';
+      /** @type {{ name?: unknown, bytes?: unknown } | undefined} */
+      let stored;
+      try {
+        stored = /** @type {{ name?: unknown, bytes?: unknown } | undefined} */ (
+          await idb.get('backups', dbId)
+        );
+      } catch (err) {
+        notify.error(toAppError(err));
+        return false;
+      }
+      const bytes = stored?.bytes;
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
+        notify.info('backup.none');
+        return false;
+      }
+      const original = typeof stored?.name === 'string' ? stored.name : deps.defaultFileName;
+      /** @type {SaveTarget} */
+      let target;
+      try {
+        target = await fs.pickSaveAs(`backup-${original}`, 'db');
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return false;
+      }
+      if (target.kind === 'cancelled') return false;
+      // 바이트를 그대로 쓴다(압축 여부도 그대로). 열린 DB와 정본 파일은 건드리지 않는다.
+      const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+      copy.set(bytes);
+      try {
+        if (target.kind === 'handle') {
+          await fs.write(target.handle, copy);
+          notify.info('backup.restored', { name: target.handle.name });
+        } else {
+          fs.download(target.name, copy);
+          notify.info('backup.restored', { name: target.name });
+        }
+        return true;
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return false;
+      }
+    },
+
+    async countRows(tableId, viewSpec) {
+      try {
+        return (await client.call('query.count', { tableId, viewSpec })).count;
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return 0;
+      }
+    },
+
+    async exportTable(args, callOptions = {}) {
+      const kind = args.format === 'xlsx' ? 'xlsx' : 'csv';
+      const target = await fs.pickSaveAs(args.suggestedName, kind);
+      if (target.kind === 'cancelled') return null;
+      const name = target.kind === 'handle' ? target.handle.name : target.name;
+      const sink = await fs.openSink(
+        target,
+        kind === 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'text/csv',
+      );
+      // 조각은 도착 순서대로 싱크에 쓴다. 쓰기는 비동기이므로 사슬로 이어 순서를 지키고, 쓰기 실패는
+      // 취소 신호로 Worker를 멈춘 뒤 다시 던진다.
+      const controller = new AbortController();
+      const abortUpstream = () => controller.abort();
+      if (callOptions.signal?.aborted) controller.abort();
+      else callOptions.signal?.addEventListener('abort', abortUpstream, { once: true });
+      /** @type {Promise<void>} */
+      let queue = Promise.resolve();
+      /** @type {AppError | null} */
+      let sinkError = null;
+      try {
+        const result = await client.call(
+          'export.stream',
+          {
+            tableId: args.tableId,
+            viewSpec: args.viewSpec,
+            format: args.format,
+            ...(args.options ? { options: args.options } : {}),
+          },
+          {
+            signal: controller.signal,
+            onProgress: callOptions.onProgress,
+            onChunk: (chunk) => {
+              queue = queue.then(async () => {
+                if (sinkError) return;
+                try {
+                  await sink.write(chunk);
+                } catch (err) {
+                  sinkError = toStoreError(err);
+                  controller.abort();
+                }
+              });
+            },
+          },
+        );
+        await queue;
+        if (sinkError) throw sinkError;
+        await sink.close();
+        return { ...result, name };
+      } catch (err) {
+        await queue;
+        await sink.abort();
+        throw sinkError ?? toStoreError(err);
+      } finally {
+        callOptions.signal?.removeEventListener('abort', abortUpstream);
+      }
     },
 
     markDirty() {

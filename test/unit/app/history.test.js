@@ -10,6 +10,7 @@ import { createHistory, HISTORY_LIMIT } from '../../../src/app/history.js';
 import { createStore } from '../../../src/app/store.js';
 import { createClient, createInlineTransport } from '../../../src/db/client.js';
 import { createAutosave } from '../../../src/io/autosave.js';
+import { gunzip, gzip, gzipSupported, isGzip } from '../../../src/io/filesystem.js';
 import { createMemoryIdb } from '../../../src/io/idb.js';
 import { createTabLock } from '../../../src/io/tablock.js';
 import { AppError } from '../../../src/util/errors.js';
@@ -47,6 +48,15 @@ async function setup() {
       write: async () => {},
       download: () => {},
       ensurePermission: async () => {},
+      openSink: async () => ({
+        write: async () => {},
+        close: async () => {},
+        abort: async () => {},
+      }),
+      gzip,
+      gunzip,
+      isGzip,
+      gzipSupported,
     },
     idb,
     autosave,

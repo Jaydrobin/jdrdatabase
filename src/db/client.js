@@ -32,6 +32,7 @@ import { createDispatcher } from './worker.js';
  * @property {Transferable[]} [transfer] 1 MB를 넘는 ArrayBuffer는 반드시 여기에 넣는다
  * @property {(progress: RpcProgress) => void} [onProgress]
  * @property {AbortSignal} [signal] 취소. 취소를 지원하는 op만 실제로 멈춘다
+ * @property {(chunk: Uint8Array<ArrayBuffer>) => void} [onChunk] 조각 이벤트(`export.stream`). 도착 순서가 파일 순서다
  */
 
 /**
@@ -198,7 +199,7 @@ export async function createTransport(options = {}) {
 export function createClient(options) {
   const { transport } = options;
   let nextId = 1;
-  /** @type {Map<number, { resolve: (value: unknown) => void, reject: (err: AppError) => void, onProgress?: (p: RpcProgress) => void }>} */
+  /** @type {Map<number, { resolve: (value: unknown) => void, reject: (err: AppError) => void, onProgress?: (p: RpcProgress) => void, onChunk?: (chunk: Uint8Array<ArrayBuffer>) => void }>} */
   const pending = new Map();
 
   transport.onMessage((message) => {
@@ -207,6 +208,10 @@ export function createClient(options) {
     if (!entry) return;
     if ('progress' in message) {
       entry.onProgress?.(message.progress);
+      return;
+    }
+    if ('chunk' in message) {
+      entry.onChunk?.(message.chunk);
       return;
     }
     pending.delete(message.id);
@@ -235,6 +240,7 @@ export function createClient(options) {
           resolve: (value) => resolve(/** @type {never} */ (value)),
           reject,
           onProgress: callOptions.onProgress,
+          onChunk: callOptions.onChunk,
         });
         callOptions.signal?.addEventListener(
           'abort',

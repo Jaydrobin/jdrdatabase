@@ -4,6 +4,7 @@
  * Step 5: 되돌리기·다시 실행 버튼. 문서 수준 단축키(저장·되돌리기)는 `app/shortcuts.js`의 표를 따른다.
  * Step 6: 표 도구 줄 — 검색 상자, 정렬·필터 대화상자, 뷰 선택·저장·삭제, 검색 인덱스 만들기·삭제.
  * Step 7: 가져오기 버튼. 숨은 `<input type="file">`을 열고 고른 파일로 가져오기 대화상자를 띄운다.
+ * Step 9: 설정 버튼(대화상자는 `deps.openSettings`가 연다)과 표 도구 줄의 내보내기 버튼.
  * 표 도구는 지금 고른 테이블에 대한 것이며 테이블이 없으면 숨긴다.
  * 사용자 데이터(파일 이름·뷰 이름)는 textContent로만 넣는다.
  */
@@ -14,6 +15,7 @@ import { toAppError } from '../util/errors.js';
 import { formatInteger } from '../util/format.js';
 import { isDialogOpen } from './dialogs/dialog.js';
 import { confirmDeleteView, promptFilter, promptSort, promptViewName } from './dialogs/filter.js';
+import { openExportDialog } from './dialogs/export.js';
 import { IMPORT_ACCEPT, IMPORT_INPUT_CLASS, openImportDialog } from './dialogs/import.js';
 
 /** @typedef {import('../app/store.js').Store} Store */
@@ -49,7 +51,7 @@ function makeButton(label, action) {
  * @param {HTMLElement} parent
  * @param {Store} store
  * @param {History} history
- * @param {{ toasts: Toasts }} deps
+ * @param {{ toasts: Toasts, openSettings: () => Promise<void> }} deps
  * @returns {Toolbar}
  */
 export function mountToolbar(parent, store, history, deps) {
@@ -66,6 +68,7 @@ export function mountToolbar(parent, store, history, deps) {
   const saveButton = makeButton(t('toolbar.save'), 'save');
   const saveAsButton = makeButton(t('toolbar.saveAs'), 'save-as');
   const importButton = makeButton(t('toolbar.import'), 'import');
+  const settingsButton = makeButton(t('toolbar.settings'), 'settings');
   const undoButton = makeButton(t('toolbar.undo'), 'undo');
   const redoButton = makeButton(t('toolbar.redo'), 'redo');
 
@@ -120,6 +123,7 @@ export function mountToolbar(parent, store, history, deps) {
   const viewSaveButton = makeButton(t('toolbar.viewSave'), 'view-save');
   const viewDeleteButton = makeButton(t('toolbar.viewDelete'), 'view-delete');
   const indexButton = makeButton('', 'search-index');
+  const exportButton = makeButton(t('toolbar.export'), 'export');
 
   tools.append(
     searchInput,
@@ -130,6 +134,7 @@ export function mountToolbar(parent, store, history, deps) {
     viewSaveButton,
     viewDeleteButton,
     indexButton,
+    exportButton,
   );
 
   el.append(
@@ -139,6 +144,7 @@ export function mountToolbar(parent, store, history, deps) {
     saveButton,
     saveAsButton,
     importButton,
+    settingsButton,
     undoButton,
     redoButton,
     fileName,
@@ -159,6 +165,8 @@ export function mountToolbar(parent, store, history, deps) {
   let busy = false;
   /** 가져오기 대화상자가 열려 있다. */
   let importing = false;
+  /** 설정 대화상자가 열려 있다. */
+  let settingsOpen = false;
   let searchTimer = 0;
 
   /** @returns {TableInfo | null} */
@@ -175,6 +183,7 @@ export function mountToolbar(parent, store, history, deps) {
     saveButton.disabled = state.readOnly !== 'none';
     saveAsButton.disabled = state.readOnly !== 'none';
     importButton.disabled = state.readOnly !== 'none' || importing;
+    settingsButton.disabled = settingsOpen;
     banner.hidden = !state.journalFull;
     banner.textContent =
       state.journalStop === 'import' ? t('toolbar.journalImport') : t('toolbar.journalFull');
@@ -225,6 +234,8 @@ export function mountToolbar(parent, store, history, deps) {
     // 외부(비STRICT) 테이블에는 인덱스를 만들지 않는다(D-07). LIKE 검색은 된다.
     indexButton.hidden = !table.strict;
     indexButton.disabled = !writable || busy;
+    // 내보내기는 읽기라 읽기 전용에서도 된다. 내보낼 열이 없으면 대화상자가 알린다.
+    exportButton.disabled = busy;
     renderViewSelect(view.viewId);
   }
 
@@ -296,6 +307,9 @@ export function mountToolbar(parent, store, history, deps) {
         await refreshViews();
         return;
       }
+      case 'export':
+        await openExportDialog({ store, toasts, table });
+        return;
       case 'search-index': {
         if (table.ftsEnabled) {
           if (await store.disableSearch(table.id)) toasts.info('search.disabled');
@@ -400,6 +414,18 @@ export function mountToolbar(parent, store, history, deps) {
     importInput.click();
   };
 
+  const onSettings = () => {
+    if (settingsOpen) return;
+    settingsOpen = true;
+    render();
+    deps
+      .openSettings()
+      .catch((/** @type {unknown} */ err) => toasts.error(toAppError(err)))
+      .finally(() => {
+        settingsOpen = false;
+        render();
+      });
+  };
   const onNew = () => void store.newDatabase();
   const onOpen = () => {
     if (capabilities().fsa) void store.openFile();
@@ -416,6 +442,7 @@ export function mountToolbar(parent, store, history, deps) {
   saveButton.addEventListener('click', onSave);
   saveAsButton.addEventListener('click', onSaveAs);
   importButton.addEventListener('click', onImport);
+  settingsButton.addEventListener('click', onSettings);
   undoButton.addEventListener('click', onUndo);
   redoButton.addEventListener('click', onRedo);
   tools.addEventListener('click', onToolsClick);
@@ -460,6 +487,7 @@ export function mountToolbar(parent, store, history, deps) {
       saveAsButton.removeEventListener('click', onSaveAs);
       importButton.removeEventListener('click', onImport);
       importInput.removeEventListener('change', onImportInputChange);
+      settingsButton.removeEventListener('click', onSettings);
       undoButton.removeEventListener('click', onUndo);
       redoButton.removeEventListener('click', onRedo);
       tools.removeEventListener('click', onToolsClick);

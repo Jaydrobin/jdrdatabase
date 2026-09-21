@@ -9,6 +9,8 @@
 import { AppError, serializeError } from '../util/errors.js';
 import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
+import { exportCsv } from '../export/csv.js';
+import { exportXlsx } from '../export/xlsx.js';
 import * as pipeline from '../import/pipeline.js';
 import * as query from './query.js';
 import * as search from './search.js';
@@ -50,6 +52,8 @@ import {
 /** @typedef {import('../import/pipeline.js').ImportPolicy} ImportPolicy */
 /** @typedef {import('../import/pipeline.js').ImportReport} ImportReport */
 /** @typedef {import('../import/pipeline.js').PreviewResult} PreviewResult */
+/** @typedef {import('../export/csv.js').CsvExportOptions} CsvExportOptions */
+/** @typedef {import('../export/csv.js').ExportResult} ExportResult */
 
 /**
  * `db.open`·`schema.adopt`의 결과.
@@ -66,8 +70,9 @@ import {
 /** @typedef {{ id: number, ok: true, result: unknown }} RpcOk */
 /** @typedef {{ id: number, ok: false, error: SerializedError }} RpcFail */
 /** @typedef {{ id: number, progress: RpcProgress }} RpcProgressEvent */
+/** @typedef {{ id: number, chunk: Uint8Array<ArrayBuffer> }} RpcChunkEvent 내보내기 조각(Step 9). 바이트는 transfer */
 /** @typedef {{ ready: true }} RpcReady 전송 계층 핸드셰이크. Worker 부팅 직후 한 번 보낸다 */
-/** @typedef {RpcOk | RpcFail | RpcProgressEvent | RpcReady} RpcOutbound */
+/** @typedef {RpcOk | RpcFail | RpcProgressEvent | RpcChunkEvent | RpcReady} RpcOutbound */
 /** @typedef {RpcRequest | RpcCancel} RpcInbound */
 
 /**
@@ -102,6 +107,7 @@ import {
  *   'views.delete': { args: { viewId: string }, result: { cmd: Command } },
  *   'import.preview': { args: { file: Blob, options: ImportOptions }, result: PreviewResult },
  *   'import.run': { args: { file: Blob, options: ImportOptions, mapping: ImportMapping, target: ImportTarget, policy?: ImportPolicy }, result: { report: ImportReport } },
+ *   'export.stream': { args: { tableId: string, viewSpec: ViewSpec, format: 'csv' | 'xlsx', options?: CsvExportOptions }, result: ExportResult },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -111,6 +117,7 @@ import {
  * @typedef {object} HandlerContext
  * @property {AbortSignal} signal 취소 신호. 취소를 지원하는 op만 확인한다
  * @property {(progress: RpcProgress) => void} progress 진행 이벤트. 250 ms 간격으로 조절된다
+ * @property {(bytes: Uint8Array<ArrayBuffer>) => void} chunk 조각 이벤트(`export.stream`). 조절 없이 순서대로, 바이트는 transfer
  */
 
 /**
@@ -152,6 +159,7 @@ export const EXCLUSIVE_OPS = new Set([
   'views.delete',
   'db.snapshot',
   'db.close',
+  'export.stream',
 ]);
 
 /**
@@ -472,6 +480,21 @@ export function createDispatcher(options) {
         progress: ctx.progress,
       }),
 
+    'export.stream': async (args, ctx) => {
+      const active = requireEngine();
+      const table = tables.requireTable(active, args.tableId);
+      const viewSpec = args.viewSpec ?? {};
+      const sink = { write: (/** @type {Uint8Array<ArrayBuffer>} */ bytes) => ctx.chunk(bytes) };
+      const exportCtx = { signal: ctx.signal, progress: ctx.progress };
+      if (args.format === 'xlsx') return exportXlsx(active, table, viewSpec, sink, exportCtx);
+      if (args.format === 'csv') {
+        return exportCsv(active, table, viewSpec, args.options, sink, exportCtx);
+      }
+      throw new AppError('E_DB_QUERY', 'export format must be csv or xlsx', {
+        detail: { format: String(args.format).slice(0, 20) },
+      });
+    },
+
     'db.close': async () => {
       await requireEngine().close();
       return null;
@@ -486,7 +509,7 @@ export function createDispatcher(options) {
     return Object.prototype.hasOwnProperty.call(handlers, op);
   }
 
-  /** 행 수 캐시를 무효화하지 않아도 되는 op: 읽기와, 메타만 쓰는 `db.snapshot`. */
+  /** 행 수 캐시를 무효화하지 않아도 되는 op: 읽기와, 메타만 쓰는 `db.snapshot`, 읽기만 하는 `export.stream`. */
   const READ_OPS = new Set([
     'engine.init',
     'schema.list',
@@ -498,6 +521,7 @@ export function createDispatcher(options) {
     'views.list',
     'import.preview',
     'db.snapshot',
+    'export.stream',
   ]);
 
   /**
@@ -546,10 +570,12 @@ export function createDispatcher(options) {
       assertNotBusy(op);
       inflight.set(id, { op, controller });
       const progress = createProgressReporter((p) => post({ id, progress: p }));
+      /** @param {Uint8Array<ArrayBuffer>} bytes */
+      const chunk = (bytes) => post({ id, chunk: bytes }, [bytes.buffer]);
       const handler = /** @type {(args: unknown, ctx: HandlerContext) => Promise<unknown>} */ (
         handlers[op]
       );
-      const returned = await handler(request.args, { signal: controller.signal, progress });
+      const returned = await handler(request.args, { signal: controller.signal, progress, chunk });
       // 쓰기 op 뒤에는 행 수 캐시가 낡는다. 실패한 쓰기도 롤백 전 상태를 단정할 수 없어 catch에서도 올린다.
       if (!READ_OPS.has(op)) invalidateCounts();
       if (hasTransfer(returned)) {

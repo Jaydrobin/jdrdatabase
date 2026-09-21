@@ -7,16 +7,18 @@
  */
 import { createSchemaCommands, editCell } from './app/commands.js';
 import { createHistory } from './app/history.js';
+import * as settings from './app/settings.js';
 import { createStore } from './app/store.js';
 import { createClient, createTransport } from './db/client.js';
 import { nowIso } from './db/schema.js';
 import { t } from './i18n/index.js';
-import { createAutosave } from './io/autosave.js';
+import { createAutosave, createSaveTimer } from './io/autosave.js';
 import * as filesystem from './io/filesystem.js';
 import { openIdb } from './io/idb.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
 import { confirmDialog } from './ui/dialogs/dialog.js';
+import { openSettingsDialog } from './ui/dialogs/settings.js';
 import { mountLongtextPanel } from './ui/editor/longtext.js';
 import { mountGridHost } from './ui/grid/grid.js';
 import { mountSidebar } from './ui/sidebar.js';
@@ -36,9 +38,6 @@ import { formatInteger } from './util/format.js';
 /** @typedef {import('./app/store.js').Store} Store */
 /** @typedef {import('./io/idb.js').Idb} Idb */
 /** @typedef {import('./ui/grid/grid.js').GridHost} GridHost */
-
-/** IDB `settings`에서 이 기기 이름(`saved_by`)을 두는 키. */
-const DEVICE_NAME_KEY = 'device_name';
 
 /**
  * @typedef {object} Shell
@@ -183,26 +182,6 @@ async function startEngine(opts) {
 }
 
 /**
- * 이 기기 이름(`_jdr_meta.saved_by`). IDB 설정에 있으면 그것, 없으면 만들어 저장한다(D-10).
- * @param {Idb | null} idb
- * @returns {Promise<string>}
- */
-async function loadDeviceName(idb) {
-  const generated = t('device.defaultName', {
-    id: Math.random().toString(36).slice(2, 6).toUpperCase(),
-  });
-  if (!idb) return generated;
-  try {
-    const stored = await idb.get('settings', DEVICE_NAME_KEY);
-    if (typeof stored === 'string' && stored) return stored;
-    await idb.put('settings', DEVICE_NAME_KEY, generated);
-  } catch (err) {
-    console.warn(toAppError(err));
-  }
-  return generated;
-}
-
-/**
  * 셸을 띄운 뒤의 모든 시작 작업. 여기서 던지는 오류는 `boot()`가 잠금 화면으로 바꾼다.
  * @param {Shell} shell
  */
@@ -279,6 +258,9 @@ async function start(shell) {
             readOnly: s.readOnly,
             journalFull: s.journalFull,
             journalStop: s.journalStop,
+            backupNote: s.backupNote,
+            saving: s.saving,
+            gzip: s.file.gzip,
           };
         },
         /** IndexedDB를 실제로 열 수 있었는가(지원 매트릭스 실측용). */
@@ -338,7 +320,8 @@ async function start(shell) {
   idb = opened.idb;
   if (opened.error) console.warn(`${opened.error.code}: ${opened.error.message}`);
 
-  const deviceName = await loadDeviceName(idb);
+  // 설정(Step 9): 기기 이름(saved_by), 자동 저장 간격, 압축 저장. IDB가 없으면 이 실행 동안만 유효하다.
+  let current = await settings.load(idb);
   const tablock = createTabLock();
   tabLockAvailable = tablock.available;
   const autosave = createAutosave({ idb });
@@ -352,10 +335,41 @@ async function start(shell) {
     tablock,
     prompts: createPrompts(),
     notify: { error: (err) => shell.toasts.error(err), info: (k, p) => shell.toasts.info(k, p) },
-    deviceName,
+    deviceName: current.deviceName,
     defaultFileName: t('file.defaultName'),
+    saveGzip: current.saveGzip,
   });
   const active = store;
+  // 자동 저장 타이머(Step 9). dirty가 되면 간격 뒤에 저장을 시도하고, 저장이 뮤텍스·E_DB_BUSY로 미뤄지면
+  // 같은 간격 뒤에 다시. 정본 핸들이 없는(다운로드 폴백) DB에서는 스토어가 false를 돌려주므로 조용히 미뤄진다.
+  const saveTimer = createSaveTimer({
+    save: () => active.save({ auto: true }),
+    intervalMs: current.autosaveSeconds * 1000,
+  });
+  active.on('file:dirty', () => saveTimer.markDirty());
+  active.on('file:saved', () => saveTimer.markClean());
+  active.on('file:opened', () => saveTimer.markClean());
+
+  async function openSettings() {
+    const next = await openSettingsDialog({
+      store: active,
+      toasts: shell.toasts,
+      settings: current,
+      gzipSupported: filesystem.gzipSupported(),
+    });
+    if (!next) return;
+    current = next;
+    active.setDeviceName(next.deviceName);
+    active.setSaveGzip(next.saveGzip);
+    saveTimer.setInterval(next.autosaveSeconds * 1000);
+    try {
+      await settings.save(idb, next);
+    } catch (err) {
+      shell.toasts.error(toAppError(err));
+      return;
+    }
+    shell.toasts.info('settings.saved');
+  }
   const history = createHistory({
     client: session.client,
     store: active,
@@ -363,7 +377,7 @@ async function start(shell) {
   });
 
   historyRef = history;
-  mountToolbar(shell.toolbarHost, active, history, { toasts: shell.toasts });
+  mountToolbar(shell.toolbarHost, active, history, { toasts: shell.toasts, openSettings });
   const sidebar = mountSidebar(shell.body, {
     store: active,
     commands: createSchemaCommands(active),
@@ -414,10 +428,19 @@ async function start(shell) {
   };
   window.addEventListener('beforeunload', onBeforeUnload);
 
+  /** @type {Record<import('./app/store.js').BackupNote, MessageKey | null>} */
+  const BACKUP_NOTES = {
+    none: null,
+    skipped: 'status.backupSkipped',
+    quota: 'status.backupQuota',
+    failed: 'status.backupFailed',
+  };
   active.on('state:changed', () => {
     const s = active.getState();
     shell.statusbar.setNote(
-      s.readOnly !== 'none' ? 'status.readOnly' : idb ? null : 'status.noIdb',
+      s.readOnly !== 'none'
+        ? 'status.readOnly'
+        : (BACKUP_NOTES[s.backupNote] ?? (idb ? null : 'status.noIdb')),
     );
     shell.welcome.hidden = s.currentTableId !== null;
   });

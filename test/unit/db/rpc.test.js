@@ -232,6 +232,7 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
     'command.apply',
     'db.close',
     'db.snapshot',
+    'export.stream',
     'import.run',
     'search.disable',
     'search.enable',
@@ -897,5 +898,68 @@ test('import.run: 취소 신호가 Worker에 닿아 롤백되고 E_IMPORT_CANCEL
     (err) => err instanceof AppError && err.code === 'E_IMPORT_CANCELLED',
   );
   assert.deepEqual((await client.call('schema.list')).tables, [], '새 테이블이 남지 않는다');
+  client.close();
+});
+
+test('export.stream: 조각 이벤트(transfer)가 순서대로 오고 결과를 돌려주며, 배타 op이고 행 수 캐시를 건드리지 않는다', async () => {
+  const { client } = await readyClient();
+  const file = new Blob(['이름,나이\n홍길동,30\n김영희,25\n']);
+  const { report } = await client.call('import.run', {
+    file,
+    options: { format: 'csv' },
+    mapping: {
+      columns: [
+        { source: 0, name: '이름', type: 'text' },
+        { source: 1, name: '나이', type: 'integer' },
+      ],
+    },
+    target: { kind: 'new', name: '고객' },
+  });
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  /** @type {string[]} */
+  const phases = [];
+  const result = await client.call(
+    'export.stream',
+    { tableId: report.tableId, viewSpec: {}, format: 'csv', options: { encoding: 'utf-8' } },
+    { onChunk: (c) => chunks.push(c), onProgress: (p) => phases.push(p.phase) },
+  );
+  const bytes = new Uint8Array(chunks.flatMap((c) => [...c]));
+  assert.equal(new TextDecoder().decode(bytes), '이름,나이\r\n홍길동,30\r\n김영희,25\r\n');
+  assert.deepEqual(result, { rows: 2, bytes: bytes.byteLength, blobCells: 0 });
+  assert.equal(phases[0], 'export');
+  assert.ok(isExclusiveOp('export.stream'));
+
+  // 디스패처가 조각을 transfer 목록과 함께 보낸다.
+  /** @type {Array<[unknown, Transferable[] | undefined]>} */
+  const posted = [];
+  const dispatcher = createDispatcher({ post: (m, t) => posted.push([m, t]) });
+  const wasm = await loadWasmBinary();
+  await dispatcher.dispatch({ id: 1, op: 'engine.init', args: { mode: 'wasm', wasmBinary: wasm } });
+  const snap = await client.call('db.snapshot', {});
+  await dispatcher.dispatch({ id: 2, op: 'db.open', args: { bytes: snap.bytes } });
+  await dispatcher.dispatch({
+    id: 3,
+    op: 'export.stream',
+    args: { tableId: report.tableId, viewSpec: {}, format: 'xlsx' },
+  });
+  const chunkMessages = posted.filter(([m]) => typeof m === 'object' && m !== null && 'chunk' in m);
+  assert.equal(chunkMessages.length, 1, 'xlsx는 조각 하나');
+  const [message, transfer] = /** @type {[{ chunk: Uint8Array }, Transferable[]]} */ (
+    chunkMessages[0]
+  );
+  assert.deepEqual(transfer, [message.chunk.buffer]);
+  const last = /** @type {{ ok: boolean, result: { rows: number } }} */ (posted.at(-1)?.[0]);
+  assert.equal(last.ok, true);
+  assert.equal(last.result.rows, 2);
+
+  await assert.rejects(
+    client.call('export.stream', {
+      tableId: report.tableId,
+      viewSpec: {},
+      format: /** @type {never} */ ('pdf'),
+    }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+  );
   client.close();
 });

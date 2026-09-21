@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createClient, createInlineTransport } from '../../../src/db/client.js';
-import { createAutosave, JOURNAL_LIMIT_BYTES } from '../../../src/io/autosave.js';
+import { createAutosave, createSaveTimer, JOURNAL_LIMIT_BYTES } from '../../../src/io/autosave.js';
 import { createMemoryIdb } from '../../../src/io/idb.js';
 import { MB } from '../../../src/util/bytes.js';
 import { loadWasmBinary } from '../db/helpers.js';
@@ -209,4 +209,103 @@ test('suspend: 기록을 멈추고 truncated로 표시하며 clear가 풀어 준
   fresh.attach({ dbId: 'db-2', baseRevision: 0, fileName: null });
   await fresh.suspend();
   assert.equal(await fresh.recordCommand(insertCmd('t', 'x')), false);
+});
+
+// ---- Step 9: 자동 저장 타이머 ----
+
+/** 가짜 타이머: 잡힌 콜백을 손으로 돌린다. */
+function fakeTimers() {
+  /** @type {Map<number, { fn: () => void, ms: number }>} */
+  const pending = new Map();
+  let next = 1;
+  return {
+    pending,
+    setTimer: (/** @type {() => void} */ fn, /** @type {number} */ ms) => {
+      const id = next;
+      next += 1;
+      pending.set(id, { fn, ms });
+      return id;
+    },
+    clearTimer: (/** @type {unknown} */ id) => {
+      pending.delete(/** @type {number} */ (id));
+    },
+    /** 잡힌 틱을 전부 실행한다. */
+    async fire() {
+      const fns = [...pending.values()].map((p) => p.fn);
+      pending.clear();
+      for (const fn of fns) fn();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+  };
+}
+
+test('createSaveTimer: dirty 뒤 간격마다 save, 성공하면 쉬고, 미뤄지면 다시, 간격 0은 꺼짐', async () => {
+  const timers = fakeTimers();
+  /** @type {boolean[]} */
+  const answers = [];
+  let calls = 0;
+  const timer = createSaveTimer({
+    save: async () => {
+      calls += 1;
+      return answers.shift() ?? true;
+    },
+    intervalMs: 0,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  timer.markDirty();
+  assert.equal(timer.armed(), false, '꺼져 있으면 틱을 잡지 않는다');
+  timer.setInterval(30_000);
+  assert.equal(timer.armed(), true, '간격을 켜면 dirty 상태라 바로 잡는다');
+  assert.equal([...timers.pending.values()][0]?.ms, 30_000);
+
+  answers.push(false);
+  await timers.fire();
+  assert.equal(calls, 1);
+  assert.equal(timer.armed(), true, '미뤄졌으면 같은 간격 뒤 다시');
+  answers.push(true);
+  await timers.fire();
+  assert.equal(calls, 2);
+  assert.equal(timer.armed(), false, '저장되면 다음 dirty까지 쉰다');
+
+  timer.markDirty();
+  assert.equal(timer.armed(), true);
+  timer.markDirty();
+  assert.equal(timers.pending.size, 1, '겹쳐 잡지 않는다');
+  timer.markClean();
+  assert.equal(timer.armed(), false, '사용자 저장이 먼저 끝나면 틱을 지운다');
+
+  timer.markDirty();
+  timer.setInterval(0);
+  assert.equal(timer.armed(), false);
+  timer.setInterval(60_000);
+  assert.equal(timer.armed(), true);
+  timer.dispose();
+  assert.equal(timer.armed(), false);
+  timer.markDirty();
+  assert.equal(timer.armed(), false, 'dispose 뒤에는 잡지 않는다');
+});
+
+test('createSaveTimer: save가 던져도 다음 틱을 잡고, 저장 중 다시 dirty가 되면 이어서 잡는다', async () => {
+  const timers = fakeTimers();
+  let calls = 0;
+  const timer = createSaveTimer({
+    save: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('boom');
+      // 저장 중에 새 변경이 들어온 경우.
+      timer.markDirty();
+      return true;
+    },
+    intervalMs: 1000,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  timer.markDirty();
+  await timers.fire();
+  assert.equal(calls, 1);
+  assert.equal(timer.armed(), true, '던져도 다시 잡는다');
+  await timers.fire();
+  assert.equal(calls, 2);
+  assert.equal(timer.armed(), true, '저장 중 들어온 dirty를 위해 다시 잡는다');
 });

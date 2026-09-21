@@ -669,3 +669,17 @@ body {
   color: var(--jdr-fg-muted);
   font-size: 13px;
 }
+
+/* 내보내기·설정 대화상자 (Step 9) */
+.jdr-import__options[hidden] {
+  display: none;
+}
+
+.jdr-import__warning[hidden] {
+  display: none;
+}
+
+.jdr-dialog__label + .jdr-import__check,
+.jdr-import__muted + .jdr-import__check {
+  margin-top: 8px;
+}
