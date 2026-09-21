@@ -1,0 +1,21 @@
+[package]
+name = "jdr-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "jdrdatabase 데스크톱 모드의 네이티브 SQLite 엔진·저장·작업 사본 (타우리 의존 없음)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "jdr_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jdr-ipc-stdio"
+path = "src/bin/jdr-ipc-stdio.rs"
+
+[dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
