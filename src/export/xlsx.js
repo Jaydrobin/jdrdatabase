@@ -154,8 +154,8 @@ export async function exportXlsx(engine, table, viewSpec, sink, ctx = {}) {
   const written = /** @type {ArrayBuffer} */ (
     XLSX.write(wb, { type: 'array', bookType: 'xlsx', cellDates: true })
   );
-  const bytes = new Uint8Array(new ArrayBuffer(written.byteLength));
-  bytes.set(new Uint8Array(written));
+  // `type: 'array'`의 ArrayBuffer는 그 자리에서 만들어져 뒤에 쓰는 데가 없으므로 복사 없이 감싸 transfer한다.
+  const bytes = new Uint8Array(written);
   result.bytes = bytes.byteLength;
   await sink.write(bytes);
   ctx.progress?.({ phase: 'export', done: result.rows, total: total || result.rows });
