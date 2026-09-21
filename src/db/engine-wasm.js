@@ -515,8 +515,13 @@ export function createWasmEngine(options) {
     snapshot() {
       const lib = requireSqlite3();
       const database = requireDb();
-      if (txDepth > 0) {
-        throw new AppError('E_DB_QUERY', 'snapshot inside transaction');
+      // `txDepth`는 이 엔진의 장부일 뿐이고 sqlite의 실제 상태와 어긋날 수 있다. `transaction()`의 ROLLBACK이
+      // 함께 실패하면 장부는 0으로 돌아가지만 트랜잭션은 열린 채로 남는다. 그 상태로 직렬화하면 커밋되지
+      // 않은 페이지가 섞인 이미지를 사용자의 파일에 덮어쓰게 되므로, sqlite에게 직접 묻는다.
+      if (txDepth > 0 || lib.capi.sqlite3_get_autocommit(database.pointer ?? 0) === 0) {
+        throw new AppError('E_DB_QUERY', 'snapshot inside transaction', {
+          detail: { txDepth },
+        });
       }
       clearStatementCache();
       /** @type {Uint8Array<ArrayBuffer>} */

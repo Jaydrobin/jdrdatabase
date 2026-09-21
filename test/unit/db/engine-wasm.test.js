@@ -178,3 +178,31 @@ test('snapshot: deserialize로 연 DB는 NOCOPY 경로로도 같은 파일을 �
   assert.deepEqual(verify.exec('SELECT s FROM a ORDER BY id').rows, [['하나'], ['둘']]);
   await verify.close();
 });
+
+test('snapshot: 장부와 어긋나게 트랜잭션이 열려 있으면 파일을 내보내지 않는다', async () => {
+  // `transaction()`의 본문이 실패하고 ROLLBACK까지 실패하면 `txDepth`는 0으로 돌아가지만 sqlite에는
+  // 트랜잭션이 남는다(세션 H가 롤백 실패를 detail로 내리면서 오류 코드로도 구분되지 않게 됐다).
+  // 그 상태의 snapshot()은 커밋되지 않은 페이지가 섞인 이미지를 사용자의 파일에 덮어쓴다.
+  // 같은 어긋남을 진단용 `exec('BEGIN')`으로 만든다(BEGIN은 sqlite3_stmt_readonly가 참이라 통과한다).
+  const engine = await openWasmEngine();
+  await engine.transaction(() => {
+    engine.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, s TEXT) STRICT');
+    engine.exec('INSERT INTO a (s) VALUES (?)', ['하나']);
+  });
+  const clean = engine.snapshot();
+  assert.ok(clean.byteLength > 0);
+
+  engine.exec('BEGIN');
+  assert.throws(
+    () => engine.snapshot(),
+    (err) =>
+      err instanceof AppError &&
+      err.code === 'E_DB_QUERY' &&
+      /inside transaction/.test(err.message),
+  );
+
+  // 롤백해 장부와 맞추면 다시 내보낼 수 있다.
+  engine.exec('ROLLBACK');
+  assert.deepEqual(engine.snapshot(), clean);
+  await engine.close();
+});
