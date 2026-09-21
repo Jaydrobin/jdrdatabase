@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient, createInlineTransport, createTransport } from '../../../src/db/client.js';
 import {
+  COUNT_CACHE_MAX,
   createDispatcher,
   createProgressReporter,
   EXCLUSIVE_OPS,
@@ -740,5 +741,76 @@ test('search.enable/disable·views.list/save/delete op (Step 6): 커맨드를 �
   const removed = await client.call('views.delete', { viewId: saved.viewId });
   assert.equal(removed.cmd.type, 'view.delete');
   assert.deepEqual((await client.call('views.list', { tableId })).views, []);
+  client.close();
+});
+
+/** `readyClient`와 같되 디스패처를 함께 돌려준다(캐시 크기를 들여다보는 검사용). */
+async function readyClientWithDispatcher() {
+  /** @type {((message: RpcOutbound) => void) | null} */
+  let handler = null;
+  const dispatcher = createDispatcher({
+    post: (message) => {
+      queueMicrotask(() => handler?.(message));
+    },
+  });
+  const client = createClient({
+    transport: {
+      kind: 'inline',
+      post: (message) => void dispatcher.dispatch(message),
+      onMessage: (h) => {
+        handler = h;
+      },
+      onFatal: () => {},
+      close: () => {
+        handler = null;
+      },
+    },
+  });
+  await client.call('engine.init', { mode: 'wasm', wasmBinary: await loadWasmBinary() });
+  await client.call('db.open', {});
+  return { client, dispatcher };
+}
+
+test('query.count: 행 수 캐시는 검색어마다 늘지 않고 쓰기 뒤에는 다시 센다', async () => {
+  const { client, dispatcher } = await readyClientWithDispatcher();
+  const { tableId } = await client.call('schema.create', { name: '도시' });
+  const { columnId: name } = await client.call('schema.addColumn', {
+    tableId,
+    name: '이름',
+    type: 'text',
+  });
+  const insert = {
+    type: 'test.insert',
+    tableId,
+    do: [{ sql: `INSERT INTO "${tableId}" ("${name}") VALUES ('서울'), ('부산')` }],
+    undo: [{ sql: `DELETE FROM "${tableId}"` }],
+    summary: 'seed',
+  };
+  await client.call('command.apply', { cmd: insert });
+  assert.equal((await client.call('query.count', { tableId, viewSpec: {} })).count, 2);
+
+  // 검색어가 키에 들어가므로 한 글자마다 항목이 하나씩 생긴다. 상한을 넘겨도 답은 그대로여야 한다.
+  for (let i = 0; i < COUNT_CACHE_MAX + 10; i += 1) {
+    const found = await client.call('query.count', { tableId, viewSpec: { search: `없는말${i}` } });
+    assert.equal(found.count, 0, `검색 ${i}`);
+  }
+  assert.ok(
+    dispatcher.countCacheSize() <= COUNT_CACHE_MAX,
+    `검색어마다 항목이 쌓이면 안 된다(지금 ${dispatcher.countCacheSize()}개)`,
+  );
+  // 상한에 밀려 빠진 옛 항목도 다시 세어 같은 답을 준다.
+  assert.equal(
+    (await client.call('query.count', { tableId, viewSpec: { search: '서울' } })).count,
+    1,
+  );
+
+  // 쓰기 뒤에는 캐시를 통째로 비우므로 같은 조건도 새로 센다.
+  await client.call('command.apply', { cmd: insert, direction: 'undo' });
+  assert.equal(dispatcher.countCacheSize(), 0, '쓰기 뒤에는 캐시가 비어 있다');
+  assert.equal((await client.call('query.count', { tableId, viewSpec: {} })).count, 0);
+  assert.equal(
+    (await client.call('query.count', { tableId, viewSpec: { search: '서울' } })).count,
+    0,
+  );
   client.close();
 });

@@ -121,6 +121,12 @@ import {
 export const PROGRESS_INTERVAL_MS = 250;
 
 /**
+ * 행 수 캐시가 들고 있는 (테이블 × 뷰 조건) 항목 수 상한. 쓰기마다 비우므로 평소에는 한참 아래지만,
+ * 쓰기 없이 검색·필터만 바꾸는 동안에도 한계를 둔다.
+ */
+export const COUNT_CACHE_MAX = 64;
+
+/**
  * 서로 배타적인 op. 동시에 오면 `E_DB_BUSY`. `db.open`은 모든 op와 배타적이다.
  *
  * `db.snapshot`·`db.close`는 쓰기는 아니지만 여기 있어야 한다. 둘 다 트랜잭션 상태를 전제로
@@ -180,6 +186,7 @@ export function createProgressReporter(emit, now = () => Date.now()) {
  * @typedef {object} Dispatcher
  * @property {(message: RpcInbound) => Promise<void>} dispatch 요청 하나를 처리하고 응답을 post한다
  * @property {() => Engine | null} engine 현재 엔진(테스트·진단용)
+ * @property {() => number} countCacheSize 행 수 캐시의 항목 수(테스트·진단용)
  */
 
 /**
@@ -204,6 +211,9 @@ export function createDispatcher(options) {
   /**
    * 테이블 id와 뷰 조건(필터·검색. 정렬은 행 수를 바꾸지 않는다)을 키로 한다. `elapsedMs`는 처음 센
    * 시간이며 캐시에서 돌려줄 때도 그대로 보고한다(8장 측정은 첫 계산을 본다).
+   *
+   * 키에 검색어가 들어가므로 한 글자마다 항목이 하나씩 생긴다. 쓰기가 있을 때 통째로 비우고(그때 모든
+   * 항목이 어차피 낡는다) 그 사이에도 상한을 두어, 오래 열어 둔 탭에서 끝없이 자라지 않게 한다.
    * @type {Map<string, { serial: number, count: number, elapsedMs: number }>}
    */
   const countCache = new Map();
@@ -225,8 +235,18 @@ export function createDispatcher(options) {
     const started = performance.now();
     const count = query.count(active, table, viewSpec);
     const elapsedMs = performance.now() - started;
+    if (countCache.size >= COUNT_CACHE_MAX) {
+      const oldest = countCache.keys().next().value;
+      if (oldest !== undefined) countCache.delete(oldest);
+    }
     countCache.set(key, { serial: writeSerial, count, elapsedMs });
     return { count, elapsedMs };
+  }
+
+  /** 쓰기 뒤: 모든 항목이 낡으므로 통째로 비운다(키가 늘어나기만 하는 것을 막는다). */
+  function invalidateCounts() {
+    writeSerial += 1;
+    countCache.clear();
   }
 
   /** @returns {Engine} */
@@ -504,14 +524,14 @@ export function createDispatcher(options) {
       );
       const returned = await handler(request.args, { signal: controller.signal, progress });
       // 쓰기 op 뒤에는 행 수 캐시가 낡는다. 실패한 쓰기도 롤백 전 상태를 단정할 수 없어 catch에서도 올린다.
-      if (!READ_OPS.has(op)) writeSerial += 1;
+      if (!READ_OPS.has(op)) invalidateCounts();
       if (hasTransfer(returned)) {
         post({ id, ok: true, result: returned.result }, returned.transfer);
       } else {
         post({ id, ok: true, result: returned });
       }
     } catch (err) {
-      if (typeof op === 'string' && !READ_OPS.has(op)) writeSerial += 1;
+      if (typeof op === 'string' && !READ_OPS.has(op)) invalidateCounts();
       post({ id, ok: false, error: serializeError(err) });
     } finally {
       inflight.delete(id);
@@ -527,6 +547,8 @@ export function createDispatcher(options) {
       await handle(message);
     },
     engine: () => engine,
+    /** 행 수 캐시가 들고 있는 항목 수(상한을 지키는지 보는 검사용). */
+    countCacheSize: () => countCache.size,
   };
 }
 
