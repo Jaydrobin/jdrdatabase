@@ -58,9 +58,18 @@ export default async function globalTeardown() {
   /** @type {{ environment: string, calibrationMs?: number, metrics: Record<string, Record<string, number>> }} */
   const baseline = JSON.parse(await readFile(BASELINE_PATH, 'utf8'));
   const scale = speedRatio(baseline.calibrationMs, calibrationMs);
-  const { regressions, compared, skipped } = compareWithBaseline(baseline.metrics, reports, scale);
+  const { regressions, compared, skipped, recorded } = compareWithBaseline(
+    baseline.metrics,
+    reports,
+    scale,
+  );
   console.log(
     `[perf] 기준선(${baseline.environment}) 비교: 러너 속도 비 ${scale.toFixed(2)}(보정 ${calibrationMs ?? '없음'} / ${baseline.calibrationMs ?? '없음'} ms), ${compared}개 항목, 건너뜀 ${skipped.length}개${skipped.length ? ` (${skipped.join(', ')})` : ''}`,
+  );
+  // 판정하지 않는 항목은 위 요약에 수치가 남는다. 8장의 절대 예산으로만 보며, 기준으로 삼지 않는 이유는
+  // report.js의 `GATED_METRICS` 주석에 있다.
+  console.log(
+    `[perf] 기록만(기준선 비교 안 함) ${recorded.length}개${recorded.length ? ` (${recorded.join(', ')})` : ''}`,
   );
   if (regressions.length > 0) {
     throw new Error(`[perf] 기준선 대비 30% 이상 회귀:\n${regressions.join('\n')}`);

@@ -39,6 +39,40 @@ export function noiseFloor(key) {
 export function isBytes(key) {
   return key.endsWith('Bytes');
 }
+
+/**
+ * 기준선 비교로 판정하는 항목(`<spec>.<키>`). 여기에 없는 측정값은 요약·로그에는 그대로 남지만 회귀 판정에는
+ * 쓰지 않고, 8장의 절대 예산으로만 본다(DESIGN.md 8장).
+ *
+ * 넣는 기준은 "러너가 바뀌어도 보정으로 설명되는가" 하나다.
+ * - 바이트 항목: 기계 속도와 무관하므로 보정 없이 견준다(`isBytes`).
+ * - 수 초 이상 이어지는 wasm CPU 작업(가져오기, 인덱스 만들기, 내보내기, 전체 훑기): `calibrate.js`의 고정
+ *   작업과 성질이 같아 보정 비가 실제로 맞는다.
+ *
+ * 빼는 것은 브라우저 쪽 1초 미만 지연(앱 시작, 프레임, 왕복, 창 질의, 스냅샷)이다. 앱 코드가 똑같은 CI 실행
+ * 다섯 번에서 이 항목들은 1.5~3.9배까지 흔들렸는데(`editMaxMs` 3.92배, `renderP95Ms` 2.56배, `readyMs`
+ * 1.75배) 같은 실행의 처리량 항목은 1.22배, 보정값은 1.29배였다. I/O·GC·프로세스 경합이 CPU 처리량보다
+ * 훨씬 크게 흔들리는데 보정은 CPU 처리량만 재기 때문이다(세션 H 점검 실측).
+ */
+export const GATED_METRICS = new Set([
+  'import-csv.importMs',
+  'import-xlsx.importMs',
+  'import-xlsx.previewMs',
+  'search.indexBuildMs',
+  'search.likeMs',
+  'search.likeShortMs',
+  'app-300k.exportCsvMs',
+]);
+
+/**
+ * `<spec>.<키>`가 기준선 비교 대상인가. 바이트 항목은 이름만으로 늘 대상이다.
+ * @param {string} name spec 이름
+ * @param {string} key 측정 항목 이름
+ * @returns {boolean}
+ */
+export function isGated(name, key) {
+  return isBytes(key) || GATED_METRICS.has(`${name}.${key}`);
+}
 /** CI에서 기준선 비교를 켜는 환경 변수. 로컬 기본 실행은 8장의 절대 예산으로만 판정한다. */
 export const COMPARE_ENV = 'JDR_PERF_COMPARE';
 /** 절대 예산으로 판정하는가(로컬). CI(기준선 비교)에서는 예산 초과를 기록만 한다(DESIGN.md 8장). */
@@ -78,22 +112,29 @@ export async function record(name, metrics, info = {}) {
 }
 
 /**
- * 기준선 비교. `baseline`에 없는 항목은 건너뛴다(새 측정값은 다음 기준선 갱신에서 들어간다).
+ * 기준선 비교. 판정 대상은 `isGated`가 고르고(나머지는 `recorded`로 이름만 돌려준다), 그중 `baseline`에 없는
+ * 항목은 건너뛴다(`skipped`. 새 측정값은 다음 기준선 갱신에서 들어간다).
  * 회귀 = 기준선 × 러너 속도 비(`scale`, calibrate.js. 시간 항목에만) × 1.3 + 잡음 바닥을 넘는 값.
  * @param {Record<string, Record<string, number>>} baseline spec 이름 → metrics
  * @param {PerfReport[]} reports
  * @param {number} [scale] 이번 러너가 기준선 러너보다 느린 비(1이면 같은 속도). 바이트 항목에는 쓰지 않는다
- * @returns {{ regressions: string[], compared: number, skipped: string[] }}
+ * @returns {{ regressions: string[], compared: number, skipped: string[], recorded: string[] }}
  */
 export function compareWithBaseline(baseline, reports, scale = 1) {
   /** @type {string[]} */
   const regressions = [];
   /** @type {string[]} */
   const skipped = [];
+  /** @type {string[]} */
+  const recorded = [];
   let compared = 0;
   for (const report of reports) {
     const base = baseline[report.name];
     for (const [key, value] of Object.entries(report.metrics)) {
+      if (!isGated(report.name, key)) {
+        recorded.push(`${report.name}.${key}`);
+        continue;
+      }
       const ref = base?.[key];
       if (typeof ref !== 'number') {
         skipped.push(`${report.name}.${key}`);
@@ -111,5 +152,5 @@ export function compareWithBaseline(baseline, reports, scale = 1) {
       }
     }
   }
-  return { regressions, compared, skipped };
+  return { regressions, compared, skipped, recorded };
 }

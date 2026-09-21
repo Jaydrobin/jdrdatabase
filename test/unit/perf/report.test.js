@@ -10,39 +10,86 @@ import {
   NOISE_FLOOR_BYTES,
   NOISE_FLOOR_MS,
   compareWithBaseline,
+  isGated,
   noiseFloor,
 } from '../../perf/report.js';
 
 test('compareWithBaseline: 비율과 잡음 바닥을 둘 다 넘어야 회귀', () => {
   const baseline = {
-    'app-300k': { editMaxMs: 1.3, snapshotMs: 135, peakRssBytes: 876_531_712 },
-    grid: { queryMaxMs: 34.1 },
+    'app-300k': { exportCsvMs: 17_760, peakRssBytes: 876_531_712 },
+    search: { likeMs: 687.4 },
   };
   const ok = compareWithBaseline(baseline, [
-    { name: 'app-300k', metrics: { editMaxMs: 1.9, snapshotMs: 175, peakRssBytes: 890_000_000 } },
-    { name: 'grid', metrics: { queryMaxMs: 44 } },
-    { name: 'search', metrics: { likeMs: 900 } },
+    { name: 'app-300k', metrics: { exportCsvMs: 20_000, peakRssBytes: 890_000_000 } },
+    { name: 'search', metrics: { likeMs: 800 } },
+    { name: 'import-csv', metrics: { importMs: 900 } },
   ]);
   assert.deepEqual(ok.regressions, []);
-  assert.equal(ok.compared, 4);
-  assert.deepEqual(ok.skipped, ['search.likeMs']);
+  assert.equal(ok.compared, 3);
+  assert.deepEqual(ok.skipped, ['import-csv.importMs']);
 
   const bad = compareWithBaseline(baseline, [
-    { name: 'app-300k', metrics: { editMaxMs: 7, snapshotMs: 181, peakRssBytes: 1_160_000_000 } },
-    { name: 'grid', metrics: { queryMaxMs: 49 } },
+    { name: 'app-300k', metrics: { exportCsvMs: 26_000, peakRssBytes: 1_160_000_000 } },
+    { name: 'search', metrics: { likeMs: 900 } },
   ]);
   assert.deepEqual(
     bad.regressions.map((r) => r.split(':')[0]),
-    ['app-300k.editMaxMs', 'app-300k.snapshotMs', 'app-300k.peakRssBytes'],
+    ['app-300k.exportCsvMs', 'app-300k.peakRssBytes', 'search.likeMs'],
   );
   assert.equal(noiseFloor('anythingMs'), NOISE_FLOOR_MS);
   assert.equal(noiseFloor('peakRssBytes'), NOISE_FLOOR_BYTES);
 
   // 느린 러너(속도 비 1.4)에서는 기대값이 그만큼 늘어난다. 같은 값이 비 1에서는 회귀, 1.4에서는 아니다.
-  const slow = compareWithBaseline(baseline, [{ name: 'grid', metrics: { queryMaxMs: 55 } }], 1.4);
+  const slow = compareWithBaseline(baseline, [{ name: 'search', metrics: { likeMs: 900 } }], 1.4);
   assert.deepEqual(slow.regressions, []);
-  const same = compareWithBaseline(baseline, [{ name: 'grid', metrics: { queryMaxMs: 55 } }], 1);
+  const same = compareWithBaseline(baseline, [{ name: 'search', metrics: { likeMs: 900 } }], 1);
   assert.equal(same.regressions.length, 1);
+});
+
+test('isGated/compareWithBaseline: 브라우저 쪽 지연 항목은 기록만 하고 판정하지 않는다', () => {
+  // 같은 앱 코드의 CI 실행 다섯 번에서 지연 항목은 1.5~3.9배 흔들렸고(보정값은 1.29배), 그 때문에 문서만
+  // 바꾼 커밋이 두 번 빨강이 됐다(renderMaxMs, readyMs). 8장의 절대 예산으로만 본다.
+  for (const [name, key] of [
+    ['app', 'readyMs'],
+    ['grid', 'renderP95Ms'],
+    ['grid', 'queryMaxMs'],
+    ['grid', 'openMs'],
+    ['app-300k', 'editMaxMs'],
+    ['app-300k', 'snapshotMs'],
+    ['app-300k', 'saveMs'],
+    ['search', 'sortIntMs'],
+    ['import-csv', 'previewMs'],
+  ]) {
+    assert.equal(isGated(name, key), false, `${name}.${key}는 판정 대상이 아니어야 한다`);
+  }
+  // 수 초 이상 이어지는 wasm CPU 작업과 모든 바이트 항목은 판정한다.
+  for (const [name, key] of [
+    ['import-csv', 'importMs'],
+    ['import-xlsx', 'importMs'],
+    ['import-xlsx', 'previewMs'],
+    ['search', 'indexBuildMs'],
+    ['search', 'likeMs'],
+    ['app-300k', 'exportCsvMs'],
+    ['app-300k', 'peakRssBytes'],
+    ['memory', 'rssLastBytes'],
+  ]) {
+    assert.equal(isGated(name, key), true, `${name}.${key}는 판정 대상이어야 한다`);
+  }
+
+  // 판정하지 않는 항목은 기준선에 값이 있어도 회귀를 내지 않고 `recorded`로만 돌아온다.
+  const baseline = { app: { readyMs: 279.5 }, grid: { renderP95Ms: 0.9 } };
+  const result = compareWithBaseline(
+    baseline,
+    [
+      { name: 'app', metrics: { readyMs: 490 } },
+      { name: 'grid', metrics: { renderP95Ms: 10.6 } },
+    ],
+    1.29,
+  );
+  assert.deepEqual(result.regressions, []);
+  assert.equal(result.compared, 0);
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(result.recorded, ['app.readyMs', 'grid.renderP95Ms']);
 });
 
 test('compareWithBaseline: 러너 속도 보정은 시간 항목에만 적용한다', () => {

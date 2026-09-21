@@ -1,25 +1,13 @@
 {
-  "environment": "GitHub Actions ubuntu-latest, Chromium 141 (Playwright 1.56.0), ci.yml perf 잡 run 35616156607 (커밋 cb18b84, 보정값·측정값을 같은 실행에서 옮겨 적음)",
+  "environment": "GitHub Actions ubuntu-latest, Chromium 141 (Playwright 1.56.0), ci.yml perf 잡 run 35616156607 (커밋 cb18b84, 보정값·측정값을 같은 실행에서 옮겨 적음). 판정 대상만 남김(세션 H 점검: report.js의 GATED_METRICS)",
   "recordedAt": "2026-09-21T15:05:44Z",
   "calibrationMs": 559,
   "metrics": {
     "app-300k": {
-      "editMaxMs": 1.3,
-      "snapshotMs": 92,
-      "saveMs": 314,
       "peakRssBytes": 856301568,
       "exportCsvMs": 17760
     },
-    "app": {
-      "readyMs": 279.5
-    },
-    "grid": {
-      "openMs": 893,
-      "renderP95Ms": 0.9,
-      "queryMaxMs": 37.9
-    },
     "import-csv": {
-      "previewMs": 138,
       "importMs": 13991
     },
     "import-xlsx": {
@@ -33,12 +21,7 @@
     "search": {
       "likeMs": 687.4,
       "likeShortMs": 812.1,
-      "indexBuildMs": 27409,
-      "ftsMs": 45,
-      "ftsKoreanMs": 21.9,
-      "sortIntMs": 60.5,
-      "sortTextMs": 66.2,
-      "filterCountMs": 41.2
+      "indexBuildMs": 27409
     }
   }
 }
