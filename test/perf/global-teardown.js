@@ -6,7 +6,14 @@
  */
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { BASELINE_PATH, COMPARE_ENV, REPORT_DIR, compareWithBaseline } from './report.js';
+import { speedRatio } from './calibrate.js';
+import {
+  BASELINE_PATH,
+  CALIBRATION_PATH,
+  COMPARE_ENV,
+  REPORT_DIR,
+  compareWithBaseline,
+} from './report.js';
 
 /** @typedef {import('./report.js').PerfReport} PerfReport */
 
@@ -16,7 +23,9 @@ export default async function globalTeardown() {
   /** @type {string[]} */
   let files = [];
   try {
-    files = (await readdir(REPORT_DIR)).filter((f) => f.endsWith('.json') && f !== 'summary.json');
+    files = (await readdir(REPORT_DIR)).filter(
+      (f) => f.endsWith('.json') && f !== 'summary.json' && f !== 'calibration.json',
+    );
   } catch {
     files = [];
   }
@@ -27,20 +36,31 @@ export default async function globalTeardown() {
     console.log('[perf] 기록된 측정값이 없습니다');
     return;
   }
+  /** @type {number | undefined} */
+  let calibrationMs;
+  try {
+    calibrationMs = JSON.parse(await readFile(CALIBRATION_PATH, 'utf8')).calibrationMs;
+  } catch {
+    calibrationMs = undefined;
+  }
   /** @type {Record<string, Record<string, number>>} */
   const summary = {};
   for (const report of reports) summary[report.name] = report.metrics;
-  await writeFile(path.join(REPORT_DIR, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+  await writeFile(
+    path.join(REPORT_DIR, 'summary.json'),
+    `${JSON.stringify({ calibrationMs, metrics: summary }, null, 2)}\n`,
+  );
   console.log(
-    `[perf] summary (perf-baseline.json의 metrics 형식):\n${JSON.stringify(summary, null, 2)}`,
+    `[perf] summary (perf-baseline.json 형식):\n${JSON.stringify({ calibrationMs, metrics: summary }, null, 2)}`,
   );
 
   if (process.env[COMPARE_ENV] !== '1') return;
-  /** @type {{ environment: string, metrics: Record<string, Record<string, number>> }} */
+  /** @type {{ environment: string, calibrationMs?: number, metrics: Record<string, Record<string, number>> }} */
   const baseline = JSON.parse(await readFile(BASELINE_PATH, 'utf8'));
-  const { regressions, compared, skipped } = compareWithBaseline(baseline.metrics, reports);
+  const scale = speedRatio(baseline.calibrationMs, calibrationMs);
+  const { regressions, compared, skipped } = compareWithBaseline(baseline.metrics, reports, scale);
   console.log(
-    `[perf] 기준선(${baseline.environment}) 비교: ${compared}개 항목, 건너뜀 ${skipped.length}개${skipped.length ? ` (${skipped.join(', ')})` : ''}`,
+    `[perf] 기준선(${baseline.environment}) 비교: 러너 속도 비 ${scale.toFixed(2)}(보정 ${calibrationMs ?? '없음'} / ${baseline.calibrationMs ?? '없음'} ms), ${compared}개 항목, 건너뜀 ${skipped.length}개${skipped.length ? ` (${skipped.join(', ')})` : ''}`,
   );
   if (regressions.length > 0) {
     throw new Error(`[perf] 기준선 대비 30% 이상 회귀:\n${regressions.join('\n')}`);

@@ -1,43 +1,6 @@
 {
-  "environment": "GitHub Actions ubuntu-latest, Chromium 141 (Playwright 1.56.0), ci.yml perf 잡 run 35613225320 (커밋 f540c27). likeShortMs는 측정 방식이 바뀌어(3개 검색어 중앙값) 다음 실행에서 채운다",
-  "recordedAt": "2026-09-21T14:40:20Z",
-  "metrics": {
-    "app-300k": {
-      "editMaxMs": 1.3,
-      "snapshotMs": 135,
-      "saveMs": 361,
-      "peakRssBytes": 876531712,
-      "exportCsvMs": 20135
-    },
-    "app": {
-      "readyMs": 327.1
-    },
-    "grid": {
-      "openMs": 909,
-      "renderP95Ms": 1.3,
-      "renderMaxMs": 3.5,
-      "queryMaxMs": 34.1
-    },
-    "import-csv": {
-      "previewMs": 149,
-      "importMs": 18011
-    },
-    "import-xlsx": {
-      "previewMs": 2903,
-      "importMs": 5942
-    },
-    "memory": {
-      "heapLastBytes": 7807568,
-      "rssLastBytes": 300265472
-    },
-    "search": {
-      "likeMs": 731,
-      "indexBuildMs": 34769,
-      "ftsMs": 50.8,
-      "ftsKoreanMs": 23.6,
-      "sortIntMs": 74.1,
-      "sortTextMs": 78.9,
-      "filterCountMs": 39.4
-    }
-  }
+  "environment": "pending: 러너 속도 보정(calibrationMs)이 더해져 다음 CI perf 잡 실행의 summary.json을 통째로 옮겨 적는다",
+  "recordedAt": null,
+  "calibrationMs": null,
+  "metrics": {}
 }

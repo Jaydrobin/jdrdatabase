@@ -10,6 +10,8 @@ import path from 'node:path';
 
 export const REPORT_DIR = path.resolve('test-results/perf');
 export const BASELINE_PATH = path.resolve('test/perf/perf-baseline.json');
+/** global-setup이 남기는 러너 속도 보정값(`{ calibrationMs }`). */
+export const CALIBRATION_PATH = path.join(REPORT_DIR, 'calibration.json');
 /** CLAUDE.md 6장: 기준선 대비 30% 이상 회귀는 실패. */
 export const REGRESSION_RATIO = 1.3;
 /**
@@ -66,12 +68,13 @@ export async function record(name, metrics, info = {}) {
 
 /**
  * 기준선 비교. `baseline`에 없는 항목은 건너뛴다(새 측정값은 다음 기준선 갱신에서 들어간다).
- * 회귀 = 기준선 × 1.3 + 잡음 바닥을 넘는 값.
+ * 회귀 = 기준선 × 러너 속도 비(`scale`, calibrate.js) × 1.3 + 잡음 바닥을 넘는 값.
  * @param {Record<string, Record<string, number>>} baseline spec 이름 → metrics
  * @param {PerfReport[]} reports
+ * @param {number} [scale] 이번 러너가 기준선 러너보다 느린 비(1이면 같은 속도)
  * @returns {{ regressions: string[], compared: number, skipped: string[] }}
  */
-export function compareWithBaseline(baseline, reports) {
+export function compareWithBaseline(baseline, reports, scale = 1) {
   /** @type {string[]} */
   const regressions = [];
   /** @type {string[]} */
@@ -86,10 +89,11 @@ export function compareWithBaseline(baseline, reports) {
         continue;
       }
       compared += 1;
-      const limit = ref * REGRESSION_RATIO + noiseFloor(key);
+      const expected = ref * scale;
+      const limit = expected * REGRESSION_RATIO + noiseFloor(key);
       if (value > limit) {
         regressions.push(
-          `${report.name}.${key}: ${value} > ${ref} × ${REGRESSION_RATIO} + ${noiseFloor(key)} (${((value / ref - 1) * 100).toFixed(0)}% 회귀)`,
+          `${report.name}.${key}: ${value} > ${ref} × ${scale.toFixed(2)} × ${REGRESSION_RATIO} + ${noiseFloor(key)} (${((value / expected - 1) * 100).toFixed(0)}% 회귀)`,
         );
       }
     }
