@@ -552,6 +552,12 @@ async function attempt(args, planned, demoted) {
   /** `select` 열에 새로 더한 항목. 끝에서 메타를 갱신한다. */
   /** @type {Map<string, string[]>} */
   const grownChoices = new Map();
+  /**
+   * `select` 열마다 지금까지의 항목 집합. 행마다 배열을 훑으면 항목 수 × 행 수가 되어
+   * 30만 행 예산(8장)을 항목이 많은 열 하나가 혼자 넘긴다.
+   * @type {Map<string, Set<string>>}
+   */
+  const choiceIndex = new Map();
 
   /** @type {SqlValue[][]} */
   let batch = [];
@@ -602,11 +608,18 @@ async function attempt(args, planned, demoted) {
       if (col.type === 'select') {
         // 4.2: 가져오기에서 선택 항목에 없는 값은 자동으로 더한다.
         const text = selectText(raw);
-        const choices = col.options?.choices ?? [];
-        if (!choices.includes(text)) {
+        const columnId = /** @type {string} */ (col.columnId);
+        let known = choiceIndex.get(columnId);
+        if (!known) {
+          known = new Set(col.options?.choices ?? []);
+          choiceIndex.set(columnId, known);
+        }
+        if (!known.has(text)) {
+          known.add(text);
+          const choices = col.options?.choices ?? [];
           choices.push(text);
           col.options = { ...(col.options ?? {}), choices };
-          grownChoices.set(/** @type {string} */ (col.columnId), choices);
+          grownChoices.set(columnId, choices);
         }
         params.push(text);
         continue;

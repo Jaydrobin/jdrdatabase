@@ -468,6 +468,36 @@ test('run: select 자동 추가는 항목을 다듬어 같아 보이는 항목�
   assert.deepEqual(rowsOf(engine, tableId, [grade]), [['일반'], ['일반'], ['VIP']]);
 });
 
+test('run: select 항목이 많아도 자동 추가가 중복 없이 한 번씩만 쌓인다', async () => {
+  const engine = await setup();
+  const { tableId } = await tables.create(engine, { name: 't' });
+  const grade = (
+    await tables.addColumn(engine, tableId, {
+      name: 'g',
+      type: 'select',
+      options: { choices: ['기존'] },
+    })
+  ).columnId;
+  // 항목 조회가 행마다 배열을 훑으면 여기서 항목 수 × 행 수가 된다(Set 색인으로 막는다).
+  const distinct = 4000;
+  let text = 'g\n';
+  for (let i = 0; i < distinct; i += 1) text += `v${i}\n`;
+  for (let i = 0; i < distinct; i += 1) text += `v${i}\n`; // 같은 값을 한 번 더
+  const { report } = await run({
+    engine,
+    file: csv(text),
+    options: { format: 'csv' },
+    mapping: { columns: [{ source: 0, columnId: grade }] },
+    target: { kind: 'existing', tableId },
+  });
+  assert.equal(report.inserted, distinct * 2);
+  const column = tables.requireTable(engine, tableId).columns.find((c) => c.id === grade);
+  const choices = column?.options?.choices ?? [];
+  assert.equal(choices.length, distinct + 1, '두 번째 등장은 항목을 늘리지 않는다');
+  assert.equal(new Set(choices).size, choices.length, '항목에 중복이 없다');
+  assert.equal(choices[0], '기존', '기존 항목이 앞에 남는다');
+});
+
 test('run: 기존 테이블 매핑 검증 — 외부 테이블, 없는·지운·중복 열, text 정책 거부', async () => {
   const engine = await setup();
   const { tableId } = await tables.create(engine, { name: 't' });
