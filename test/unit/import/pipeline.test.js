@@ -442,6 +442,32 @@ test('run: 기존 테이블에 추가 — 이름 자동 대응은 UI 몫이고 W
   assert.deepEqual(column?.options, { choices: ['일반', 'VIP'] }, '없는 값은 선택 항목에 더한다');
 });
 
+test('run: select 자동 추가는 항목을 다듬어 같아 보이는 항목이 둘로 늘지 않는다', async () => {
+  const engine = await setup();
+  const { tableId } = await tables.create(engine, { name: '고객' });
+  const grade = (
+    await tables.addColumn(engine, tableId, {
+      name: '등급',
+      type: 'select',
+      options: { choices: ['일반'] },
+    })
+  ).columnId;
+  const { report } = await run({
+    engine,
+    file: csv('등급\n 일반 \n일반\n  VIP\n'),
+    options: { format: 'csv' },
+    mapping: { columns: [{ source: 0, columnId: grade }] },
+    target: { kind: 'existing', tableId },
+  });
+  assert.equal(report.inserted, 3);
+  const column = tables.requireTable(engine, tableId).columns.find((c) => c.id === grade);
+  // `tables.normalizeOptions`가 항목을 trim·중복 제거로 정리하므로 가져오기도 같은 규칙을 써야 한다.
+  // 다듬지 않으면 ' 일반 '이 별개 항목으로 늘고, 나중에 열을 고칠 때 그 항목이 사라져
+  // 그 값이 든 셀이 `not_in_choices`가 된다.
+  assert.deepEqual(column?.options, { choices: ['일반', 'VIP'] });
+  assert.deepEqual(rowsOf(engine, tableId, [grade]), [['일반'], ['일반'], ['VIP']]);
+});
+
 test('run: 기존 테이블 매핑 검증 — 외부 테이블, 없는·지운·중복 열, text 정책 거부', async () => {
   const engine = await setup();
   const { tableId } = await tables.create(engine, { name: 't' });

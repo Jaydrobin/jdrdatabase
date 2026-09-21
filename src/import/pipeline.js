@@ -452,13 +452,16 @@ export function requireTarget(target) {
 }
 
 /**
- * `select` 열의 문자열 값. `validate`의 `toText`와 같은 규칙(불리언은 true/false).
+ * `select` 열의 문자열 값. `validate`의 `toText`와 같은 규칙(불리언은 true/false)이되,
+ * `tables.normalizeOptions`가 선택 항목에 적용하는 것과 같게 앞뒤 공백을 뗀다. 다듬지 않으면
+ * 자동 추가가 같아 보이는 항목을 둘로 늘리고, 나중에 열을 고칠 때 그 항목이 사라져 그 값이 든
+ * 셀이 `not_in_choices`가 된다. 공백뿐인 값은 `isEmpty`가 먼저 걸러 NULL로 간다.
  * @param {SourceValue} raw
  * @returns {string}
  */
 function selectText(raw) {
   if (typeof raw === 'boolean') return raw ? 'true' : 'false';
-  return String(raw);
+  return String(raw).trim();
 }
 
 /**
