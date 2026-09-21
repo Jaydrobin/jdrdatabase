@@ -72,15 +72,17 @@ export function toIpcError(err, cmd) {
 
 /**
  * 타우리 명령을 부른다. 전역 객체가 없거나 호출이 실패하면 `E_NATIVE_IPC`(wasm 폴백 없음, D-15).
+ * `args`가 `Uint8Array`면 요청 본문(raw)으로 보내고 러스트는 `tauri::ipc::Request`로 받는다(내보내기 조각).
  * @param {string} cmd
- * @param {Record<string, unknown>} [args]
+ * @param {Record<string, unknown> | Uint8Array} [args]
+ * @param {{ headers?: Record<string, string> }} [options]
  * @returns {Promise<unknown>}
  */
-export async function tauriInvoke(cmd, args = {}) {
+export async function tauriInvoke(cmd, args = {}, options) {
   const internals = tauriInternals();
   if (!internals) throw new AppError('E_NATIVE_IPC', 'window.__TAURI_INTERNALS__ is missing');
   try {
-    return await internals.invoke(cmd, args);
+    return await internals.invoke(cmd, args, options);
   } catch (err) {
     throw toIpcError(err, cmd);
   }

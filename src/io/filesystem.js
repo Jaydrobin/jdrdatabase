@@ -2,11 +2,14 @@
 /**
  * 파일 접근 추상화(D-04): File System Access API → `<input type="file">`·`<a download>` 폴백.
  * Step 9: gzip(`.db.gz`) 압축·해제, 내보내기 조각을 받는 바이트 싱크, 저장 종류(db·csv·xlsx)별 선택기.
+ * Step 11: 데스크톱 모드(`capabilities().native`)의 경로 선택기(러스트 `pick_open`·`pick_save`), `.bak` 정보·복원,
+ * 작업 사본 목록, 경로 싱크(러스트 `sink_*`로 조각을 쓰고 닫을 때 원자적으로 교체). 타우리 invoke는 이 파일과
+ * `io/ipc-bridge.js`에서만 부른다(CLAUDE.md 4장). 브라우저 모드의 폴백 사다리는 데스크톱 모드에 없다(D-15).
  *
- * 타우리 dialog/fs 분기(`capabilities().native`)는 인터페이스와 스텁만 두고 Step 11에서 채운다.
  * 이 파일은 메인 스레드에서만 실행된다(gzip·싱크 함수는 DOM 없이도 동작해 Node 테스트가 부른다).
  */
 import { AppError, toAppError } from '../util/errors.js';
+import { tauriInternals, tauriInvoke } from './ipc-bridge.js';
 
 /** 열기·저장 대화상자에 보이는 확장자. */
 export const DB_EXTENSIONS = Object.freeze(['.db', '.sqlite', '.sqlite3']);
@@ -43,7 +46,7 @@ export const FILE_INPUT_CLASS = 'jdr-file-input';
  * @typedef {object} FsCapabilities
  * @property {boolean} fsa `showOpenFilePicker`·`showSaveFilePicker`를 쓸 수 있는가
  * @property {boolean} idb `indexedDB` 전역이 있는가(실제 열기 성공 여부는 io/idb.js가 안다)
- * @property {boolean} native 데스크톱 모드(타우리 dialog/fs). Step 11 전에는 항상 false
+ * @property {boolean} native 데스크톱 모드(타우리 전역 객체가 있음). 파일 선택·바이트 이동은 러스트 명령이 한다
  * @property {boolean} gzip `CompressionStream`·`DecompressionStream`을 쓸 수 있는가(Step 9)
  */
 
@@ -54,7 +57,7 @@ export const FILE_INPUT_CLASS = 'jdr-file-input';
  * @property {FileSystemFileHandle | null} handle FSA 경로에서만 있다. 없으면 저장은 다운로드 폴백
  */
 
-/** @typedef {{ kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string } | { kind: 'cancelled' }} SaveTarget */
+/** @typedef {{ kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string } | { kind: 'path', path: string } | { kind: 'cancelled' }} SaveTarget 저장 대상. `path`는 데스크톱 모드의 경로 문자열 */
 
 /**
  * 내보내기 조각을 받는 바이트 싱크(Step 9). FSA 경로는 `createWritable()`(임시 파일에 쓰고 `close()`에서 교체),
@@ -84,7 +87,132 @@ export function capabilities() {
   } catch {
     idb = false;
   }
-  return { fsa, idb, native: false, gzip: gzipSupported() };
+  return { fsa, idb, native: tauriInternals() !== null, gzip: gzipSupported() };
+}
+
+/** 데스크톱 E2E가 대화상자 대신 넣어 주는 경로(테스트 빌드 전용, DESIGN.md Step 11 완료 기준). */
+/** @type {Array<string | null>} */
+const injectedPaths = [];
+
+/**
+ * 다음 경로 선택기가 대화상자 없이 돌려줄 경로를 넣는다. null은 취소다. 테스트 빌드에서만 동작한다.
+ * @param {string | null} path
+ */
+export function injectPickedPath(path) {
+  if (!__JDR_TEST__) throw new AppError('E_UNSUPPORTED', 'injectPickedPath is test-only');
+  injectedPaths.push(path);
+}
+
+/** @returns {string | null | undefined} 넣어 둔 경로가 없으면 undefined */
+function takeInjectedPath() {
+  if (!__JDR_TEST__ || injectedPaths.length === 0) return undefined;
+  return injectedPaths.shift() ?? null;
+}
+
+/**
+ * 경로의 파일 이름 부분(`/`·`\` 뒤). 표시용이며 경로 결합에는 쓰지 않는다.
+ * @param {string} path
+ * @returns {string}
+ */
+export function baseName(path) {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return cut >= 0 ? path.slice(cut + 1) : path;
+}
+
+/**
+ * 데스크톱 모드: 열 파일의 경로를 고른다. 취소하면 null.
+ * @returns {Promise<string | null>}
+ */
+export async function pickOpenPath() {
+  const injected = takeInjectedPath();
+  if (injected !== undefined) return injected;
+  const picked = await tauriInvoke('pick_open', {});
+  return typeof picked === 'string' && picked ? picked : null;
+}
+
+/**
+ * 데스크톱 모드: 저장할 경로를 고른다. 취소하면 null.
+ * @param {string} suggestedName
+ * @param {SaveKind} [kind]
+ * @returns {Promise<string | null>}
+ */
+export async function pickSavePath(suggestedName, kind = 'db') {
+  const injected = takeInjectedPath();
+  if (injected !== undefined) return injected;
+  const picked = await tauriInvoke('pick_save', { suggestedName, kind });
+  return typeof picked === 'string' && picked ? picked : null;
+}
+
+/**
+ * 러스트 코어 명령(`engine_call`)을 메인 스레드에서 직접 부른다. 열린 DB를 건드리지 않는 파일 명령에만 쓴다.
+ * @param {string} cmd
+ * @param {Record<string, unknown>} args
+ * @returns {Promise<unknown>}
+ */
+function engineCall(cmd, args) {
+  return tauriInvoke('engine_call', { cmd, args });
+}
+
+/** @typedef {{ path: string, size: number, mtime: number }} NativeBackupInfo */
+/** @typedef {{ key: string, dir: string, dirty: boolean, size: number, meta: { originalPath: string | null, originalMtime: number | null, originalSize: number | null, openedAt: number } | null }} WorkcopyEntry */
+
+/**
+ * `<원본>.bak`이 있으면 크기·시각.
+ * @param {string} originalPath
+ * @returns {Promise<NativeBackupInfo | null>}
+ */
+export async function backupInfo(originalPath) {
+  const info = await engineCall('backup_info', { originalPath });
+  return /** @type {NativeBackupInfo | null} */ (info ?? null);
+}
+
+/**
+ * `<원본>.bak`을 고른 경로로 복사한다.
+ * @param {string} originalPath
+ * @param {string} targetPath
+ * @returns {Promise<NativeBackupInfo>}
+ */
+export async function restoreBackup(originalPath, targetPath) {
+  return /** @type {NativeBackupInfo} */ (
+    await engineCall('restore_backup', { originalPath, targetPath })
+  );
+}
+
+/**
+ * 남아 있는 작업 사본 목록(최근 연 순).
+ * @returns {Promise<WorkcopyEntry[]>}
+ */
+export async function listWorkcopies() {
+  return /** @type {WorkcopyEntry[]} */ (await engineCall('list_workcopies', {}));
+}
+
+/**
+ * 작업 사본 하나를 지운다(버리기).
+ * @param {string} key
+ */
+export async function removeWorkcopy(key) {
+  await engineCall('remove_workcopy', { key });
+}
+
+/**
+ * 데스크톱 모드의 경로 싱크: 러스트가 임시 파일에 쓰고 `close()`에서 원자적으로 교체한다. `abort()`는 임시 파일을 지운다.
+ * 조각은 IPC 요청 본문(raw)으로 보내 base64 부풀림을 피한다.
+ * @param {string} path
+ * @returns {Promise<ByteSink>}
+ */
+export async function openPathSink(path) {
+  const id = /** @type {number} */ (await engineCall('sink_open', { path }));
+  return {
+    write: async (chunk) => {
+      await tauriInvoke('sink_write', chunk, { headers: { 'jdr-sink': String(id) } });
+    },
+    close: async () => {
+      await engineCall('sink_close', { id });
+    },
+    abort: async () => {
+      await engineCall('sink_abort', { id });
+    },
+  };
 }
 
 /**
@@ -255,6 +383,10 @@ export function fileFromInput(input) {
  * @returns {Promise<SaveTarget>}
  */
 export async function pickSaveAs(suggestedName, kind = 'db') {
+  if (capabilities().native) {
+    const path = await pickSavePath(suggestedName, kind);
+    return path ? { kind: 'path', path } : { kind: 'cancelled' };
+  }
   if (capabilities().fsa && window.showSaveFilePicker) {
     try {
       const handle = await window.showSaveFilePicker({
@@ -321,11 +453,12 @@ export async function write(handle, bytes) {
 /**
  * 내보내기 조각을 받을 싱크를 연다(Step 9). FSA 핸들은 임시 파일에 쓰고 `close()`에서 교체하며, 다운로드 폴백은
  * 조각을 모아 `close()`에서 내려받는다. 어느 쪽이든 `abort()` 뒤에는 파일이 만들어지지 않는다.
- * @param {{ kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string }} target
+ * @param {{ kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string } | { kind: 'path', path: string }} target
  * @param {string} mime
  * @returns {Promise<ByteSink>}
  */
 export async function openSink(target, mime) {
+  if (target.kind === 'path') return openPathSink(target.path);
   if (target.kind === 'download') {
     /** @type {Uint8Array<ArrayBuffer>[]} */
     let parts = [];

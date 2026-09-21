@@ -3,7 +3,8 @@
  * 부트스트랩(3.1): 기능 감지, 모드 판정, Worker 기동, IndexedDB·스토어·UI 마운트, 초기 화면.
  *
  * 모드 문자열('wasm' | 'native') 판정은 이 파일에서만 한다(D-15). 다른 모듈은 `capabilities()`를 읽는다.
- * 데스크톱 모드는 Step 11에서 채워지며, 그 전까지는 `E_UNSUPPORTED`로 잠긴다(wasm 폴백 없음, D-15).
+ * 데스크톱 모드는 Worker 전송이 필수다: 브리지가 Worker의 `engine:call`을 타우리 invoke로 넘기며, 인라인 폴백이나
+ * IPC 실패는 `E_NATIVE_IPC`로 앱을 잠근다(wasm 폴백 없음, D-15).
  */
 import { createSchemaCommands, editCell } from './app/commands.js';
 import { createHistory } from './app/history.js';
@@ -15,6 +16,7 @@ import { t } from './i18n/index.js';
 import { createAutosave, createSaveTimer } from './io/autosave.js';
 import * as filesystem from './io/filesystem.js';
 import { openIdb } from './io/idb.js';
+import { createBridge, tauriEngineInvoke, workerPort } from './io/ipc-bridge.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
 import { confirmDialog } from './ui/dialogs/dialog.js';
@@ -159,21 +161,49 @@ function readEmbedded(id) {
 
 /**
  * 전송 계층을 만들고 엔진을 초기화한다. `openEmpty`면 빈 메모리 DB까지 연다(진단 세션용).
+ * 데스크톱 모드는 Worker가 없으면(인라인 폴백) `E_NATIVE_IPC`로 실패하고, 브리지를 Worker에 붙인 뒤 초기화한다.
  * @param {{ mode: EngineMode, transport: 'auto' | 'inline', workerSource: string, wasmB64: string, openEmpty: boolean }} opts
  * @returns {Promise<EngineSession>}
  */
 async function startEngine(opts) {
-  const { transport, fallbackError } = await createTransport({
+  const { transport, fallbackError, worker } = await createTransport({
     workerSource: opts.transport === 'inline' ? undefined : opts.workerSource,
   });
-  const client = createClient({ transport });
-  const wasmBinary = base64ToBytes(opts.wasmB64).buffer;
+  const native = opts.mode === 'native';
+  if (native && !worker) {
+    transport.close();
+    throw new AppError('E_NATIVE_IPC', 'desktop mode requires a Worker transport', {
+      cause: fallbackError,
+    });
+  }
+  /** @type {import('./io/ipc-bridge.js').Bridge | null} */
+  let bridge = null;
+  if (native && worker) {
+    bridge = createBridge({ invoke: tauriEngineInvoke() });
+    bridge.attach(workerPort(worker));
+  }
+  const rawClient = createClient({ transport });
+  /** @type {Client} */
+  const client = {
+    ...rawClient,
+    close() {
+      bridge?.detach();
+      rawClient.close();
+    },
+  };
   try {
-    const info = await client.call(
-      'engine.init',
-      { mode: opts.mode, wasmBinary, appVersion: __JDR_VERSION__ },
-      { transfer: [wasmBinary] },
-    );
+    /** @type {import('./db/worker.js').OpMap['engine.init']['result']} */
+    let info;
+    if (native) {
+      info = await client.call('engine.init', { mode: opts.mode, appVersion: __JDR_VERSION__ });
+    } else {
+      const wasmBinary = base64ToBytes(opts.wasmB64).buffer;
+      info = await client.call(
+        'engine.init',
+        { mode: opts.mode, wasmBinary, appVersion: __JDR_VERSION__ },
+        { transfer: [wasmBinary] },
+      );
+    }
     if (opts.openEmpty) await client.call('db.open', {});
     return {
       client,
@@ -234,6 +264,19 @@ async function start(shell) {
          */
         async exec(transport, sql) {
           const statements = Array.isArray(sql) ? sql : [sql];
+          if (mode === 'native') {
+            // 러스트 엔진은 프로세스에 하나뿐이라 별도 세션을 띄울 수 없다. 메인 세션에서 실행한다.
+            if (transport === 'inline') {
+              throw new AppError('E_NATIVE_IPC', 'desktop mode has no inline transport');
+            }
+            const main = await ready;
+            /** @type {import('./db/engine.js').ExecResult} */
+            let result = { columns: [], rows: [] };
+            for (const statement of statements) {
+              result = await main.client.call('engine.exec', { sql: statement });
+            }
+            return { transportKind: main.transportKind, ...result };
+          }
           const session = await startEngine({
             mode,
             transport,
@@ -258,7 +301,12 @@ async function start(shell) {
           if (!store) return null;
           const s = store.getState();
           return {
-            file: { name: s.file.name, hasHandle: s.file.handle !== null, size: s.file.size },
+            file: {
+              name: s.file.name,
+              hasHandle: s.file.handle !== null,
+              path: s.file.path,
+              size: s.file.size,
+            },
             meta: s.meta,
             tables: s.tables,
             dirty: s.dirty,
@@ -272,6 +320,18 @@ async function start(shell) {
         },
         /** IndexedDB를 실제로 열 수 있었는가(지원 매트릭스 실측용). */
         idbAvailable: () => idb !== null,
+        /**
+         * 데스크톱 E2E: 다음 파일 대화상자가 돌려줄 경로를 넣는다(null은 취소). 대화상자는 자동화할 수 없다(Step 11).
+         * @param {string | null} path
+         */
+        setPickedPath: (path) => filesystem.injectPickedPath(path),
+        /** 데스크톱 E2E: 스토어 API를 직접 부른다(열기·저장·백업 복원). */
+        openPath: (/** @type {string} */ path) =>
+          store ? store.openPath(path) : Promise.resolve(false),
+        save: () => (store ? store.save() : Promise.resolve(false)),
+        saveAs: () => (store ? store.saveAs() : Promise.resolve(false)),
+        restoreBackup: () => (store ? store.restoreBackup() : Promise.resolve(false)),
+        newDatabase: () => (store ? store.newDatabase() : Promise.resolve(false)),
         /** BroadcastChannel을 쓸 수 있는가(지원 매트릭스 실측용). */
         tabLockAvailable: () => tabLockAvailable,
         /** 저널에 남은 기록 요약(없으면 null). E2E가 비움이 끝났는지 확인한다. */
@@ -331,7 +391,8 @@ async function start(shell) {
   let current = await settings.load(idb);
   const tablock = createTabLock();
   tabLockAvailable = tablock.available;
-  const autosave = createAutosave({ idb });
+  // 데스크톱 모드의 미저장 변경은 작업 사본 자체에 남으므로 IDB 저널은 쓰지 않는다(D-15).
+  const autosave = createAutosave({ idb: mode === 'native' ? null : idb });
   journal = autosave;
   store = createStore({
     client: session.client,
@@ -481,7 +542,11 @@ async function start(shell) {
   // 8장 "앱 시작(빈 DB)": 문서 시작부터 여기까지. 테스트 빌드의 성능 측정이 읽는다.
   if (__JDR_TEST__) performance.mark('jdr:app.ready');
   shell.statusbar.setMode(
-    session.transportKind === 'worker' ? 'status.mode.worker' : 'status.mode.inline',
+    mode === 'native'
+      ? 'status.mode.native'
+      : session.transportKind === 'worker'
+        ? 'status.mode.worker'
+        : 'status.mode.inline',
   );
   shell.statusbar.setEngine(session.sqliteVersion);
   shell.statusbar.setNote(idb ? null : 'status.noIdb');
@@ -503,7 +568,12 @@ async function boot() {
   } catch (err) {
     const appErr = toAppError(err);
     console.error(appErr);
-    showLock(shell, appErr);
+    // 데스크톱 모드의 IPC 실패는 지원 브라우저 안내가 뜻이 없다(D-15).
+    if (appErr.code === 'E_NATIVE_IPC') {
+      showLock(shell, appErr, { title: 'lock.title', message: 'lock.nativeIpc' });
+    } else {
+      showLock(shell, appErr);
+    }
   }
 }
 

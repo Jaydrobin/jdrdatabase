@@ -433,7 +433,9 @@ export function mountToolbar(parent, store, history, deps) {
   };
   const onNew = () => void store.newDatabase();
   const onOpen = () => {
-    if (capabilities().fsa) void store.openFile();
+    // 데스크톱 모드는 러스트 대화상자, FSA가 있으면 파일 선택기, 그 밖은 숨은 <input type="file">.
+    const caps = capabilities();
+    if (caps.native || caps.fsa) void store.openFile();
     else fileInput.click();
   };
   const onRecent = () => void store.openRecent();

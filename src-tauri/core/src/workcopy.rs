@@ -273,6 +273,62 @@ fn remove_sidecars(db_path: &Path) {
     }
 }
 
+/// 사본 폴더에 dirty 사본이 있으면 그 revision과 함께 돌려준다.
+fn dirty_copy_in(dir: &Path) -> Option<Option<i64>> {
+    let db_path = dir.join(CURRENT_DB);
+    if !db_path.is_file() {
+        return None;
+    }
+    let conn = Connection::open_with_flags(
+        &db_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    if !is_dirty(&conn).unwrap_or(false) {
+        return None;
+    }
+    Some(parse_revision(
+        read_meta_value(&conn, "revision").ok().flatten(),
+    ))
+}
+
+/// 남은 dirty 사본 가운데 이 원본에서 온 것. 키 폴더가 먼저고, 없으면 `meta.json`의 원본 경로로 찾는다
+/// (새 DB를 "다른 이름으로 저장"한 사본은 `new-*` 폴더에 남아 키가 다르다).
+fn find_dirty_copy(
+    app_data: &Path,
+    key_dir: &Path,
+    original: &Path,
+) -> Option<(PathBuf, Option<i64>)> {
+    if let Some(revision) = dirty_copy_in(key_dir) {
+        return Some((key_dir.to_path_buf(), revision));
+    }
+    let wanted = original.to_string_lossy();
+    for entry in list(app_data) {
+        if !entry.dirty {
+            continue;
+        }
+        let same = entry
+            .meta
+            .as_ref()
+            .and_then(|m| m.original_path.as_deref())
+            .map(|p| p == wanted || same_file(Path::new(p), original))
+            .unwrap_or(false);
+        if same {
+            let dir = PathBuf::from(&entry.dir);
+            let revision = dirty_copy_in(&dir).flatten();
+            return Some((dir, revision));
+        }
+    }
+    None
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
 /// 원본의 사본을 준비한다. 남은 사본이 dirty고 `discard`가 아니면 그대로 쓴다.
 pub fn prepare(
     app_data: &Path,
@@ -283,34 +339,36 @@ pub fn prepare(
 ) -> Result<Prepared> {
     let key = workcopy_key(original, info);
     let dir = workcopy_dir(app_data, &key);
-    let db_path = dir.join(CURRENT_DB);
-    if !discard && db_path.is_file() {
-        if let Ok(conn) = Connection::open_with_flags(
-            &db_path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        ) {
-            if is_dirty(&conn).unwrap_or(false) {
-                let workcopy_revision = parse_revision(read_meta_value(&conn, "revision")?);
-                drop(conn);
-                let meta = read_meta(&dir).unwrap_or(WorkcopyMeta {
-                    original_path: Some(original.to_string_lossy().into_owned()),
-                    original_mtime: None,
-                    original_size: None,
-                    opened_at: now_ms(),
-                });
-                return Ok(Prepared {
-                    key,
-                    dir,
-                    db_path,
-                    reused_dirty: true,
-                    workcopy_revision,
-                    copy_ms: 0,
-                    meta,
-                });
-            }
+    if !discard {
+        if let Some((found, workcopy_revision)) = find_dirty_copy(app_data, &dir, original) {
+            let meta = read_meta(&found).unwrap_or(WorkcopyMeta {
+                original_path: Some(original.to_string_lossy().into_owned()),
+                original_mtime: None,
+                original_size: None,
+                opened_at: now_ms(),
+            });
+            let found_key = found
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(key);
+            return Ok(Prepared {
+                key: found_key,
+                db_path: found.join(CURRENT_DB),
+                dir: found,
+                reused_dirty: true,
+                workcopy_revision,
+                copy_ms: 0,
+                meta,
+            });
+        }
+    } else {
+        // 버리기: 키 폴더뿐 아니라 이 원본에서 온 다른 dirty 사본(`new-*`)도 지운다.
+        if let Some((found, _)) = find_dirty_copy(app_data, &dir, original) {
+            remove_dir(&found)?;
         }
     }
     remove_dir(&dir)?;
+    let db_path = dir.join(CURRENT_DB);
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::from_io(e, "create workcopy dir", Some(&dir)))?;
     let started = std::time::Instant::now();

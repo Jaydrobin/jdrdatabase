@@ -374,14 +374,31 @@ export function createDispatcher(options) {
       }
       // `db.snapshot`과 같은 순서: 메타를 먼저 기록하고 파일을 만든다. 등록하지 않은 외부 파일은 그때 메타를 만든다.
       if (!hasMeta(active) && args.bumpRevision) await migrate(active, { appVersion });
+      const before = hasMeta(active) ? readMeta(active) : {};
       const meta = args.bumpRevision
         ? await bumpRevision(active, { savedBy: args.savedBy ?? '' })
-        : hasMeta(active)
-          ? readMeta(active)
-          : {};
-      const saved = await active.saveTo(args.originalPath, undefined, {
-        force: args.force === true,
-      });
+        : before;
+      /** @type {import('./engine.js').NativeSaveInfo | undefined} */
+      let saved;
+      try {
+        saved = await active.saveTo(args.originalPath, undefined, { force: args.force === true });
+      } catch (err) {
+        // 파일은 바뀌지 않았으므로 올린 revision·saved_at·saved_by를 되돌린다. 그대로 두면 사본의 revision이 파일보다
+        // 앞서 다음 복구 판정(D-15)이 어긋난다. 브라우저 모드의 스냅샷은 메모리 DB라 같은 문제가 없다.
+        if (args.bumpRevision && hasMeta(active)) {
+          await active.transaction(() => {
+            for (const key of ['revision', 'saved_at', 'saved_by']) {
+              const previous = before[key];
+              if (previous === undefined) {
+                active.run('DELETE FROM _jdr_meta WHERE key = ?', [key]);
+              } else {
+                writeMeta(active, { [key]: previous });
+              }
+            }
+          });
+        }
+        throw err;
+      }
       if (!saved) throw new AppError('E_UNSUPPORTED', 'saveTo returned nothing');
       // 저장이 끝났으므로 사본의 dirty 표식을 내린다(D-15). 저장된 파일에는 이 값이 남아 있어도 뜻이 없다.
       if (hasMeta(active)) {
@@ -576,8 +593,11 @@ export function createDispatcher(options) {
     'export.stream',
   ]);
 
-  /** 작업 사본의 dirty 표식을 올리지 않는 op: 읽기와 열기·닫기·저장·초기화. */
-  const NOT_DIRTY_OPS = new Set([...READ_OPS, 'db.open', 'db.close', 'engine.init']);
+  /**
+   * 작업 사본의 dirty 표식을 올리지 않는 op: 읽기와 열기·닫기·저장·초기화, 그리고 진단·테스트 전용 `engine.exec`
+   * (UI가 부르지 않으며, 검사 질의가 사본을 dirty로 만들면 복구 제안이 잘못 뜬다).
+   */
+  const NOT_DIRTY_OPS = new Set([...READ_OPS, 'db.open', 'db.close', 'engine.init', 'engine.exec']);
 
   /**
    * 데스크톱 모드(D-15): 쓰기 op가 성공하면 사본에 `_jdr_meta.dirty = 1`을 남겨 비정상 종료 뒤 복구를 제안할 수 있게 한다.

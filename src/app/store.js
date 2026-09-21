@@ -23,6 +23,9 @@ import { AppError, toAppError } from '../util/errors.js';
 /** @typedef {import('../io/filesystem.js').PickedFile} PickedFile */
 /** @typedef {import('../io/filesystem.js').SaveTarget} SaveTarget */
 /** @typedef {import('../io/filesystem.js').SaveKind} SaveKind */
+/** @typedef {import('../io/filesystem.js').NativeBackupInfo} NativeBackupInfo */
+/** @typedef {import('../io/filesystem.js').WorkcopyEntry} WorkcopyEntry */
+/** @typedef {import('../db/engine.js').NativeOpenInfo} NativeOpenInfo */
 /** @typedef {import('../io/filesystem.js').ByteSink} ByteSink */
 /** @typedef {import('../export/csv.js').CsvExportOptions} CsvExportOptions */
 /** @typedef {import('../export/csv.js').ExportResult} ExportResult */
@@ -57,11 +60,18 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(handle: FileSystemFileHandle, bytes: Uint8Array<ArrayBuffer>) => Promise<void>} write
  * @property {(name: string, bytes: Uint8Array<ArrayBuffer> | Blob) => void} download
  * @property {(handle: FileSystemFileHandle, mode: 'read' | 'readwrite') => Promise<void>} ensurePermission
- * @property {(target: { kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string }, mime: string) => Promise<ByteSink>} openSink 내보내기 조각을 받을 싱크(Step 9)
+ * @property {(target: { kind: 'handle', handle: FileSystemFileHandle } | { kind: 'download', name: string } | { kind: 'path', path: string }, mime: string) => Promise<ByteSink>} openSink 내보내기 조각을 받을 싱크(Step 9·11)
  * @property {(bytes: Uint8Array) => Promise<Uint8Array<ArrayBuffer>>} gzip
  * @property {(bytes: Uint8Array) => Promise<Uint8Array<ArrayBuffer>>} gunzip
  * @property {(bytes: Uint8Array) => boolean} isGzip
  * @property {() => boolean} gzipSupported
+ * @property {() => Promise<string | null>} [pickOpenPath] 데스크톱 모드(Step 11): 열 파일 경로. 취소는 null
+ * @property {(suggestedName: string, kind?: SaveKind) => Promise<string | null>} [pickSavePath] 데스크톱 모드: 저장 경로. 취소는 null
+ * @property {(originalPath: string) => Promise<NativeBackupInfo | null>} [backupInfo] 데스크톱 모드: `<원본>.bak` 정보
+ * @property {(originalPath: string, targetPath: string) => Promise<NativeBackupInfo>} [restoreBackup] 데스크톱 모드: `.bak`을 새 파일로 복사
+ * @property {() => Promise<WorkcopyEntry[]>} [listWorkcopies] 데스크톱 모드: 남은 작업 사본
+ * @property {(key: string) => Promise<void>} [removeWorkcopy] 데스크톱 모드: 작업 사본 버리기
+ * @property {(path: string) => string} [baseName] 데스크톱 모드: 경로의 파일 이름 부분
  */
 
 /**
@@ -73,6 +83,8 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(info: { fileRevision: number, knownRevision: number }) => Promise<boolean>} revisionBehind 되돌아간 파일을 그대로 열지
  * @property {(info: { count: number, truncated: boolean, isNew: boolean, fileName: string | null }) => Promise<'recover' | 'discard'>} journalRecover
  * @property {(info: { count: number, baseRevision: number, fileRevision: number }) => Promise<'export' | 'discard'>} journalMismatch
+ * @property {(info: { name: string }) => Promise<'overwrite' | 'saveAs' | 'cancel'>} originalChanged 데스크톱 모드: 연 뒤 원본이 디스크에서 바뀜(D-15)
+ * @property {(info: { fileName: string | null, sameRevision: boolean, originalRevision: number | null, workcopyRevision: number | null }) => Promise<'recover' | 'discard'>} workcopyRecover 데스크톱 모드: 남은 dirty 작업 사본의 복구 여부
  */
 
 /**
@@ -85,6 +97,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @typedef {object} FileState
  * @property {string | null} name 저장한 적 없는 새 DB면 null
  * @property {FileSystemFileHandle | null} handle FSA 핸들. 없으면 저장은 다운로드 폴백
+ * @property {string | null} path 데스크톱 모드의 원본 경로(D-15). 브라우저 모드에서는 항상 null
  * @property {number} size 마지막으로 읽거나 쓴 바이트 수(gzip이면 압축된 크기)
  * @property {boolean} gzip 현재 파일이 gzip(`.db.gz`)인가. "저장"은 이 형식을 유지한다(Step 9)
  */
@@ -179,6 +192,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(options?: { force?: boolean, dbId?: string }) => Promise<boolean>} newDatabase
  * @property {() => Promise<boolean>} openFile FSA 선택기로 고른 뒤 `openPicked`. 폴백 입력 요소는 UI가 `openPicked`를 직접 부른다
  * @property {(picked: PickedFile) => Promise<boolean>} openPicked 미저장 변경 확인 → 크기 검사 → 열기 → revision 판정
+ * @property {(originalPath: string) => Promise<boolean>} openPath 데스크톱 모드: 미저장 변경 확인 → 작업 사본 위에서 열기 → dirty 사본 복구 판정 → revision 판정
  * @property {(options?: { auto?: boolean }) => Promise<boolean>} save `auto`면 자동 저장: 정본 핸들이 있고 dirty일 때만, 뮤텍스·`E_DB_BUSY`는 조용히 false
  * @property {() => Promise<boolean>} saveAs
  * @property {(name: string) => void} setDeviceName `saved_by`에 쓸 기기 이름
@@ -192,7 +206,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(handler: (cmd: Command) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
  * @property {() => void} refreshData 그리드가 블록 캐시를 버리고 다시 읽게 한다(`data:changed`)
  * @property {() => Promise<boolean>} recoverPending 시작 시 저널에 남은 새 DB 기록을 복구 제안한다
- * @property {() => Promise<{ name: string, handle: FileSystemFileHandle } | null>} recentFile IDB에 남은 최근 파일 핸들(권한은 아직 묻지 않음)
+ * @property {() => Promise<RecentFile | null>} recentFile IDB에 남은 최근 파일(핸들 또는 데스크톱 경로. 권한은 아직 묻지 않음)
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
  * @property {(tableId: string | null) => void} selectTable
  * @property {<K extends SchemaOp>(op: K, args: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result'] | null>} runSchemaOp 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다. 실패는 알리고 null
@@ -217,6 +231,8 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(file: Blob, options: ImportOptions, callOptions?: CallOptions) => Promise<PreviewResult>} importPreview 미리보기·추론. 실패는 던진다(대화상자가 표시)
  * @property {(args: { file: Blob, options: ImportOptions, mapping: ImportMapping, target: ImportTarget, policy?: ImportPolicy }, callOptions?: CallOptions) => Promise<ImportReport | null>} importRun 가져오기 실행. 성공하면 히스토리·저널 정지·dirty·테이블 목록을 반영하고 `import:done`. 읽기 전용이면 안내하고 null. 실패는 던진다
  */
+
+/** @typedef {{ name: string, handle: FileSystemFileHandle | null, path: string | null }} RecentFile */
 
 /**
  * 메모리 부족은 RangeError로 드러난다. 그 밖은 그대로 AppError로.
@@ -243,9 +259,12 @@ export function createStore(deps) {
    */
   let duringSave = null;
 
+  /** 데스크톱 모드(D-15): 저장은 `db.save`, 열기는 원본 경로, 백업은 `.bak`. */
+  const nativeMode = caps.persistence !== 'snapshot';
+
   /** @type {StoreState} */
   const state = {
-    file: { name: null, handle: null, size: 0, gzip: false },
+    file: { name: null, handle: null, path: null, size: 0, gzip: false },
     meta: {},
     tables: [],
     currentTableId: null,
@@ -373,10 +392,16 @@ export function createStore(deps) {
 
   /**
    * 열기·새로 만들기 뒤의 공통 상태 설정.
-   * @param {{ name: string | null, handle: FileSystemFileHandle | null, size: number, gzip: boolean, meta: Meta, tables: TableInfo[], readOnly: ReadOnlyReason }} next
+   * @param {{ name: string | null, handle: FileSystemFileHandle | null, path?: string | null, size: number, gzip: boolean, meta: Meta, tables: TableInfo[], readOnly: ReadOnlyReason }} next
    */
   function setOpened(next) {
-    state.file = { name: next.name, handle: next.handle, size: next.size, gzip: next.gzip };
+    state.file = {
+      name: next.name,
+      handle: next.handle,
+      path: next.path ?? null,
+      size: next.size,
+      gzip: next.gzip,
+    };
     state.meta = next.meta;
     state.currentTableId = null;
     views.clear();
@@ -488,13 +513,19 @@ export function createStore(deps) {
    * 스냅샷과 쓰기 사이에는 await가 여럿이라 그동안 편집·가져오기가 들어올 수 있고, 그 변경은 방금 쓴 파일에
    * 없다. 그래서 `duringSave`가 그 창의 변경을 들고 있으면 dirty를 풀지 않고, 저널도 비운 뒤 새 baseRevision
    * (= 방금 쓴 파일의 revision) 위에 그 변경만 다시 넣는다. 그대로 비우면 미저장 변경이 조용히 사라진다.
-   * @param {{ name: string, handle: FileSystemFileHandle | null, size: number, gzip: boolean, meta: Meta }} saved
+   * @param {{ name: string, handle: FileSystemFileHandle | null, path?: string | null, size: number, gzip: boolean, meta: Meta }} saved
    */
   async function setSaved(saved) {
     const during = duringSave;
     const pending = during?.commands ?? [];
     const stop = during?.stop ?? null;
-    state.file = { name: saved.name, handle: saved.handle, size: saved.size, gzip: saved.gzip };
+    state.file = {
+      name: saved.name,
+      handle: saved.handle,
+      path: saved.path ?? null,
+      size: saved.size,
+      gzip: saved.gzip,
+    };
     state.meta = saved.meta;
     state.dirty = during?.dirty === true;
     await autosave.clear();
@@ -522,22 +553,197 @@ export function createStore(deps) {
       }
       setJournalStop(stop);
     }
-    if (saved.handle) await rememberHandle(saved.name, saved.handle);
+    if (saved.handle) await rememberRecent(saved.name, saved.handle, null);
+    else if (saved.path) await rememberRecent(saved.name, null, saved.path);
     emit('file:saved');
   }
 
   /**
+   * 최근 파일(FSA 핸들 또는 데스크톱 경로)을 IDB에 남긴다.
    * @param {string} name
-   * @param {FileSystemFileHandle} handle
+   * @param {FileSystemFileHandle | null} handle
+   * @param {string | null} path
    */
-  async function rememberHandle(name, handle) {
+  async function rememberRecent(name, handle, path) {
     if (!idb) return;
     try {
-      await idb.put('handles', RECENT_HANDLE_KEY, { name, handle });
+      await idb.put('handles', RECENT_HANDLE_KEY, { name, handle, path });
     } catch (err) {
       // 핸들을 IDB에 넣지 못하는 브라우저가 있다. 최근 파일 기능만 빠진다.
       notify.error(toAppError(err));
     }
+  }
+
+  /**
+   * 데스크톱 모드에서 필요한 파일 함수. 없으면 주입이 잘못된 것이다.
+   * @template {keyof FileSystemLike} K
+   * @param {K} name
+   * @returns {NonNullable<FileSystemLike[K]>}
+   */
+  function nativeFs(name) {
+    const fn = fs[name];
+    if (!fn) throw new AppError('E_UNSUPPORTED', `${name} is not available in this mode`);
+    return /** @type {NonNullable<FileSystemLike[K]>} */ (fn);
+  }
+
+  /**
+   * 데스크톱 모드: 지금 열린 dirty 작업 사본을 버린다(사용자가 미저장 변경 버리기를 확인한 뒤에만).
+   */
+  async function discardDirtyWorkcopy() {
+    if (!nativeMode || !state.dirty) return;
+    try {
+      await client.call('db.close', { discardWorkcopy: true });
+    } catch (err) {
+      notify.error(toStoreError(err));
+    }
+  }
+
+  /**
+   * 데스크톱 모드 저장(D-15): `db.save`가 메타를 기록하고 러스트가 `VACUUM INTO` → `.bak` → rename으로 원본을 바꾼다.
+   * 원본이 연 뒤 디스크에서 바뀌었으면(`E_ORIGINAL_CHANGED`) 덮어쓰기 / 다른 이름으로 저장 / 취소를 묻는다.
+   * @param {string} originalPath
+   * @param {{ auto?: boolean, force?: boolean }} [options]
+   * @returns {Promise<boolean>}
+   */
+  async function saveNative(originalPath, options = {}) {
+    if (state.readOnly !== 'none') {
+      if (!options.auto) notify.info('file.readOnlyBlocked');
+      return false;
+    }
+    if (state.saving) {
+      if (!options.auto) notify.info('file.saveBusy');
+      return false;
+    }
+    state.saving = true;
+    emit('state:changed');
+    const name = nativeFs('baseName')(originalPath);
+    try {
+      const saved = await client.call('db.save', {
+        originalPath,
+        bumpRevision: true,
+        savedBy: deviceName,
+        force: options.force === true,
+      });
+      // `.bak`은 러스트가 저장마다 회전시키므로 브라우저 모드의 백업 생략 표시는 여기서 뜻이 없다.
+      state.backupNote = 'none';
+      await setSaved({
+        name,
+        handle: null,
+        path: originalPath,
+        size: saved.size,
+        gzip: false,
+        meta: saved.meta,
+      });
+      if (!options.auto) {
+        if (saved.backupPath) {
+          notify.info('file.savedBackup', {
+            name,
+            backup: nativeFs('baseName')(saved.backupPath),
+          });
+        } else {
+          notify.info('file.saved', { name });
+        }
+      }
+      return true;
+    } catch (err) {
+      const appErr = toStoreError(err);
+      if (appErr.code === 'E_ORIGINAL_CHANGED' && !options.auto) {
+        state.saving = false;
+        emit('state:changed');
+        const choice = await prompts.originalChanged({ name });
+        if (choice === 'overwrite') return saveNative(originalPath, { force: true });
+        if (choice === 'saveAs') return store.saveAs();
+        return false;
+      }
+      // 자동 저장이 배타 op와 겹친 것과 원본 변경은 오류가 아니라 미룸이다.
+      if (!(
+        options.auto &&
+        (appErr.code === 'E_DB_BUSY' || appErr.code === 'E_ORIGINAL_CHANGED')
+      )) {
+        notify.error(appErr);
+      }
+      return false;
+    } finally {
+      state.saving = false;
+      emit('state:changed');
+    }
+  }
+
+  /**
+   * 데스크톱 모드: 남은 dirty 사본을 열었을 때의 복구 판정(4.3절의 저널 조건과 같다, D-15).
+   * @param {NativeOpenInfo} workcopy
+   * @param {string | null} fileName
+   * @returns {Promise<'keep' | 'discard'>}
+   */
+  async function judgeWorkcopy(workcopy, fileName) {
+    const sameRevision =
+      fileName === null || workcopy.originalRevision === workcopy.workcopyRevision;
+    const choice = await prompts.workcopyRecover({
+      fileName,
+      sameRevision,
+      originalRevision: workcopy.originalRevision,
+      workcopyRevision: workcopy.workcopyRevision,
+    });
+    if (choice === 'discard') return 'discard';
+    if (!sameRevision) notify.info('file.workcopyMismatch');
+    return 'keep';
+  }
+
+  /**
+   * 데스크톱 모드: 연 결과를 스토어 상태로 옮긴다(외부 파일 등록, 읽기 전용, 탭 잠금, revision 판정).
+   * @param {import('../db/worker.js').OpenResult} opened
+   * @param {{ name: string | null, path: string | null, dirty: boolean }} file
+   * @returns {Promise<boolean>}
+   */
+  async function finishNativeOpen(opened, file) {
+    let result = opened;
+    if (result.unmanaged) {
+      if (!(await prompts.adoptExternal())) {
+        await store.newDatabase({ force: true });
+        return false;
+      }
+      try {
+        result = await client.call('schema.adopt');
+      } catch (err) {
+        notify.error(toStoreError(err));
+        await store.newDatabase({ force: true });
+        return false;
+      }
+    }
+    /** @type {ReadOnlyReason} */
+    let readOnly = 'none';
+    if (result.readOnly) {
+      readOnly = 'newerSchema';
+      notify.error(new AppError('E_FILE_NEWER_SCHEMA', 'schema_version is newer than this app'));
+    }
+    const dbId = result.meta.db_id ?? '';
+    const lock = await tablock.claim(dbId);
+    if (lock.heldElsewhere && readOnly === 'none') {
+      readOnly = 'otherTab';
+      notify.info('file.readOnlyTab');
+    }
+    setOpened({
+      name: file.name,
+      handle: null,
+      path: file.path,
+      size: opened.workcopy?.size ?? 0,
+      gzip: false,
+      meta: result.meta,
+      tables: result.tables,
+      readOnly,
+    });
+    if (file.dirty) {
+      // 복구한 사본의 변경은 아직 파일에 없다.
+      state.dirty = true;
+    }
+    if (file.path !== null && !(await reconcileRevision(result.meta))) {
+      await store.newDatabase({ force: true });
+      return false;
+    }
+    if (file.path !== null && file.name !== null) await rememberRecent(file.name, null, file.path);
+    emit('file:opened');
+    if (file.dirty) emit('file:dirty');
+    return true;
   }
 
   /**
@@ -680,13 +886,17 @@ export function createStore(deps) {
     },
 
     async newDatabase(options = {}) {
-      if (!options.force && !(await confirmDiscard())) return false;
+      if (!options.force) {
+        if (!(await confirmDiscard())) return false;
+        await discardDirtyWorkcopy();
+      }
       try {
         const opened = await client.call('db.open', options.dbId ? { dbId: options.dbId } : {});
         tablock.release();
         setOpened({
           name: null,
           handle: null,
+          path: null,
           size: 0,
           gzip: false,
           meta: opened.meta,
@@ -702,6 +912,18 @@ export function createStore(deps) {
     },
 
     async openFile() {
+      if (nativeMode) {
+        /** @type {string | null} */
+        let path;
+        try {
+          path = await nativeFs('pickOpenPath')();
+        } catch (err) {
+          notify.error(toStoreError(err));
+          return false;
+        }
+        if (!path) return false;
+        return store.openPath(path);
+      }
       /** @type {PickedFile | null} */
       let picked;
       try {
@@ -712,6 +934,37 @@ export function createStore(deps) {
       }
       if (!picked) return false;
       return store.openPicked(picked);
+    },
+
+    async openPath(originalPath) {
+      if (!nativeMode) {
+        notify.error(new AppError('E_UNSUPPORTED', 'openPath is desktop-only'));
+        return false;
+      }
+      if (!(await confirmDiscard())) return false;
+      await discardDirtyWorkcopy();
+      const name = nativeFs('baseName')(originalPath);
+      /** @type {import('../db/worker.js').OpenResult} */
+      let opened;
+      try {
+        opened = await client.call('db.open', { originalPath });
+        if (opened.workcopy?.dirty) {
+          const verdict = await judgeWorkcopy(opened.workcopy, name);
+          if (verdict === 'discard') {
+            opened = await client.call('db.open', { originalPath, discardWorkcopy: true });
+          }
+        }
+      } catch (err) {
+        // 이전 DB는 이미 닫혔다. 사용 가능한 상태로 돌아가기 위해 새 DB를 연다.
+        notify.error(toStoreError(err));
+        await store.newDatabase({ force: true });
+        return false;
+      }
+      return finishNativeOpen(opened, {
+        name,
+        path: originalPath,
+        dirty: opened.workcopy?.dirty === true,
+      });
     },
 
     async openPicked(picked) {
@@ -798,12 +1051,20 @@ export function createStore(deps) {
         await store.newDatabase({ force: true });
         return false;
       }
-      if (picked.handle) await rememberHandle(picked.name, picked.handle);
+      if (picked.handle) await rememberRecent(picked.name, picked.handle, null);
       emit('file:opened');
       return true;
     },
 
     async save(options = {}) {
+      if (nativeMode) {
+        if (options.auto) {
+          if (!state.file.path || !state.dirty || state.readOnly !== 'none') return false;
+          return saveNative(state.file.path, { auto: true });
+        }
+        if (!state.file.path) return store.saveAs();
+        return saveNative(state.file.path);
+      }
       if (options.auto) {
         // 자동 저장은 정본 파일(핸들)이 있을 때만이고, 다운로드 폴백으로는 하지 않는다(Step 9).
         if (!state.file.handle || !state.dirty || state.readOnly !== 'none') return false;
@@ -826,6 +1087,18 @@ export function createStore(deps) {
     },
 
     async saveAs() {
+      if (nativeMode) {
+        /** @type {string | null} */
+        let path;
+        try {
+          path = await nativeFs('pickSavePath')(state.file.name ?? deps.defaultFileName, 'db');
+        } catch (err) {
+          notify.error(toStoreError(err));
+          return false;
+        }
+        if (!path) return false;
+        return saveNative(path);
+      }
       const current = state.file.name ?? deps.defaultFileName;
       // 폴백(다운로드) 경로에서는 설정의 "압축 저장"이 제안 이름을 정한다. 핸들이 있는 파일은 그 형식을 제안한다.
       const suggested = withGzipName(current, state.file.handle ? state.file.gzip : saveGzip);
@@ -841,6 +1114,10 @@ export function createStore(deps) {
       if (target.kind === 'handle') {
         return writeSnapshot({ kind: 'handle', handle: target.handle, name: target.handle.name });
       }
+      if (target.kind === 'path') {
+        notify.error(new AppError('E_UNSUPPORTED', 'path targets belong to desktop mode'));
+        return false;
+      }
       return writeSnapshot({ kind: 'download', name: target.name });
     },
 
@@ -854,6 +1131,17 @@ export function createStore(deps) {
     },
 
     async backupInfo() {
+      if (nativeMode) {
+        if (!state.file.path) return null;
+        try {
+          const info = await nativeFs('backupInfo')(state.file.path);
+          if (!info) return null;
+          return { name: nativeFs('baseName')(info.path), bytes: info.size, at: info.mtime };
+        } catch (err) {
+          notify.error(toStoreError(err));
+          return null;
+        }
+      }
       if (!idb) return null;
       const dbId = state.meta.db_id ?? '';
       if (!dbId) return null;
@@ -874,9 +1162,29 @@ export function createStore(deps) {
     },
 
     async restoreBackup() {
-      if (caps.persistence !== 'snapshot') {
-        notify.error(new AppError('E_UNSUPPORTED', 'backup restore is Step 11 in this mode'));
-        return false;
+      if (nativeMode) {
+        // `<원본>.bak`을 고른 경로로 복사한다. 열린 DB와 원본은 건드리지 않는다.
+        const originalPath = state.file.path;
+        if (!originalPath) {
+          notify.info('backup.none');
+          return false;
+        }
+        try {
+          const info = await nativeFs('backupInfo')(originalPath);
+          if (!info) {
+            notify.info('backup.none');
+            return false;
+          }
+          const suggested = `backup-${nativeFs('baseName')(originalPath)}`;
+          const target = await nativeFs('pickSavePath')(suggested, 'db');
+          if (!target) return false;
+          const restored = await nativeFs('restoreBackup')(originalPath, target);
+          notify.info('backup.restored', { name: nativeFs('baseName')(restored.path) });
+          return true;
+        } catch (err) {
+          notify.error(toStoreError(err));
+          return false;
+        }
       }
       if (!idb) {
         notify.info('backup.none');
@@ -915,9 +1223,11 @@ export function createStore(deps) {
         if (target.kind === 'handle') {
           await fs.write(target.handle, copy);
           notify.info('backup.restored', { name: target.handle.name });
-        } else {
+        } else if (target.kind === 'download') {
           fs.download(target.name, copy);
           notify.info('backup.restored', { name: target.name });
+        } else {
+          throw new AppError('E_UNSUPPORTED', 'path targets belong to desktop mode');
         }
         return true;
       } catch (err) {
@@ -939,7 +1249,12 @@ export function createStore(deps) {
       const kind = args.format === 'xlsx' ? 'xlsx' : 'csv';
       const target = await fs.pickSaveAs(args.suggestedName, kind);
       if (target.kind === 'cancelled') return null;
-      const name = target.kind === 'handle' ? target.handle.name : target.name;
+      const name =
+        target.kind === 'handle'
+          ? target.handle.name
+          : target.kind === 'path'
+            ? nativeFs('baseName')(target.path)
+            : target.name;
       const sink = await fs.openSink(
         target,
         kind === 'xlsx'
@@ -1035,6 +1350,7 @@ export function createStore(deps) {
     },
 
     async recoverPending() {
+      if (nativeMode) return recoverWorkcopies();
       const pending = await autosave.pending();
       if (!pending) return false;
       if (pending.fileName !== null) {
@@ -1060,13 +1376,15 @@ export function createStore(deps) {
       try {
         const stored = await idb.get('handles', RECENT_HANDLE_KEY);
         if (!stored || typeof stored !== 'object') return null;
-        const { name, handle } = /** @type {{ name: string, handle: FileSystemFileHandle }} */ (
-          stored
-        );
-        if (typeof name !== 'string' || !handle || typeof handle.getFile !== 'function') {
-          return null;
-        }
-        return { name, handle };
+        const { name, handle, path } =
+          /** @type {{ name: string, handle?: FileSystemFileHandle | null, path?: string | null }} */ (
+            stored
+          );
+        if (typeof name !== 'string') return null;
+        if (nativeMode)
+          return typeof path === 'string' && path ? { name, handle: null, path } : null;
+        if (!handle || typeof handle.getFile !== 'function') return null;
+        return { name, handle, path: null };
       } catch (err) {
         // 핸들을 구조화 복제로 되살릴 수 없는 브라우저는 최근 파일 항목이 없는 것과 같다.
         notify.error(toAppError(err));
@@ -1292,6 +1610,8 @@ export function createStore(deps) {
     async openRecent() {
       const recent = await store.recentFile();
       if (!recent) return false;
+      if (recent.path !== null) return store.openPath(recent.path);
+      if (!recent.handle) return false;
       try {
         // 권한 만료: queryPermission → requestPermission(사용자 동작 안에서 호출됨). 거부되면 E_FILE_PERMISSION.
         await fs.ensurePermission(recent.handle, 'read');
@@ -1303,6 +1623,55 @@ export function createStore(deps) {
       }
     },
   };
+
+  /**
+   * 데스크톱 모드의 시작 복구(D-15): 저장한 적 없는 새 DB의 dirty 사본은 복구를 제안하고, 파일의 dirty 사본은
+   * 그 파일을 열면 복구된다는 안내만 한다(브라우저 모드의 `file.journalPendingFor`와 같다).
+   * @returns {Promise<boolean>}
+   */
+  async function recoverWorkcopies() {
+    /** @type {WorkcopyEntry[]} */
+    let entries;
+    try {
+      entries = await nativeFs('listWorkcopies')();
+    } catch (err) {
+      notify.error(toStoreError(err));
+      return false;
+    }
+    const dirty = entries.filter((e) => e.dirty);
+    const fresh = dirty.find((e) => (e.meta?.originalPath ?? null) === null);
+    for (const entry of dirty) {
+      const originalPath = entry.meta?.originalPath ?? null;
+      if (originalPath !== null) {
+        notify.info('file.workcopyPendingFor', { name: nativeFs('baseName')(originalPath) });
+      }
+    }
+    if (!fresh) return false;
+    const choice = await prompts.workcopyRecover({
+      fileName: null,
+      sameRevision: true,
+      originalRevision: null,
+      workcopyRevision: null,
+    });
+    if (choice !== 'recover') {
+      try {
+        await nativeFs('removeWorkcopy')(fresh.key);
+      } catch (err) {
+        notify.error(toStoreError(err));
+      }
+      return false;
+    }
+    /** @type {import('../db/worker.js').OpenResult} */
+    let opened;
+    try {
+      opened = await client.call('db.open', { workcopyKey: fresh.key });
+    } catch (err) {
+      notify.error(toStoreError(err));
+      await store.newDatabase({ force: true });
+      return false;
+    }
+    return finishNativeOpen(opened, { name: null, path: null, dirty: true });
+  }
 
   autosave.attach({ dbId: '', baseRevision: 0, fileName: null });
   return store;

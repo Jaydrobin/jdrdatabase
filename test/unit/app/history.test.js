@@ -68,6 +68,8 @@ async function setup() {
       revisionBehind: async () => true,
       journalRecover: async () => 'discard',
       journalMismatch: async () => 'discard',
+      originalChanged: async () => 'cancel',
+      workcopyRecover: async () => 'discard',
     },
     notify,
     deviceName: '테스트',

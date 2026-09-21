@@ -190,11 +190,21 @@ impl Backend {
         let size = std::fs::metadata(&prepared.db_path)
             .map(|m| m.len())
             .unwrap_or(0);
+        // 저장 직전 비교의 기준은 "이 사본이 무엇에서 왔는가"다. 남은 dirty 사본을 재사용했으면 사본을 만들 때의
+        // 원본 상태(meta.json)를 쓴다. 그 뒤 원본이 바뀌었으면(다른 PC의 저장) 저장이 E_ORIGINAL_CHANGED로 멈춘다.
         let original_ref = match (&reused_original, &info) {
             (Some(path), Some(info)) => Some(OriginalRef {
                 path: path.clone(),
-                mtime: info.mtime,
-                size: info.size,
+                mtime: if prepared.reused_dirty {
+                    prepared.meta.original_mtime.unwrap_or(info.mtime)
+                } else {
+                    info.mtime
+                },
+                size: if prepared.reused_dirty {
+                    prepared.meta.original_size.unwrap_or(info.size)
+                } else {
+                    info.size
+                },
             }),
             _ => None,
         };

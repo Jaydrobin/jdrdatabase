@@ -6,6 +6,7 @@
 pub mod db;
 pub mod error;
 pub mod save;
+pub mod sink;
 pub mod value;
 pub mod workcopy;
 
@@ -28,6 +29,8 @@ pub struct Backend {
     pub(crate) interrupt: Mutex<Option<InterruptHandle>>,
     /// 테스트 전용 실패 주입(`save.rs`). `call`로는 바꿀 수 없다.
     pub fail_point: Mutex<Option<save::FailPoint>>,
+    /// 열려 있는 경로 싱크(`sink.rs`).
+    pub(crate) sinks: Mutex<sink::Sinks>,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +71,22 @@ struct KeyArgs {
     key: String,
 }
 
+#[derive(Deserialize)]
+struct SinkOpenArgs {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct SinkIdArgs {
+    id: u64,
+}
+
+#[derive(Deserialize)]
+struct SinkWriteArgs {
+    id: u64,
+    bytes: value::SqlValue,
+}
+
 fn parse<T: for<'de> Deserialize<'de>>(args: Value) -> Result<T> {
     let value = if args.is_null() {
         Value::Object(serde_json::Map::new())
@@ -84,6 +103,7 @@ impl Backend {
             session: Mutex::new(None),
             interrupt: Mutex::new(None),
             fail_point: Mutex::new(None),
+            sinks: Mutex::new(sink::Sinks::default()),
         }
     }
 
@@ -153,6 +173,29 @@ impl Backend {
                 }
                 Ok(Value::Null)
             }
+            "sink_open" => {
+                let a: SinkOpenArgs = parse(args)?;
+                Ok(Value::from(self.sink_open(&a.path)?))
+            }
+            "sink_write" => {
+                // JSON 경로(하네스·테스트). 타우리는 요청 본문(raw)으로 `sink_write`를 직접 부른다.
+                let a: SinkWriteArgs = parse(args)?;
+                let bytes = match a.bytes {
+                    value::SqlValue::Blob(b) => b,
+                    value::SqlValue::Text(t) => t.into_bytes(),
+                    _ => return Err(AppError::new(Code::FileWrite, "sink_write needs bytes")),
+                };
+                Ok(Value::from(self.sink_write(a.id, &bytes)?))
+            }
+            "sink_close" => {
+                let a: SinkIdArgs = parse(args)?;
+                Ok(serde_json::to_value(self.sink_close(a.id)?)?)
+            }
+            "sink_abort" => {
+                let a: SinkIdArgs = parse(args)?;
+                self.sink_abort(a.id)?;
+                Ok(Value::Null)
+            }
             _ => Err(AppError::new(
                 Code::NativeIpc,
                 format!("unknown command: {cmd}"),
@@ -180,4 +223,8 @@ pub const COMMANDS: &[&str] = &[
     "list_workcopies",
     "purge_workcopies",
     "remove_workcopy",
+    "sink_open",
+    "sink_write",
+    "sink_close",
+    "sink_abort",
 ];

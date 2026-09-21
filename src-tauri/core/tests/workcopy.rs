@@ -213,3 +213,100 @@ fn non_sqlite_and_missing_files_are_rejected() {
     assert!(info.workcopy_key.starts_with("p-"));
     assert_eq!(info.original_revision, None);
 }
+
+#[test]
+fn dirty_copy_of_a_saved_new_database_is_found_by_original_path() {
+    let tmp = TempDir::new("saveas-dirty");
+    let b = Backend::new(tmp.join("app"));
+    let info = b.open(OpenArgs::default(), &|_| {}).unwrap();
+    assert!(info.workcopy_key.starts_with("new-"));
+    run_tx(
+        &b,
+        "CREATE TABLE _jdr_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT",
+        None,
+    );
+    run_tx(
+        &b,
+        "INSERT INTO _jdr_meta VALUES ('db_id', 'saved-new'), ('revision', '1'), ('dirty', '0')",
+        None,
+    );
+    run_tx(
+        &b,
+        "CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT) STRICT",
+        None,
+    );
+    let file = tmp.join("새로 저장.db");
+    b.save_to(
+        jdr_core::save::SaveArgs {
+            original_path: file.to_string_lossy().into_owned(),
+            expected: None,
+            force: false,
+        },
+        &|_| {},
+    )
+    .unwrap();
+    run_tx(&b, "INSERT INTO t (s) VALUES ('미저장')", None);
+    mark_dirty(&b);
+    b.close(false).unwrap();
+
+    // 원본 경로로 다시 열면 키는 db_id지만 `new-*` 폴더의 dirty 사본을 찾아 재사용한다.
+    let reopened = open_original(&b, &file);
+    assert!(reopened.dirty);
+    assert_eq!(reopened.workcopy_key, info.workcopy_key);
+    assert_eq!(
+        b.exec("SELECT count(*) FROM t", None).unwrap().rows,
+        vec![vec![SqlValue::Integer(1)]]
+    );
+    // 버리면 그 폴더도 지우고 db_id 키로 새로 복사한다.
+    let fresh = b
+        .open(
+            OpenArgs {
+                original_path: Some(file.to_string_lossy().into_owned()),
+                discard_workcopy: true,
+                workcopy_key: None,
+            },
+            &|_| {},
+        )
+        .unwrap();
+    assert!(!fresh.dirty);
+    assert_eq!(fresh.workcopy_key, "saved-new");
+    assert!(!tmp.join("app/workcopies").join(&info.workcopy_key).exists());
+    assert_eq!(
+        b.exec("SELECT count(*) FROM t", None).unwrap().rows,
+        vec![vec![SqlValue::Integer(0)]]
+    );
+}
+
+#[test]
+fn reused_dirty_copy_compares_against_the_original_it_was_copied_from() {
+    let tmp = TempDir::new("stale-copy");
+    let original = tmp.join("동기화.db");
+    make_original(&original, "db-stale", 1, 1);
+    let b = Backend::new(tmp.join("app"));
+    open_original(&b, &original);
+    run_tx(&b, "INSERT INTO t (s) VALUES ('내 변경')", None);
+    mark_dirty(&b);
+    b.close(false).unwrap();
+    // 다른 PC의 저장이 동기화됐다.
+    make_original(&original, "db-stale", 2, 5);
+    let reopened = open_original(&b, &original);
+    assert!(reopened.dirty);
+    assert_eq!(reopened.original_revision, Some(2));
+    assert_eq!(reopened.workcopy_revision, Some(1));
+    let err = b
+        .save_to(
+            jdr_core::save::SaveArgs {
+                original_path: original.to_string_lossy().into_owned(),
+                expected: None,
+                force: false,
+            },
+            &|_| {},
+        )
+        .unwrap_err();
+    assert_eq!(
+        err.code,
+        Code::OriginalChanged,
+        "사본을 만든 뒤 바뀐 원본을 덮어쓰지 않는다"
+    );
+    assert_eq!(count_rows(&original), 5);
+}

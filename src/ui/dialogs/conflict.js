@@ -63,6 +63,42 @@ export function createPrompts() {
       return value === 'discard' ? 'discard' : 'recover';
     },
 
+    async originalChanged({ name }) {
+      const value = await openDialog({
+        title: t('confirm.originalChanged.title'),
+        message: t('confirm.originalChanged.message', { name }),
+        buttons: [
+          { label: t('confirm.originalChanged.cancel'), value: 'cancel' },
+          { label: t('confirm.originalChanged.overwrite'), value: 'overwrite', danger: true },
+          { label: t('confirm.originalChanged.saveAs'), value: 'saveAs', primary: true },
+        ],
+        cancelValue: 'cancel',
+      });
+      if (value === 'overwrite') return 'overwrite';
+      return value === 'saveAs' ? 'saveAs' : 'cancel';
+    },
+
+    async workcopyRecover({ fileName, sameRevision, originalRevision, workcopyRevision }) {
+      const lines = [
+        fileName === null
+          ? t('confirm.workcopy.messageNew')
+          : t('confirm.workcopy.message', { name: fileName, revision: workcopyRevision ?? 0 }),
+      ];
+      if (fileName !== null && !sameRevision) {
+        lines.push(t('confirm.workcopy.mismatch', { file: originalRevision ?? 0 }));
+      }
+      const value = await openDialog({
+        title: t('confirm.workcopy.title'),
+        message: lines.join('\n'),
+        buttons: [
+          { label: t('confirm.workcopy.discard'), value: 'discard', danger: true },
+          { label: t('confirm.workcopy.recover'), value: 'recover', primary: true },
+        ],
+        cancelValue: 'recover',
+      });
+      return value === 'discard' ? 'discard' : 'recover';
+    },
+
     async journalMismatch({ count, baseRevision, fileRevision }) {
       const value = await openDialog({
         title: t('confirm.journalMismatch.title'),

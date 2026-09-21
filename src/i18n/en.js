@@ -324,6 +324,29 @@ export const en = Object.freeze({
   'import.reason.error_cell': 'error cell',
   'toolbar.export': 'Export…',
   'toolbar.settings': 'Settings…',
+  'status.mode.native': 'Desktop mode',
+  'lock.nativeIpc':
+    'The desktop engine could not be started. Restart the app. If it keeps happening, reinstall.',
+  'confirm.originalChanged.title': 'The original file has changed',
+  'confirm.originalChanged.message':
+    '{name} changed on disk after it was opened. A file saved on another PC may have been synced. Overwriting discards that change; the overwritten file is kept as .bak.',
+  'confirm.originalChanged.overwrite': 'Overwrite',
+  'confirm.originalChanged.saveAs': 'Save as…',
+  'confirm.originalChanged.cancel': 'Cancel',
+  'confirm.workcopy.title': 'Recover unsaved changes',
+  'confirm.workcopy.message':
+    'Unsaved changes to {name} remain in the working copy (on top of revision {revision}). Recover them?',
+  'confirm.workcopy.messageNew':
+    'Unsaved changes to a database that was never saved remain in the working copy. Recover them?',
+  'confirm.workcopy.mismatch':
+    'Meanwhile the file changed to revision {file}. Recovering opens the copy as is; save it under another name to avoid overwriting the file.',
+  'confirm.workcopy.recover': 'Recover',
+  'confirm.workcopy.discard': 'Discard',
+  'file.workcopyPendingFor':
+    'Unsaved changes to {name} remain in a working copy. Open that file to recover them.',
+  'file.workcopyMismatch':
+    'The recovered changes were made on top of an older revision than the current file. Saving under another name is safer.',
+  'file.savedBackup': 'Saved to {name}. The previous file was kept as {backup}.',
   'file.saveBusy': 'A save is in progress. Try again when it finishes.',
   'status.backupSkipped': 'Pre-save backup skipped: file over 200 MB',
   'status.backupQuota': 'Pre-save backup skipped: browser storage is full',

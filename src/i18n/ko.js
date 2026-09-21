@@ -324,6 +324,29 @@ export const ko = Object.freeze({
   'import.reason.error_cell': '오류 셀',
   'toolbar.export': '내보내기…',
   'toolbar.settings': '설정…',
+  'status.mode.native': '데스크톱 모드',
+  'lock.nativeIpc':
+    '데스크톱 엔진을 시작하지 못했습니다. 앱을 다시 시작하세요. 반복되면 설치본을 다시 설치하세요.',
+  'confirm.originalChanged.title': '원본 파일이 바뀌었습니다',
+  'confirm.originalChanged.message':
+    '{name}이(가) 연 뒤에 디스크에서 바뀌었습니다. 다른 PC에서 저장한 파일이 동기화되었을 수 있습니다. 덮어쓰면 그 변경은 사라지고, 덮어쓴 파일은 .bak으로 남습니다.',
+  'confirm.originalChanged.overwrite': '덮어쓰기',
+  'confirm.originalChanged.saveAs': '다른 이름으로 저장…',
+  'confirm.originalChanged.cancel': '취소',
+  'confirm.workcopy.title': '저장되지 않은 변경 복구',
+  'confirm.workcopy.message':
+    '{name}의 저장되지 않은 변경이 작업 사본에 남아 있습니다(revision {revision} 위의 변경). 복구하시겠습니까?',
+  'confirm.workcopy.messageNew':
+    '저장한 적 없는 새 데이터베이스의 변경이 작업 사본에 남아 있습니다. 복구하시겠습니까?',
+  'confirm.workcopy.mismatch':
+    '그 사이 파일은 revision {file}(으)로 바뀌었습니다. 복구하면 사본을 그대로 열며, 파일을 덮어쓰지 않으려면 다른 이름으로 저장하세요.',
+  'confirm.workcopy.recover': '복구',
+  'confirm.workcopy.discard': '버리기',
+  'file.workcopyPendingFor':
+    '{name}의 저장되지 않은 변경이 작업 사본에 남아 있습니다. 그 파일을 열면 복구할 수 있습니다.',
+  'file.workcopyMismatch':
+    '복구한 변경은 지금 파일보다 오래된 revision 위의 것입니다. 다른 이름으로 저장하는 것이 안전합니다.',
+  'file.savedBackup': '{name}에 저장했습니다. 이전 파일은 {backup}(으)로 남았습니다.',
   'file.saveBusy': '저장이 진행 중입니다. 끝난 뒤 다시 시도하세요.',
   'status.backupSkipped': '저장 전 백업 생략: 파일이 200 MB를 넘음',
   'status.backupQuota': '저장 전 백업 생략: 브라우저 저장 공간 부족',

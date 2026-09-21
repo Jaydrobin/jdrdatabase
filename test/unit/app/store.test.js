@@ -73,7 +73,12 @@ function fakeFs() {
       return nextSaveTarget;
     },
     openSink: async (target, mime) => {
-      const name = target.kind === 'handle' ? target.handle.name : target.name;
+      const name =
+        target.kind === 'handle'
+          ? target.handle.name
+          : target.kind === 'path'
+            ? target.path
+            : target.name;
       const sink = {
         name,
         mime,
@@ -141,6 +146,8 @@ function fakePrompts(answers = {}) {
     revisionBehind: async () => (asked.push('behind'), answers.behind ?? true),
     journalRecover: async () => (asked.push('journal'), answers.journal ?? 'recover'),
     journalMismatch: async () => (asked.push('mismatch'), answers.mismatch ?? 'discard'),
+    originalChanged: async () => (asked.push('originalChanged'), 'cancel'),
+    workcopyRecover: async () => (asked.push('workcopy'), 'recover'),
   };
   return { prompts, asked };
 }
