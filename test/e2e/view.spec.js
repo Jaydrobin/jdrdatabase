@@ -449,7 +449,14 @@ test('정렬 대상 열을 삭제하면 뷰에서 그 정렬 항목이 빠지고
   await expect(cell(page, 0, 0)).toHaveText('이름1');
 });
 
-test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
+/**
+ * 임시 진단(세션 F 점검 후속): 이 시나리오가 CI에서만 간헐적으로 실패한다. 샘플을 늘리려고
+ * 같은 본문을 여러 번 등록한다. `seed()`와 `dblclick()` 사이에 아무것도 넣지 않는 것이 중요하다
+ * (왕복을 하나만 끼워도 실패가 사라졌다. 경합이 그 구간에 있다는 뜻이다).
+ * 원인을 특정하면 반복 등록을 지우고 검사 하나만 남긴다.
+ * @param {import('@playwright/test').Page} page
+ */
+async function headerClickWhileEditing(page) {
   const { table, name } = await seed(page);
   // 그리드가 다시 마운트되며 편집기를 닫는 경로다. 닫히기 전에 blur 확정이 먼저 일어나야
   // Step 5의 "다른 곳 클릭 → 확정 시도"가 지켜진다(입력이 조용히 사라지지 않는다).
@@ -462,7 +469,7 @@ test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정�
   const sql = `SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`;
   const stored = await hook(page).query(sql);
   if (stored.rows[0]?.[0] !== '머리글클릭확정') {
-    // 임시 진단: 실패할 때만 증거를 모은다(성공 경로에는 아무 비용도 붙지 않는다).
+    // 실패할 때만 증거를 모은다(성공 경로에는 아무 비용도 붙지 않는다).
     const seen = await page.evaluate(() => ({
       blurs: /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window)).__jdrBlur,
       toasts: /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window)).__jdrToasts,
@@ -472,4 +479,14 @@ test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정�
     console.log(`DIAG ${JSON.stringify({ immediate: stored.rows[0]?.[0], later, ...seen })}`);
   }
   expect(stored.rows[0]?.[0]).toBe('머리글클릭확정');
+}
+
+test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
+  await headerClickWhileEditing(page);
 });
+
+for (let n = 2; n <= 8; n += 1) {
+  test(`편집 중 머리글 클릭(정렬) 반복 ${n} (임시 진단)`, async ({ page }) => {
+    await headerClickWhileEditing(page);
+  });
+}
