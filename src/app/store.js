@@ -546,6 +546,8 @@ export function createStore(deps) {
    * @param {string} dbId
    */
   async function backupBefore(handle, dbId) {
+    // 이번 저장의 백업 결과로 덮어쓴다. 백업이 필요 없는 저장(첫 저장, IDB 없음)은 지난 실패를 지운다.
+    state.backupNote = 'none';
     if (!idb) return;
     try {
       const previous = await fs.readAll(handle);
@@ -560,7 +562,6 @@ export function createStore(deps) {
         bytes: previous,
         at: Date.now(),
       });
-      state.backupNote = 'none';
     } catch (err) {
       const appErr = toStoreError(err);
       // 백업은 저장을 막지 않는다(Step 9 예외 처리). 상태바가 다음 저장 성공까지 표시한다.
@@ -622,6 +623,8 @@ export function createStore(deps) {
         });
         if (!options.auto) notify.info('file.saved', { name: target.name });
       } else {
+        // 다운로드 폴백은 덮어쓸 원본이 없어 백업하지 않는다. 지난 저장의 백업 실패 표시는 지운다.
+        state.backupNote = 'none';
         fs.download(target.name, bytes);
         await setSaved({
           name: target.name,

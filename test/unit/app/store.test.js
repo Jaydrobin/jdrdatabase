@@ -1032,6 +1032,36 @@ test('backupNote: 백업 실패는 저장을 막지 않고 상태에 남으며 �
   client.close();
 });
 
+test('backupNote: 백업하지 않는 저장(다운로드 폴백)도 지난 실패 표시를 지운다', async () => {
+  const { store, client, fsx, idb } = await setup();
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true);
+  store.markDirty();
+  const put = idb?.put;
+  assert.ok(idb && put);
+  idb.put = async (storeName, key, value) => {
+    if (storeName === 'backups') throw new AppError('E_QUOTA', 'full');
+    return put.call(idb, storeName, key, value);
+  };
+  assert.equal(await store.save(), true);
+  assert.equal(store.getState().backupNote, 'quota');
+  idb.put = put;
+
+  // 덮어쓸 원본이 없는 저장이라 백업을 만들지 않는다. 그래도 지난 실패 표시는 남으면 안 된다.
+  fsx.setSaveTarget({ kind: 'download', name: 'database.db' });
+  store.markDirty();
+  assert.equal(await store.saveAs(), true);
+  assert.equal(store.getState().backupNote, 'none');
+  client.close();
+});
+
 test('exportTable: 저장 위치 선택 → 조각을 싱크에 순서대로 쓰고 close, 취소는 null, 실패는 abort', async () => {
   const { store, client, fsx } = await setup();
   const { report } = await client.call('import.run', {
