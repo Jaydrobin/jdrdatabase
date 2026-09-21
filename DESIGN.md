@@ -331,6 +331,7 @@ build/
   template.html                  산출물 템플릿(자리표시자: CSP_META, CSS, WORKER_JS, WASM_B64, MAIN_JS)
 
 docs/
+  sessions.md                    세션별 검증 기록(5.0의 A~I와 점검 세션). 세션마다 절 하나, 미확인 항목은 "미확인"으로 남긴다
   support-matrix.md              브라우저·WebView API 가용성 실측표(R1, R8). 미확인 항목은 "미확인"으로 남긴다
 
 src-tauri/
