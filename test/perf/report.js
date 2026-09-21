@@ -12,6 +12,20 @@ export const REPORT_DIR = path.resolve('test-results/perf');
 export const BASELINE_PATH = path.resolve('test/perf/perf-baseline.json');
 /** CLAUDE.md 6장: 기준선 대비 30% 이상 회귀는 실패. */
 export const REGRESSION_RATIO = 1.3;
+/**
+ * 비율 판정에 더하는 잡음 바닥. 1~2 ms짜리 측정(셀 편집 왕복)은 타이머 해상도만으로 30%가 흔들리므로,
+ * 비율을 넘고 **또한** 이만큼 이상 늘어야 회귀로 본다. ms 항목 5 ms, bytes 항목 16 MiB.
+ */
+export const NOISE_FLOOR_MS = 5;
+export const NOISE_FLOOR_BYTES = 16 * 1024 * 1024;
+
+/**
+ * @param {string} key 측정 항목 이름(`…Ms` 또는 `…Bytes`)
+ * @returns {number}
+ */
+export function noiseFloor(key) {
+  return key.endsWith('Bytes') ? NOISE_FLOOR_BYTES : NOISE_FLOOR_MS;
+}
 /** CI에서 기준선 비교를 켜는 환경 변수. 로컬 기본 실행은 8장의 절대 예산으로만 판정한다. */
 export const COMPARE_ENV = 'JDR_PERF_COMPARE';
 /** 절대 예산으로 판정하는가(로컬). CI(기준선 비교)에서는 예산 초과를 기록만 한다(DESIGN.md 8장). */
@@ -52,6 +66,7 @@ export async function record(name, metrics, info = {}) {
 
 /**
  * 기준선 비교. `baseline`에 없는 항목은 건너뛴다(새 측정값은 다음 기준선 갱신에서 들어간다).
+ * 회귀 = 기준선 × 1.3 + 잡음 바닥을 넘는 값.
  * @param {Record<string, Record<string, number>>} baseline spec 이름 → metrics
  * @param {PerfReport[]} reports
  * @returns {{ regressions: string[], compared: number, skipped: string[] }}
@@ -71,9 +86,10 @@ export function compareWithBaseline(baseline, reports) {
         continue;
       }
       compared += 1;
-      if (value > ref * REGRESSION_RATIO) {
+      const limit = ref * REGRESSION_RATIO + noiseFloor(key);
+      if (value > limit) {
         regressions.push(
-          `${report.name}.${key}: ${value} > ${ref} × ${REGRESSION_RATIO} (${((value / ref - 1) * 100).toFixed(0)}% 회귀)`,
+          `${report.name}.${key}: ${value} > ${ref} × ${REGRESSION_RATIO} + ${noiseFloor(key)} (${((value / ref - 1) * 100).toFixed(0)}% 회귀)`,
         );
       }
     }
