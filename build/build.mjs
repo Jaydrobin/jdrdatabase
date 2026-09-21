@@ -56,9 +56,12 @@ const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
  * @property {(file: string) => Promise<string>} [readSource] 테스트용 소스 읽기 훅
  */
 
-/** import 문에서 specifier를 뽑는 정규식. 정적 import/export-from과 동적 import()를 모두 본다. */
+/**
+ * import 문에서 specifier를 뽑는 정규식. 정적 import/export-from과 동적 import()를 모두 본다.
+ * 따옴표 바로 뒤의 `import`는 문자열 리터럴(`'import'`)이지 문이 아니므로 제외한다.
+ */
 const IMPORT_RE =
-  /(?:^|[^\w$.])(?:import\s*(?:[\w${},*\s]*?\s*from\s*)?|export\s+(?:\*|\{[^}]*\})\s*from\s*|import\s*\()\s*(['"])([^'"\n]+)\1/g;
+  /(?:^|[^\w$.'"`])(?:import\s*(?:[\w${},*\s]*?\s*from\s*)?|export\s+(?:\*|\{[^}]*\})\s*from\s*|import\s*\()\s*(['"])([^'"\n]+)\1/g;
 
 /**
  * 소스 텍스트에서 import specifier 목록을 뽑는다. 주석 안의 import는 무시한다.

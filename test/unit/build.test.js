@@ -58,6 +58,15 @@ test('extractImportSpecifiers: 정적·재export·동적 import를 찾고 주석
   ]);
 });
 
+test("extractImportSpecifiers: 'import' 문자열 리터럴은 import 문이 아니다", () => {
+  const src = `
+    const reason = state.journalStop === 'import' ? t('toolbar.journalImport') : '';
+    const kind = "import";
+    import real from './real.js';
+  `;
+  assert.deepEqual(extractImportSpecifiers(src), ['./real.js']);
+});
+
 test('readModuleGraph: 의존성 우선 순서로 모듈을 나열한다', async () => {
   const root = path.resolve('/virtual/src');
   const files = {

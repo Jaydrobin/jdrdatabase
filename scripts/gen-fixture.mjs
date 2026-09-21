@@ -2,10 +2,11 @@
 /**
  * 벤치마크용 대용량 픽스처 생성. 산출물은 test/fixtures/generated/ 아래에 두고 커밋하지 않는다.
  *
- *   npm run fixture -- --rows 300000 [--cols 20] [--long 2] [--out test/fixtures/generated/bench.csv]
+ *   npm run fixture -- --rows 300000 [--cols 20] [--long 2] [--long-min 300 --long-max 1300] [--out test/fixtures/generated/bench.csv]
  *   npm run fixture -- --rows 300000 --db [--out test/fixtures/generated/bench.db]
  *
- * CSV: 열 구성은 id, 정수·실수·불리언·날짜·짧은 텍스트가 섞인 일반 열과 `--long` 개의 장문 열(2~8 KB).
+ * CSV: 열 구성은 id, 정수·실수·불리언·날짜·짧은 텍스트가 섞인 일반 열과 `--long` 개의 장문 열(기본 300~1,300 단어,
+ *   2~8 KB. `--long-min`·`--long-max`로 단어 수를 바꾼다. Step 7 성능 측정은 20~60 단어로 약 150 MB를 만든다).
  * DB(`--db`): wasm 엔진으로 이 앱의 메타 스키마를 가진 표준 SQLite 파일을 만든다(Step 4 성능 측정용).
  *   `--cols`개의 사용자 열 중 `--long`개가 장문(`longtext`)이고, 장문 셀은 평균 약 200자, 0.1%는 100 KB
  *   이상이다(DESIGN.md Step 4 완료 기준, 8장의 약 300 MB 예산). 나머지 열은 정수·실수·불리언·날짜·텍스트.
@@ -24,10 +25,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * @param {string[]} argv
- * @returns {{ rows: number, cols: number, long: number, out: string, db: boolean }}
+ * @returns {{ rows: number, cols: number, long: number, longMin: number, longMax: number, out: string, db: boolean }}
  */
 export function parseArgs(argv) {
-  const opts = { rows: 10_000, cols: 20, long: 2, out: '', db: false };
+  const opts = { rows: 10_000, cols: 20, long: 2, longMin: 300, longMax: 1300, out: '', db: false };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
     const value = argv[i + 1];
@@ -38,6 +39,8 @@ export function parseArgs(argv) {
     if (key === '--rows' && value) opts.rows = Number(value);
     else if (key === '--cols' && value) opts.cols = Number(value);
     else if (key === '--long' && value) opts.long = Number(value);
+    else if (key === '--long-min' && value) opts.longMin = Number(value);
+    else if (key === '--long-max' && value) opts.longMax = Number(value);
     else if (key === '--out' && value) opts.out = value;
     else continue;
     i += 1;
@@ -48,6 +51,14 @@ export function parseArgs(argv) {
   if (!Number.isInteger(opts.cols) || opts.cols < 2) throw new Error('--cols는 2 이상');
   if (!Number.isInteger(opts.long) || opts.long < 0 || opts.long >= opts.cols) {
     throw new Error('--long은 0 이상 cols 미만');
+  }
+  if (
+    !Number.isInteger(opts.longMin) ||
+    !Number.isInteger(opts.longMax) ||
+    opts.longMin < 1 ||
+    opts.longMax < opts.longMin
+  ) {
+    throw new Error('--long-min은 1 이상, --long-max는 --long-min 이상');
   }
   return opts;
 }
@@ -92,10 +103,12 @@ export function csvField(value) {
 }
 
 /**
- * @param {{ rows: number, cols: number, long: number, out: string }} opts
+ * @param {{ rows: number, cols: number, long: number, out: string, longMin?: number, longMax?: number }} opts
  * @returns {Promise<void>}
  */
 export async function generate(opts) {
+  const longMin = opts.longMin ?? 300;
+  const longMax = opts.longMax ?? 1300;
   const rand = makeRandom(20260920);
   await mkdir(path.dirname(opts.out), { recursive: true });
   const stream = createWriteStream(opts.out, { encoding: 'utf8' });
@@ -131,7 +144,7 @@ export async function generate(opts) {
       }
     }
     for (let l = 0; l < opts.long; l += 1) {
-      const words = 300 + Math.floor(rand() * 1_000);
+      const words = longMin + Math.floor(rand() * (longMax - longMin));
       /** @type {string[]} */
       const parts = [];
       for (let w = 0; w < words; w += 1) {

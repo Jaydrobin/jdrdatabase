@@ -27,7 +27,7 @@ import { toAppError } from '../util/errors.js';
 /** 스택 길이 상한(D-08). 넘으면 가장 오래된 것부터 버린다. */
 export const HISTORY_LIMIT = 200;
 
-/** @typedef {'irreversible' | 'fileOpened' | 'undoLimit' | 'user'} ClearReason */
+/** @typedef {'irreversible' | 'fileOpened' | 'undoLimit' | 'import' | 'user'} ClearReason */
 
 /**
  * @typedef {object} HistoryState
@@ -247,6 +247,9 @@ export function createHistory(deps) {
   const unsubscribe = [
     store.onCommand((cmd) => history.push(cmd)),
     store.on('file:opened', () => history.clear('fileOpened')),
+    // 가져오기는 커맨드가 아니라 스택 위에 놓이지 않는다. 앞선 `column.add`를 되돌리면 `DROP COLUMN`이
+    // 가져온 값을 지우므로 스택을 비운다(Step 7).
+    store.on('import:done', () => history.clear('import')),
   ];
   return history;
 }

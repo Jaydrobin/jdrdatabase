@@ -201,6 +201,10 @@ body {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
 }
 
+.jdr-dialog--wide {
+  width: min(960px, calc(100vw - 32px));
+}
+
 .jdr-dialog__title {
   margin: 0 0 12px;
   font-size: 16px;
@@ -541,4 +545,127 @@ body {
 .jdr-sidebar__column--hidden .jdr-sidebar__column-name {
   color: var(--jdr-fg-muted);
   font-style: italic;
+}
+
+/* 가져오기 대화상자 (Step 7·8) */
+.jdr-import__file {
+  margin: 0 0 8px;
+  color: var(--jdr-fg-muted);
+  font-size: 13px;
+}
+
+.jdr-import__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-end;
+}
+
+.jdr-import__options .jdr-dialog__label {
+  margin: 4px 0;
+}
+
+.jdr-import__check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.jdr-import__warning {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--jdr-danger);
+  border-radius: 6px;
+  background: var(--jdr-warning-bg);
+  font-size: 13px;
+}
+
+.jdr-import__section {
+  margin: 12px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.jdr-import__target {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-end;
+}
+
+.jdr-import__radio {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.jdr-import__table-wrap {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--jdr-border);
+  border-radius: 6px;
+}
+
+.jdr-import__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.jdr-import__table th,
+.jdr-import__table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--jdr-border);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.jdr-import__table th {
+  position: sticky;
+  top: 0;
+  background: var(--jdr-bg-muted);
+}
+
+.jdr-import__table .jdr-dialog__input {
+  padding: 2px 6px;
+  font-size: 13px;
+}
+
+.jdr-import__cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jdr-import__cell--empty {
+  color: var(--jdr-fg-muted);
+}
+
+.jdr-import__examples {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--jdr-fg-muted);
+  text-overflow: ellipsis;
+}
+
+.jdr-import__progress {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.jdr-import__progress progress {
+  flex: 1 1 auto;
+}
+
+.jdr-import__progress[hidden] {
+  display: none;
+}
+
+.jdr-import__muted {
+  color: var(--jdr-fg-muted);
+  font-size: 13px;
 }

@@ -58,10 +58,11 @@ export const INDEX_CHUNK_BYTES = 16 * MB;
  *
  * Worker의 `postMessage`는 태스크 큐에 들어가므로, 실행 중인 태스크가 여기로 돌아오지 않으면
  * 취소 메시지가 배달되지 않는다. 변환 루프의 await는 모두 마이크로태스크라서 이 양보가 없으면
- * 변환이 끝난 뒤에야 취소가 도착한다(= 취소 버튼이 동작하지 않는다).
+ * 변환이 끝난 뒤에야 취소가 도착한다(= 취소 버튼이 동작하지 않는다). 가져오기(`import/pipeline.js`)의
+ * 배치 사이에서도 같은 이유로 쓴다.
  * @returns {Promise<void>}
  */
-function yieldToEventLoop() {
+export function yieldToEventLoop() {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });

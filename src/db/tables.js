@@ -208,10 +208,11 @@ export function requireTable(engine, tableId) {
 }
 
 /**
- * 스키마를 바꿀 수 있는 테이블인지. 외부 파일에서 등록한 비STRICT 테이블은 v1에서 읽기 전용이다(R7).
+ * 스키마·데이터를 바꿀 수 있는 테이블인지. 외부 파일에서 등록한 비STRICT 테이블은 v1에서 읽기 전용이다(R7).
+ * 가져오기(`import/pipeline.js`)도 대상 테이블에 같은 검사를 한다.
  * @param {TableInfo} table
  */
-function requireStrict(table) {
+export function requireStrict(table) {
   if (!table.strict) {
     throw new AppError('E_DB_QUERY', 'external (non-STRICT) tables are read-only', {
       detail: { reason: 'external_table', tableId: table.id },

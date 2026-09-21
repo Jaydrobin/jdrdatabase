@@ -3,6 +3,7 @@
  * 도구 모음(Step 2): 새로 만들기, 열기, 최근 파일, 저장, 다른 이름으로 저장, 파일 이름과 dirty 표시, 저널 상한 배너.
  * Step 5: 되돌리기·다시 실행 버튼. 문서 수준 단축키(저장·되돌리기)는 `app/shortcuts.js`의 표를 따른다.
  * Step 6: 표 도구 줄 — 검색 상자, 정렬·필터 대화상자, 뷰 선택·저장·삭제, 검색 인덱스 만들기·삭제.
+ * Step 7: 가져오기 버튼. 숨은 `<input type="file">`을 열고 고른 파일로 가져오기 대화상자를 띄운다.
  * 표 도구는 지금 고른 테이블에 대한 것이며 테이블이 없으면 숨긴다.
  * 사용자 데이터(파일 이름·뷰 이름)는 textContent로만 넣는다.
  */
@@ -13,6 +14,7 @@ import { toAppError } from '../util/errors.js';
 import { formatInteger } from '../util/format.js';
 import { isDialogOpen } from './dialogs/dialog.js';
 import { confirmDeleteView, promptFilter, promptSort, promptViewName } from './dialogs/filter.js';
+import { IMPORT_ACCEPT, IMPORT_INPUT_CLASS, openImportDialog } from './dialogs/import.js';
 
 /** @typedef {import('../app/store.js').Store} Store */
 /** @typedef {import('../app/history.js').History} History */
@@ -63,6 +65,7 @@ export function mountToolbar(parent, store, history, deps) {
   recentButton.hidden = true;
   const saveButton = makeButton(t('toolbar.save'), 'save');
   const saveAsButton = makeButton(t('toolbar.saveAs'), 'save-as');
+  const importButton = makeButton(t('toolbar.import'), 'import');
   const undoButton = makeButton(t('toolbar.undo'), 'undo');
   const redoButton = makeButton(t('toolbar.redo'), 'redo');
 
@@ -77,8 +80,16 @@ export function mountToolbar(parent, store, history, deps) {
   const banner = document.createElement('div');
   banner.className = 'jdr-toolbar__banner';
   banner.setAttribute('role', 'alert');
-  banner.textContent = t('toolbar.journalFull');
   banner.hidden = true;
+
+  // 가져오기 파일 입력(Step 7). 폴백 열기 입력과 같은 방식이라 자동화 도구가 파일을 넣을 수 있다.
+  const importInput = document.createElement('input');
+  importInput.type = 'file';
+  importInput.accept = IMPORT_ACCEPT;
+  importInput.className = IMPORT_INPUT_CLASS;
+  importInput.hidden = true;
+  importInput.setAttribute('aria-hidden', 'true');
+  importInput.tabIndex = -1;
 
   // ---- 표 도구 줄 (Step 6) ----
   const tools = document.createElement('div');
@@ -127,6 +138,7 @@ export function mountToolbar(parent, store, history, deps) {
     recentButton,
     saveButton,
     saveAsButton,
+    importButton,
     undoButton,
     redoButton,
     fileName,
@@ -134,6 +146,7 @@ export function mountToolbar(parent, store, history, deps) {
     readOnlyMark,
     banner,
     tools,
+    importInput,
   );
   parent.append(el);
 
@@ -144,6 +157,8 @@ export function mountToolbar(parent, store, history, deps) {
   let views = [];
   /** 진행 중인 표 도구 작업(대화상자 답 대기, 인덱스 생성). 겹치지 않게 한다. */
   let busy = false;
+  /** 가져오기 대화상자가 열려 있다. */
+  let importing = false;
   let searchTimer = 0;
 
   /** @returns {TableInfo | null} */
@@ -159,7 +174,10 @@ export function mountToolbar(parent, store, history, deps) {
     readOnlyMark.textContent = state.readOnly === 'none' ? '' : t('status.readOnly');
     saveButton.disabled = state.readOnly !== 'none';
     saveAsButton.disabled = state.readOnly !== 'none';
+    importButton.disabled = state.readOnly !== 'none' || importing;
     banner.hidden = !state.journalFull;
+    banner.textContent =
+      state.journalStop === 'import' ? t('toolbar.journalImport') : t('toolbar.journalFull');
     renderHistory();
     renderTools();
   }
@@ -360,6 +378,28 @@ export function mountToolbar(parent, store, history, deps) {
   };
   fileInput.addEventListener('change', onFileInputChange);
 
+  const onImportInputChange = () => {
+    const file = importInput.files?.[0];
+    importInput.value = '';
+    if (!file || importing) return;
+    importing = true;
+    render();
+    openImportDialog({ store, toasts, file })
+      .catch((/** @type {unknown} */ err) => toasts.error(toAppError(err)))
+      .finally(() => {
+        importing = false;
+        render();
+      });
+  };
+  importInput.addEventListener('change', onImportInputChange);
+  const onImport = () => {
+    if (store.getState().readOnly !== 'none') {
+      toasts.info('file.readOnlyBlocked');
+      return;
+    }
+    importInput.click();
+  };
+
   const onNew = () => void store.newDatabase();
   const onOpen = () => {
     if (capabilities().fsa) void store.openFile();
@@ -375,6 +415,7 @@ export function mountToolbar(parent, store, history, deps) {
   recentButton.addEventListener('click', onRecent);
   saveButton.addEventListener('click', onSave);
   saveAsButton.addEventListener('click', onSaveAs);
+  importButton.addEventListener('click', onImport);
   undoButton.addEventListener('click', onUndo);
   redoButton.addEventListener('click', onRedo);
   tools.addEventListener('click', onToolsClick);
@@ -417,6 +458,8 @@ export function mountToolbar(parent, store, history, deps) {
       recentButton.removeEventListener('click', onRecent);
       saveButton.removeEventListener('click', onSave);
       saveAsButton.removeEventListener('click', onSaveAs);
+      importButton.removeEventListener('click', onImport);
+      importInput.removeEventListener('change', onImportInputChange);
       undoButton.removeEventListener('click', onUndo);
       redoButton.removeEventListener('click', onRedo);
       tools.removeEventListener('click', onToolsClick);

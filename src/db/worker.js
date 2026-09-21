@@ -9,6 +9,7 @@
 import { AppError, serializeError } from '../util/errors.js';
 import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
+import * as pipeline from '../import/pipeline.js';
 import * as query from './query.js';
 import * as search from './search.js';
 import * as tables from './tables.js';
@@ -43,6 +44,12 @@ import {
 /** @typedef {import('./query.js').RowStats} RowStats */
 /** @typedef {import('./views.js').View} View */
 /** @typedef {import('./views.js').SavedViewSpec} SavedViewSpec */
+/** @typedef {import('../import/pipeline.js').ImportOptions} ImportOptions */
+/** @typedef {import('../import/pipeline.js').ImportMapping} ImportMapping */
+/** @typedef {import('../import/pipeline.js').ImportTarget} ImportTarget */
+/** @typedef {import('../import/pipeline.js').ImportPolicy} ImportPolicy */
+/** @typedef {import('../import/pipeline.js').ImportReport} ImportReport */
+/** @typedef {import('../import/pipeline.js').PreviewResult} PreviewResult */
 
 /**
  * `db.open`·`schema.adopt`의 결과.
@@ -93,6 +100,8 @@ import {
  *   'views.list': { args: { tableId: string }, result: { views: View[] } },
  *   'views.save': { args: { tableId: string, name: string, spec: SavedViewSpec, viewId?: string }, result: { viewId: string, cmd: Command } },
  *   'views.delete': { args: { viewId: string }, result: { cmd: Command } },
+ *   'import.preview': { args: { file: Blob, options: ImportOptions }, result: PreviewResult },
+ *   'import.run': { args: { file: Blob, options: ImportOptions, mapping: ImportMapping, target: ImportTarget, policy?: ImportPolicy }, result: { report: ImportReport } },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -446,6 +455,23 @@ export function createDispatcher(options) {
 
     'views.delete': async (args) => views.remove(requireEngine(), args.viewId),
 
+    'import.preview': async (args, ctx) =>
+      pipeline.preview(pipeline.requireBlob(args?.file), pipeline.normalizeOptions(args?.options), {
+        signal: ctx.signal,
+      }),
+
+    'import.run': async (args, ctx) =>
+      pipeline.run({
+        engine: requireEngine(),
+        file: pipeline.requireBlob(args?.file),
+        options: pipeline.normalizeOptions(args?.options),
+        mapping: args.mapping,
+        target: args.target,
+        policy: args.policy,
+        signal: ctx.signal,
+        progress: ctx.progress,
+      }),
+
     'db.close': async () => {
       await requireEngine().close();
       return null;
@@ -470,6 +496,7 @@ export function createDispatcher(options) {
     'query.rows',
     'query.stats',
     'views.list',
+    'import.preview',
     'db.snapshot',
   ]);
 

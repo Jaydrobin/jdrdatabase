@@ -353,3 +353,21 @@ test('히스토리 밖의 배타 op와 겹쳐 난 E_DB_BUSY는 되돌리기 항�
   guarded.dispose();
   client.close();
 });
+
+test('가져오기(import:done)는 되돌리기 스택을 비운다(Step 7: 커맨드가 아니다)', async () => {
+  const { client, store, history, tableId, name } = await setup();
+  const applied = await history.apply(insertRows({ tableId, count: 1, firstId: 1, now: NOW }));
+  assert.ok(applied);
+  assert.equal(history.state().undo, 1);
+  const report = await store.importRun({
+    file: new Blob(['이름\n둘\n']),
+    options: { format: 'csv' },
+    mapping: { columns: [{ source: 0, columnId: name }] },
+    target: { kind: 'existing', tableId },
+  });
+  assert.equal(report?.inserted, 1);
+  assert.deepEqual(history.state(), { undo: 0, redo: 0, busy: false });
+  assert.equal(await history.undo(), false, '비어 있으니 되돌릴 것이 없다');
+  assert.equal((await client.call('query.count', { tableId, viewSpec: {} })).count, 2);
+  client.close();
+});

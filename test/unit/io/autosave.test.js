@@ -170,3 +170,43 @@ test('replay: command.apply로 차례로 적용하고 실패 지점을 detail에
   );
   client.close();
 });
+
+test('suspend: 기록을 멈추고 truncated로 표시하며 clear가 풀어 준다(가져오기 뒤, Step 7)', async () => {
+  const idb = createMemoryIdb();
+  let fullCalls = 0;
+  const autosave = createAutosave({
+    idb,
+    onFull: () => {
+      fullCalls += 1;
+    },
+  });
+  autosave.attach({ dbId: 'db-1', baseRevision: 0, fileName: null });
+  assert.equal(await autosave.recordCommand(insertCmd('t', 'a')), true);
+  await autosave.suspend();
+  assert.equal(autosave.isFull(), true);
+  assert.equal(fullCalls, 1);
+  assert.equal(
+    await autosave.recordCommand(insertCmd('t', 'b')),
+    false,
+    '정지 뒤에는 기록하지 않음',
+  );
+  const summary = await autosave.recoverable('db-1');
+  assert.equal(summary?.truncated, true);
+  assert.deepEqual(
+    summary?.commands.map((c) => c.summary),
+    ['insert a'],
+    '정지 전 기록은 남는다',
+  );
+  await autosave.suspend();
+  assert.equal(fullCalls, 1, '이미 멈춘 상태에서는 다시 알리지 않는다');
+  await autosave.clear();
+  assert.equal(autosave.isFull(), false);
+  assert.equal(await autosave.recordCommand(insertCmd('t', 'c')), true, '저장(clear) 뒤 다시 기록');
+  assert.equal((await autosave.recoverable('db-1'))?.truncated, false);
+
+  // 기록이 하나도 없는 채로 멈춰도 같은 dbId의 다음 기록은 정지 상태를 본다.
+  const fresh = createAutosave({ idb: createMemoryIdb() });
+  fresh.attach({ dbId: 'db-2', baseRevision: 0, fileName: null });
+  await fresh.suspend();
+  assert.equal(await fresh.recordCommand(insertCmd('t', 'x')), false);
+});

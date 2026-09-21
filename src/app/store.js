@@ -30,6 +30,12 @@ import { AppError, toAppError } from '../util/errors.js';
 /** @typedef {import('../db/query.js').FilterSpec} FilterSpec */
 /** @typedef {import('../db/views.js').View} View */
 /** @typedef {import('../db/views.js').SavedViewSpec} SavedViewSpec */
+/** @typedef {import('../import/pipeline.js').ImportOptions} ImportOptions */
+/** @typedef {import('../import/pipeline.js').ImportMapping} ImportMapping */
+/** @typedef {import('../import/pipeline.js').ImportTarget} ImportTarget */
+/** @typedef {import('../import/pipeline.js').ImportPolicy} ImportPolicy */
+/** @typedef {import('../import/pipeline.js').ImportReport} ImportReport */
+/** @typedef {import('../import/pipeline.js').PreviewResult} PreviewResult */
 
 /** 저장 직전 백업을 IDB에 남기는 파일 크기 상한(D-04). */
 export const BACKUP_MAX_BYTES = 200 * 1024 * 1024;
@@ -74,6 +80,8 @@ export const MIN_COLUMN_WIDTH = 40;
  */
 
 /** @typedef {'none' | 'newerSchema' | 'otherTab'} ReadOnlyReason */
+/** 저널이 기록을 멈춘 이유. `limit`은 50 MB 상한, `import`는 가져오기(Step 7). */
+/** @typedef {'none' | 'limit' | 'import'} JournalStop */
 
 /**
  * 테이블별 뷰 상태(Step 4·6). 메모리에만 있고, 파일에 남기는 것은 `saveView`(`_jdr_views`)다.
@@ -95,10 +103,11 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {string | null} currentTableId 사이드바에서 고른 테이블
  * @property {boolean} dirty
  * @property {ReadOnlyReason} readOnly
- * @property {boolean} journalFull
+ * @property {boolean} journalFull 저널이 기록을 멈췄다(`journalStop !== 'none'`)
+ * @property {JournalStop} journalStop
  */
 
-/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed'} StoreEvent */
+/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done'} StoreEvent */
 
 /**
  * `recordCommand`의 선택 사항.
@@ -161,6 +170,9 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(tableId: string, viewId: string) => Promise<boolean>} deleteView
  * @property {(tableId: string, options?: CallOptions) => Promise<boolean>} enableSearch 검색 인덱스 만들기(진행률·취소는 options)
  * @property {(tableId: string) => Promise<boolean>} disableSearch
+ * @property {() => EngineCapabilities} capabilities 엔진이 보고한 상한(UI는 숫자를 여기서만 읽는다)
+ * @property {(file: Blob, options: ImportOptions, callOptions?: CallOptions) => Promise<PreviewResult>} importPreview 미리보기·추론. 실패는 던진다(대화상자가 표시)
+ * @property {(args: { file: Blob, options: ImportOptions, mapping: ImportMapping, target: ImportTarget, policy?: ImportPolicy }, callOptions?: CallOptions) => Promise<ImportReport | null>} importRun 가져오기 실행. 성공하면 히스토리·저널 정지·dirty·테이블 목록을 반영하고 `import:done`. 읽기 전용이면 안내하고 null. 실패는 던진다
  */
 
 /**
@@ -189,6 +201,7 @@ export function createStore(deps) {
     dirty: false,
     readOnly: 'none',
     journalFull: false,
+    journalStop: 'none',
   };
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
@@ -235,6 +248,15 @@ export function createStore(deps) {
     view.hidden = pruned.spec.hidden;
     notify.info('view.pruned', { name: table.name });
     return true;
+  }
+
+  /**
+   * 저널 정지 상태를 바꾼다. `journalFull`은 이 값에서 따라온다.
+   * @param {JournalStop} reason
+   */
+  function setJournalStop(reason) {
+    state.journalStop = reason;
+    state.journalFull = reason !== 'none';
   }
 
   /** @param {StoreEvent} event */
@@ -306,7 +328,8 @@ export function createStore(deps) {
     setTables(next.tables);
     state.dirty = false;
     state.readOnly = next.readOnly;
-    state.journalFull = autosave.isFull();
+    // 열 때 남아 있는 정지는 이유를 알 수 없으므로 상한으로 본다(어느 쪽이든 저장을 재촉한다).
+    setJournalStop(autosave.isFull() ? 'limit' : 'none');
     autosave.attach({
       dbId: next.meta.db_id ?? '',
       baseRevision: fileRevision(),
@@ -389,7 +412,7 @@ export function createStore(deps) {
         await replayJournal(journal);
       } else {
         await autosave.clear();
-        state.journalFull = false;
+        setJournalStop('none');
       }
     } else if (journal && verdict.journal === 'mismatch') {
       const choice = await prompts.journalMismatch({
@@ -399,7 +422,7 @@ export function createStore(deps) {
       });
       if (choice === 'export') exportJournal(journal);
       await autosave.clear();
-      state.journalFull = false;
+      setJournalStop('none');
     }
     return true;
   }
@@ -413,7 +436,7 @@ export function createStore(deps) {
     state.meta = saved.meta;
     state.dirty = false;
     await autosave.clear();
-    state.journalFull = false;
+    setJournalStop('none');
     await writeKnown(saved.meta.db_id ?? '', fileRevision());
     autosave.attach({
       dbId: saved.meta.db_id ?? '',
@@ -666,7 +689,7 @@ export function createStore(deps) {
         notify.error(toAppError(err));
       }
       if (autosave.isFull() && !state.journalFull) {
-        state.journalFull = true;
+        setJournalStop('limit');
         emit('journal:full');
       }
       store.markDirty();
@@ -888,6 +911,35 @@ export function createStore(deps) {
         emit('view:changed');
       }
       return true;
+    },
+
+    capabilities: () => ({ ...caps }),
+
+    async importPreview(file, options, callOptions) {
+      return client.call('import.preview', { file, options }, callOptions);
+    },
+
+    async importRun(args, callOptions) {
+      if (state.readOnly !== 'none') {
+        notify.info('file.readOnlyBlocked');
+        return null;
+      }
+      const { report } = await client.call('import.run', args, callOptions);
+      // 가져오기는 커맨드가 아니다(Step 7): 저널에 남길 수 없으므로 이후 기록을 멈추고 저장을 재촉하며,
+      // 되돌리기 스택은 `import:done`을 받은 히스토리가 비운다.
+      try {
+        await autosave.suspend();
+      } catch (err) {
+        notify.error(toAppError(err));
+      }
+      setJournalStop('import');
+      emit('journal:full');
+      store.markDirty();
+      emit('import:done');
+      await store.refreshTables();
+      if (args.target.kind === 'new') store.selectTable(report.tableId);
+      emit('data:changed');
+      return report;
     },
 
     async enableSearch(tableId, options) {

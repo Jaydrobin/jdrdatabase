@@ -278,6 +278,7 @@ async function start(shell) {
             dirty: s.dirty,
             readOnly: s.readOnly,
             journalFull: s.journalFull,
+            journalStop: s.journalStop,
           };
         },
         /** IndexedDB를 실제로 열 수 있었는가(지원 매트릭스 실측용). */

@@ -20,7 +20,9 @@ import { t } from '../../i18n/index.js';
  * @property {(body: HTMLElement) => void} [body] 폼 등 추가 내용을 채우는 함수
  * @property {DialogButton[]} buttons
  * @property {string} cancelValue Esc·배경 클릭 시 resolve 값
- * @property {() => string | null} [validate] 확인(primary) 전에 검사. 오류 문구를 돌려주면 닫지 않고 표시
+ * @property {() => string | null | Promise<string | null>} [validate] 확인(primary) 전에 검사. 오류 문구를 돌려주면 닫지 않고 표시. Promise면 끝날 때까지 버튼을 잠근다(가져오기 실행처럼 긴 작업)
+ * @property {() => boolean} [beforeCancel] 취소(취소 버튼·Esc·배경)를 가로챈다. false를 돌려주면 닫지 않는다(진행 중인 작업을 먼저 멈출 때)
+ * @property {boolean} [wide] 넓은 대화상자(미리보기 표 등)
  */
 
 /** @type {HTMLElement | null} */
@@ -54,7 +56,7 @@ export function openDialog(options) {
     backdrop.className = 'jdr-dialog__backdrop';
 
     const dialog = document.createElement('div');
-    dialog.className = 'jdr-dialog';
+    dialog.className = options.wide ? 'jdr-dialog jdr-dialog--wide' : 'jdr-dialog';
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     const titleId = `jdr-dialog-title-${Date.now().toString(36)}`;
@@ -106,6 +108,28 @@ export function openDialog(options) {
     dialog.append(row);
     backdrop.append(dialog);
 
+    /** 비동기 검사가 진행 중이다. 그동안 확인·Enter는 무시하고 취소만 `beforeCancel`로 넘긴다. */
+    let pending = false;
+
+    /** @param {boolean} on */
+    function setBusy(on) {
+      pending = on;
+      for (const b of row.querySelectorAll('button')) {
+        // 취소 버튼은 열어 둔다(진행 중인 작업을 멈추는 손잡이다).
+        if (b.dataset.value !== options.cancelValue) b.disabled = on;
+      }
+    }
+
+    /**
+     * 취소 경로. `beforeCancel`이 false면 열린 채로 둔다.
+     * @returns {boolean} 닫혔는가
+     */
+    function cancel() {
+      if (options.beforeCancel && options.beforeCancel() === false) return false;
+      close(options.cancelValue);
+      return true;
+    }
+
     /** @param {string} value */
     function close(value) {
       document.removeEventListener('keydown', onKeydown, true);
@@ -119,11 +143,37 @@ export function openDialog(options) {
 
     /** @param {string} value */
     function submit(value) {
+      if (value === options.cancelValue) {
+        cancel();
+        return;
+      }
+      if (pending) return;
       const isPrimary = options.buttons.find((b) => b.value === value)?.primary;
       if (isPrimary && options.validate) {
-        const problem = options.validate();
-        if (problem) {
-          error.textContent = problem;
+        const outcome = options.validate();
+        if (outcome instanceof Promise) {
+          error.hidden = true;
+          setBusy(true);
+          outcome
+            .then((problem) => {
+              setBusy(false);
+              if (problem) {
+                error.textContent = problem;
+                error.hidden = false;
+                return;
+              }
+              close(value);
+            })
+            .catch((/** @type {unknown} */ err) => {
+              // validate는 오류를 문구로 바꿔 돌려주는 계약이다. 그래도 던지면 문구로 보여 주고 열어 둔다.
+              setBusy(false);
+              error.textContent = err instanceof Error ? err.message : String(err);
+              error.hidden = false;
+            });
+          return;
+        }
+        if (outcome) {
+          error.textContent = outcome;
           error.hidden = false;
           return;
         }
@@ -139,7 +189,7 @@ export function openDialog(options) {
 
     /** @param {MouseEvent} ev */
     function onBackdropClick(ev) {
-      if (ev.target === backdrop) close(options.cancelValue);
+      if (ev.target === backdrop) cancel();
     }
 
     /** @param {KeyboardEvent} ev */
@@ -148,10 +198,10 @@ export function openDialog(options) {
       if (ev.isComposing) return;
       if (ev.key === 'Escape') {
         ev.preventDefault();
-        close(options.cancelValue);
+        cancel();
         return;
       }
-      if (ev.key === 'Enter' && primaryButton) {
+      if (ev.key === 'Enter' && primaryButton && !pending) {
         const target = /** @type {HTMLElement | null} */ (ev.target);
         if (target && target.tagName === 'TEXTAREA') return;
         if (target && target.tagName === 'BUTTON') return;

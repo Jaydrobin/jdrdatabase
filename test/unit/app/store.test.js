@@ -665,3 +665,126 @@ test('enableSearch·disableSearch: 진행률·취소를 거쳐 커맨드로 반�
   assert.equal(store.getState().tables[0]?.ftsEnabled, false);
   client.close();
 });
+
+test('importPreview·importRun: 가져오기는 커맨드가 아니라 저널을 멈추고 dirty·테이블 목록·선택을 반영한다', async () => {
+  const { store, client, autosave, notices } = await setup();
+  const dbId = store.getState().meta.db_id ?? '';
+  /** @type {string[]} */
+  const events = [];
+  for (const ev of /** @type {const} */ ([
+    'journal:full',
+    'import:done',
+    'data:changed',
+    'tables:changed',
+  ])) {
+    store.on(ev, () => events.push(ev));
+  }
+  // 가져오기 전의 커맨드는 저널에 남는다.
+  const created = await store.runSchemaOp('schema.create', { name: '먼저' });
+  assert.ok(created);
+  assert.equal((await autosave.recoverable(dbId))?.commands.length, 1);
+
+  const file = new Blob(['a,b\n1,x\n2,y\n']);
+  const preview = await store.importPreview(file, { format: 'csv' });
+  assert.deepEqual(preview.headers, ['a', 'b']);
+  const report = await store.importRun({
+    file,
+    options: { format: 'csv' },
+    mapping: {
+      columns: [
+        { source: 0, name: 'a', type: 'integer' },
+        { source: 1, name: 'b', type: 'text' },
+      ],
+    },
+    target: { kind: 'new', name: '가져온' },
+  });
+  assert.ok(report);
+  assert.equal(report.inserted, 2);
+  const state = store.getState();
+  assert.equal(state.dirty, true);
+  assert.equal(state.journalStop, 'import');
+  assert.equal(state.journalFull, true);
+  assert.equal(state.currentTableId, report.tableId, '새 테이블을 고른다');
+  assert.deepEqual(
+    state.tables.map((tb) => tb.name),
+    ['먼저', '가져온'],
+  );
+  assert.ok(events.includes('journal:full') && events.includes('import:done'));
+  assert.ok(events.includes('data:changed') && events.includes('tables:changed'));
+  // 저널: 가져오기 전 기록만 남고 truncated, 이후 커맨드는 기록되지 않는다.
+  const after = await store.runSchemaOp('schema.rename', {
+    tableId: report.tableId,
+    name: '이름바꿈',
+  });
+  assert.ok(after);
+  const summary = await autosave.recoverable(dbId);
+  assert.equal(summary?.commands.length, 1);
+  assert.equal(summary?.truncated, true);
+  // 저장하면 저널이 비워지고 정지가 풀린다.
+  await store.saveAs();
+  assert.equal(store.getState().journalStop, 'none');
+  assert.equal(store.getState().dirty, false);
+  assert.equal(await autosave.recoverable(dbId), null);
+  assert.ok(!notices.some((n) => n.kind === 'error'), JSON.stringify(notices));
+
+  // 기존 테이블에 추가: 선택은 그대로.
+  store.selectTable(created.tableId);
+  const table = store.getState().tables.find((tb) => tb.id === report.tableId);
+  const colA = table?.columns.find((c) => c.name === 'a');
+  assert.ok(colA);
+  const appended = await store.importRun({
+    file: new Blob(['a\n3\n']),
+    options: { format: 'csv' },
+    mapping: { columns: [{ source: 0, columnId: colA.id }] },
+    target: { kind: 'existing', tableId: report.tableId },
+  });
+  assert.equal(appended?.inserted, 1);
+  assert.equal(store.getState().currentTableId, created.tableId);
+  assert.equal(
+    (await client.call('query.count', { tableId: report.tableId, viewSpec: {} })).count,
+    3,
+  );
+  await client.call('db.close');
+  client.close();
+});
+
+test('importRun: 읽기 전용이면 실행하지 않고 안내, 실패는 던지고 상태를 바꾸지 않는다', async () => {
+  const { store, notices, client } = await setup();
+  const file = new Blob(['a\n1\n']);
+  await assert.rejects(
+    store.importRun({
+      file,
+      options: { format: 'csv' },
+      mapping: { columns: [{ source: 0, name: 'a', type: 'integer', policy: 'abort' }] },
+      target: { kind: 'existing', tableId: 'missing' },
+    }),
+    (err) => err instanceof Error && /table not found/.test(err.message),
+  );
+  assert.equal(store.getState().dirty, false);
+  assert.equal(store.getState().journalStop, 'none');
+  // 읽기 전용: 다른 탭이 같은 db_id를 쥔 상태를 만든다.
+  const other = createTabLock();
+  const dbId = store.getState().meta.db_id ?? '';
+  await other.claim(dbId);
+  const { store: readOnlyStore, notices: roNotices, client: roClient } = await setup();
+  await readOnlyStore.newDatabase({ force: true, dbId: 'x' });
+  // 스토어를 직접 읽기 전용으로 만들 손잡이는 없으므로 저장된 파일을 다시 여는 대신 openPicked 경로를 쓴다.
+  const { bytes } = await client.call('db.snapshot', {});
+  const picked = { name: 'a.db', file: new File([bytes], 'a.db'), handle: null };
+  await readOnlyStore.openPicked(picked);
+  assert.equal(readOnlyStore.getState().readOnly, 'otherTab');
+  const blocked = await readOnlyStore.importRun({
+    file,
+    options: { format: 'csv' },
+    mapping: { columns: [{ source: 0, name: 'a', type: 'integer' }] },
+    target: { kind: 'new', name: 'X' },
+  });
+  assert.equal(blocked, null);
+  assert.equal(roNotices.at(-1)?.value, 'file.readOnlyBlocked');
+  other.release();
+  void notices;
+  await roClient.call('db.close');
+  roClient.close();
+  await client.call('db.close');
+  client.close();
+});

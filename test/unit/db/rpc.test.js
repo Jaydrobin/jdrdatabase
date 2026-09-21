@@ -814,3 +814,88 @@ test('query.count: 행 수 캐시는 검색어마다 늘지 않고 쓰기 뒤에
   );
   client.close();
 });
+
+test('import.preview·import.run: Blob을 받아 미리보기와 가져오기를 하고, 실행은 배타 op다', async () => {
+  const { client } = await readyClient();
+  const file = new Blob(['이름,나이\n홍길동,30\n김영희,25\n']);
+  const preview = await client.call('import.preview', { file, options: { format: 'csv' } });
+  assert.deepEqual(preview.headers, ['이름', '나이']);
+  assert.deepEqual(
+    preview.inferred.map((i) => i.type),
+    ['text', 'integer'],
+  );
+  /** @type {Array<{ phase: string, done: number, total: number }>} */
+  const progress = [];
+  const { report } = await client.call(
+    'import.run',
+    {
+      file,
+      options: { format: 'csv' },
+      mapping: {
+        columns: [
+          { source: 0, name: '이름', type: 'text' },
+          { source: 1, name: '나이', type: 'integer' },
+        ],
+      },
+      target: { kind: 'new', name: '고객' },
+    },
+    { onProgress: (p) => progress.push(p) },
+  );
+  assert.equal(report.inserted, 2);
+  assert.equal(progress.at(-1)?.phase, 'insert');
+  const { tables } = await client.call('schema.list');
+  assert.equal(tables[0]?.name, '고객');
+  assert.equal(
+    (await client.call('query.count', { tableId: report.tableId, viewSpec: {} })).count,
+    2,
+    '가져오기 뒤 행 수 캐시가 낡지 않는다',
+  );
+  assert.ok(isExclusiveOp('import.run'));
+  assert.ok(!isExclusiveOp('import.preview'));
+  await assert.rejects(
+    client.call('import.preview', {
+      file: /** @type {never} */ ('nope'),
+      options: { format: 'csv' },
+    }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY' && /Blob/.test(err.message),
+  );
+  await assert.rejects(
+    client.call('import.run', {
+      file,
+      options: { format: 'csv' },
+      mapping: { columns: [{ source: 0, name: 'x', type: 'text' }] },
+      target: /** @type {never} */ ({ kind: 'nope' }),
+    }),
+    (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+  );
+  client.close();
+});
+
+test('import.run: 취소 신호가 Worker에 닿아 롤백되고 E_IMPORT_CANCELLED', async () => {
+  const { client } = await readyClient();
+  const lines = ['n'];
+  for (let i = 1; i <= 2500; i += 1) lines.push(String(i));
+  const controller = new AbortController();
+  await assert.rejects(
+    client.call(
+      'import.run',
+      {
+        file: new Blob([`${lines.join('\n')}\n`]),
+        options: { format: 'csv' },
+        mapping: { columns: [{ source: 0, name: 'n', type: 'integer' }] },
+        target: { kind: 'new', name: 'P' },
+      },
+      {
+        signal: controller.signal,
+        // 진행 이벤트는 250 ms 간격으로 묶이므로(인라인 전송의 짧은 실행에서는 첫 이벤트만 온다)
+        // 첫 이벤트에서 바로 취소한다. 취소 메시지 → 디스패처의 AbortController → 파이프라인의 첫 배치 전 검사.
+        onProgress: (p) => {
+          if (p.phase === 'insert') controller.abort();
+        },
+      },
+    ),
+    (err) => err instanceof AppError && err.code === 'E_IMPORT_CANCELLED',
+  );
+  assert.deepEqual((await client.call('schema.list')).tables, [], '새 테이블이 남지 않는다');
+  client.close();
+});
