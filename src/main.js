@@ -346,9 +346,15 @@ async function start(shell) {
     save: () => active.save({ auto: true }),
     intervalMs: current.autosaveSeconds * 1000,
   });
+  // 타이머는 언제나 스토어의 dirty를 따른다. 저널을 재생한 열기와, 스냅샷 뒤에 들어온 변경이 남은 저장은
+  // 끝난 뒤에도 미저장이므로, 'file:opened'·'file:saved'에서 끄기만 하면 다음 편집까지 자동 저장이 쉰다.
+  const syncSaveTimer = () => {
+    if (active.getState().dirty) saveTimer.markDirty();
+    else saveTimer.markClean();
+  };
   active.on('file:dirty', () => saveTimer.markDirty());
-  active.on('file:saved', () => saveTimer.markClean());
-  active.on('file:opened', () => saveTimer.markClean());
+  active.on('file:saved', syncSaveTimer);
+  active.on('file:opened', syncSaveTimer);
 
   async function openSettings() {
     const next = await openSettingsDialog({
