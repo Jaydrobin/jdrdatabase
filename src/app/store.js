@@ -236,6 +236,12 @@ export function createStore(deps) {
   const { client, caps, fs, idb, autosave, tablock, prompts, notify } = deps;
   let deviceName = deps.deviceName;
   let saveGzip = deps.saveGzip === true;
+  /**
+   * 스냅샷을 만든 뒤 저장이 끝나기 전에 들어온 변경. 이 변경은 방금 쓴 파일에 담기지 않았으므로 저장이 끝나도
+   * dirty를 풀지 않고, 저널도 새 baseRevision 위에 이 변경만 남긴다. 저장 창 밖에서는 null이다.
+   * @type {{ dirty: boolean, commands: Command[], stop: JournalStop | null } | null}
+   */
+  let duringSave = null;
 
   /** @type {StoreState} */
   const state = {
@@ -302,6 +308,8 @@ export function createStore(deps) {
    * @param {JournalStop} reason
    */
   function setJournalStop(reason) {
+    // 저장 창 안에서 멈췄다면 그 이유는 방금 쓴 파일 뒤의 것이다. 저장이 끝난 뒤 다시 세운다.
+    if (duringSave && reason !== 'none') duringSave.stop = reason;
     state.journalStop = reason;
     state.journalFull = reason !== 'none';
   }
@@ -476,12 +484,19 @@ export function createStore(deps) {
 
   /**
    * 저장 뒤의 공통 처리: 메타 갱신, 저널 비움, known 갱신, dirty 해제.
+   *
+   * 스냅샷과 쓰기 사이에는 await가 여럿이라 그동안 편집·가져오기가 들어올 수 있고, 그 변경은 방금 쓴 파일에
+   * 없다. 그래서 `duringSave`가 그 창의 변경을 들고 있으면 dirty를 풀지 않고, 저널도 비운 뒤 새 baseRevision
+   * (= 방금 쓴 파일의 revision) 위에 그 변경만 다시 넣는다. 그대로 비우면 미저장 변경이 조용히 사라진다.
    * @param {{ name: string, handle: FileSystemFileHandle | null, size: number, gzip: boolean, meta: Meta }} saved
    */
   async function setSaved(saved) {
+    const during = duringSave;
+    const pending = during?.commands ?? [];
+    const stop = during?.stop ?? null;
     state.file = { name: saved.name, handle: saved.handle, size: saved.size, gzip: saved.gzip };
     state.meta = saved.meta;
-    state.dirty = false;
+    state.dirty = during?.dirty === true;
     await autosave.clear();
     setJournalStop('none');
     await writeKnown(saved.meta.db_id ?? '', fileRevision());
@@ -490,6 +505,23 @@ export function createStore(deps) {
       baseRevision: fileRevision(),
       fileName: saved.name,
     });
+    for (const cmd of pending) {
+      try {
+        await autosave.recordCommand(cmd);
+      } catch (err) {
+        // 저널 실패는 데이터 유실이 아니다(정본은 파일). 알리고 계속한다.
+        notify.error(toAppError(err));
+      }
+    }
+    if (stop) {
+      // 저널에 남길 수 없는 변경(가져오기·상한 초과)이 저장 창 안에 들어왔다. 정지와 배너를 되돌린다.
+      try {
+        await autosave.suspend();
+      } catch (err) {
+        notify.error(toAppError(err));
+      }
+      setJournalStop(stop);
+    }
     if (saved.handle) await rememberHandle(saved.name, saved.handle);
     emit('file:saved');
   }
@@ -575,6 +607,8 @@ export function createStore(deps) {
         bumpRevision: true,
         savedBy: deviceName,
       });
+      // 여기부터 `setSaved`까지 들어오는 변경은 이 스냅샷에 없다. `setSaved`가 저널에 다시 넣는다.
+      duringSave = { dirty: false, commands: [], stop: null };
       const bytes = gzip ? await fs.gzip(snap.bytes) : snap.bytes;
       if (target.kind === 'handle') {
         await backupBefore(target.handle, snap.meta.db_id ?? '');
@@ -605,6 +639,7 @@ export function createStore(deps) {
       if (!(options.auto && appErr.code === 'E_DB_BUSY')) notify.error(appErr);
       return false;
     } finally {
+      duringSave = null;
       state.saving = false;
       emit('state:changed');
     }
@@ -957,6 +992,8 @@ export function createStore(deps) {
     },
 
     markDirty() {
+      // 저장 창 안에서는 이미 dirty라 아래에서 일찍 빠져나가므로, 창 표시는 그 전에 남긴다.
+      if (duringSave) duringSave.dirty = true;
       if (state.dirty) return;
       state.dirty = true;
       emit('file:dirty');
@@ -964,7 +1001,9 @@ export function createStore(deps) {
 
     async recordCommand(cmd, options = {}) {
       try {
-        await autosave.recordCommand(cmd);
+        const journaled = await autosave.recordCommand(cmd);
+        // 저장 창 안의 커맨드는 방금 쓴 파일에 없다. `setSaved`가 새 baseRevision으로 다시 넣는다.
+        if (journaled && duringSave) duringSave.commands.push(cmd);
       } catch (err) {
         // 저널 실패는 데이터 유실이 아니다(정본은 파일). 알리고 계속한다.
         notify.error(toAppError(err));

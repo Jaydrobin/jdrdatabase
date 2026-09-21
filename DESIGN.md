@@ -407,6 +407,8 @@ scripts/
 
 **저장(브라우저 모드)**: `Ctrl+S` → `client.call('db.snapshot')`(Worker가 `revision+1`, `saved_at`, `saved_by` 기록 후 `snapshot()`) → 바이트 transfer → 기존 파일 백업(IDB) → `filesystem.write()` → 성공 시 저널 비움, `known_revisions` 갱신, dirty 해제.
 
+스냅샷과 쓰기 사이에는 await가 여럿이고(압축, 백업, 파일 쓰기) 그동안 Worker는 비어 있어 편집·가져오기가 들어올 수 있다. 그 변경은 방금 쓴 파일에 없으므로 dirty를 풀지 않고, 저널도 비운 뒤 새 `baseRevision`(= 방금 쓴 파일의 revision) 위에 그 변경만 다시 넣는다. 저널에 남길 수 없는 변경(가져오기, 상한 초과)이 그 사이에 들어왔으면 정지와 배너도 되돌린다. 그대로 비우면 미저장 변경이 "저장됨" 표시 아래에서 조용히 사라진다.
+
 **저장(데스크톱 모드)**: `Ctrl+S` → `client.call('db.save', { originalPath })` → Worker가 메타를 같은 방식으로 기록하고 `engine.saveTo()` 호출 → `ipc-bridge` → 러스트 `save_to`: 원본 mtime·크기 검사 → `wal_checkpoint(TRUNCATE)` → `VACUUM INTO` 임시 파일 → 원본을 `.bak`으로 이동 → 임시 파일을 원본으로 rename → 작업 사본의 dirty 표식 해제 → 성공 시 `known_revisions` 갱신, dirty 해제. `store.save()`는 `capabilities().persistence`가 `snapshot`인지 `native`인지로 두 경로를 고른다.
 
 ---

@@ -1109,3 +1109,95 @@ test('setDeviceName: 다음 저장의 saved_by에 반영된다', async () => {
   assert.equal(store.getState().meta.saved_by, '노트북', '빈 이름은 무시');
   client.close();
 });
+
+test('저장 중에 들어온 편집은 dirty로 남고 저널에 새 baseRevision으로 다시 들어간다', async () => {
+  const { store, client, fsx, autosave } = await setup();
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true, '첫 저장으로 핸들을 잡는다(revision 1)');
+  const dbId = store.getState().meta.db_id ?? '';
+
+  // 스냅샷이 끝난 뒤(파일에 쓰는 동안) 편집이 들어오는 상황을 만든다.
+  /** @type {() => void} */
+  let release = () => {};
+  /** @type {() => void} */
+  let entered = () => {};
+  const writeEntered = new Promise((resolve) => {
+    entered = () => resolve(undefined);
+  });
+  const original = fsx.fs.write;
+  fsx.fs.write = async (h, bytes) => {
+    entered();
+    await new Promise((resolve) => {
+      release = () => resolve(undefined);
+    });
+    return original(h, bytes);
+  };
+  store.markDirty();
+  const saving = store.save();
+  await writeEntered;
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  release();
+  assert.equal(await saving, true);
+
+  assert.equal(
+    store.getState().dirty,
+    true,
+    '스냅샷 뒤에 들어온 편집은 이 파일에 없으므로 미저장이다',
+  );
+  const journal = await autosave.recoverable(dbId);
+  assert.equal(journal?.commands.length, 1, '그 편집만 저널에 남는다');
+  assert.equal(journal?.baseRevision, 2, '저널의 기준은 방금 저장한 파일의 revision이다');
+  client.close();
+});
+
+test('저장 중에 저널이 멈추면 저장 뒤에도 dirty와 정지가 남는다', async () => {
+  const { store, client, fsx, autosave } = await setup();
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'h.db',
+      kind: 'file',
+      getFile: async () => new File([], 'h.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+  assert.equal(await store.saveAs(), true);
+
+  /** @type {() => void} */
+  let release = () => {};
+  /** @type {() => void} */
+  let entered = () => {};
+  const writeEntered = new Promise((resolve) => {
+    entered = () => resolve(undefined);
+  });
+  const original = fsx.fs.write;
+  fsx.fs.write = async (h, bytes) => {
+    entered();
+    await new Promise((resolve) => {
+      release = () => resolve(undefined);
+    });
+    return original(h, bytes);
+  };
+  store.markDirty();
+  const saving = store.save();
+  await writeEntered;
+  // 가져오기·상한 초과처럼 저널에 남길 수 없는 변경이 저장 창 안에 들어온 상황(Step 7).
+  await autosave.suspend();
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  release();
+  assert.equal(await saving, true);
+
+  assert.equal(store.getState().dirty, true);
+  assert.equal(store.getState().journalStop, 'limit', '저장이 정지를 풀어서는 안 된다');
+  assert.equal(store.getState().journalFull, true);
+  assert.equal(autosave.isFull(), true);
+  client.close();
+});
