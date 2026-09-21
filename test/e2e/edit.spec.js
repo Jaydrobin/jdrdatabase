@@ -476,6 +476,48 @@ test('편집기는 고정 열에서도 셀을 따라간다(가로 스크롤·열
   expect(rows.rows[0][0]).toBe(1);
 });
 
+test('편집기는 세로 스크롤에도 칸을 따라가고, 편집기 위의 휠은 줄 단위여도 스크롤러에 전해진다', async ({
+  page,
+}) => {
+  // 세션 H가 편집기를 스크롤러 밖 오버레이로 옮긴 뒤로 세로 위치도 `cellRect`가 계산한다(전에는
+  // 캔버스 안에 있어 스크롤과 함께 저절로 움직였다). 휠도 마찬가지로 앱이 스크롤러에 넘긴다.
+  await page.setViewportSize({ width: 900, height: 400 });
+  await seed(page);
+  const scroller = page.locator('.jdr-grid__scroller');
+  await cell(page, 1, 0).click();
+  await page.keyboard.press('Enter');
+  const editor = page.locator('.jdr-editor');
+  await expect(editor).toBeVisible();
+
+  /** 편집기와 편집 중인 칸의 y 좌표 차이. */
+  const gapY = async () => {
+    const e = await editor.boundingBox();
+    const c = await cell(page, 1, 0).boundingBox();
+    if (!e || !c) throw new Error('box missing');
+    return Math.abs(e.y - c.y);
+  };
+  expect(await gapY()).toBeLessThan(2);
+  await scroller.evaluate((el) => {
+    el.scrollTop = 96;
+  });
+  await expect.poll(gapY).toBeLessThan(2);
+  await expect(editor).toBeVisible();
+
+  // 파이어폭스의 마우스 휠은 줄 단위(deltaMode=1, deltaY=3)로 온다. 그대로 더하면 3 px만 움직였다.
+  const scrollTop = () => scroller.evaluate((el) => el.scrollTop);
+  const before = await scrollTop();
+  await editor.evaluate((el) => {
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: 3, deltaMode: 1, bubbles: true }));
+  });
+  expect((await scrollTop()) - before).toBeGreaterThanOrEqual(64);
+  // 픽셀 단위(크로미움)는 그대로 픽셀이다.
+  const afterLines = await scrollTop();
+  await editor.evaluate((el) => {
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, deltaMode: 0, bubbles: true }));
+  });
+  expect((await scrollTop()) - afterLines).toBe(100);
+});
+
 test('낡은 블록의 셀은 전문을 읽고 연다(되돌린 값이 다시 적용되지 않는다)', async ({ page }) => {
   const { table, name } = await seed(page);
   const cellValue = async () =>

@@ -1114,11 +1114,18 @@ export function createGrid(deps) {
 
   /**
    * 편집기 위에서 굴린 휠은 오버레이(스크롤러 밖)에 떨어진다. 스크롤러에 넘겨 편집 중에도 스크롤되게 한다.
+   * `deltaY`·`deltaX`의 단위는 `deltaMode`가 정한다. 크로미움의 트랙패드·휠은 픽셀(0)이지만 파이어폭스의
+   * 마우스 휠은 줄(1, `deltaY` 3)이고 Page Up/Down 장치는 쪽(2)이다. 그대로 더하면 줄 단위 휠 한 번이
+   * 3 px만 움직인다. 브라우저가 스크롤러 안에서 하던 것과 같도록 픽셀로 바꾼다.
    * @param {WheelEvent} ev
    */
   function onOverlayWheel(ev) {
-    scroller.scrollTop += ev.deltaY;
-    scroller.scrollLeft += ev.deltaX;
+    const factorY =
+      ev.deltaMode === 1 ? ROW_HEIGHT : ev.deltaMode === 2 ? Math.max(1, viewportHeight) : 1;
+    const factorX =
+      ev.deltaMode === 1 ? ROW_HEIGHT : ev.deltaMode === 2 ? Math.max(1, viewportWidth) : 1;
+    scroller.scrollTop += ev.deltaY * factorY;
+    scroller.scrollLeft += ev.deltaX * factorX;
   }
 
   /**
