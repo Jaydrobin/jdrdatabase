@@ -425,3 +425,86 @@ test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정�
   const stored = await hook(page).query(`SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`);
   expect(stored.rows[0]?.[0]).toBe('머리글클릭확정');
 });
+
+// --- 임시 진단(세션 F 점검 후속). 원인을 특정하면 이 블록을 통째로 지운다. ---
+// 바로 위 검사가 CI에서만 간헐적으로 실패한다. 조건을 똑같이 맞추려고 같은 파일·같은 seed로 두고
+// 맨 뒤에 붙인다(실패는 언제나 스위트의 마지막 검사에서 났다). 단언하지 않고 증거만 로그로 남긴다.
+// 증거는 전부 페이지 안에서 이벤트로 모으므로 경합 구간에 왕복이 끼어들지 않는다.
+//  H1 경합(확정됐는데 질의가 빨랐다) → later가 뒤늦게 기대값
+//  H2 되돌림(applyCellEdit false)   → edit.reverted 토스트
+//  H3 입력이 옛 값으로 되돌아감      → blur 시점 값이 옛 값
+//  H4 blur 미발생                    → blur 기록 없음
+function installProbe() {
+  /** @type {Array<Record<string, unknown>>} */
+  const diag = [];
+  /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window)).__jdrDiag = diag;
+  const at = () => Math.round(performance.now());
+  /** @param {HTMLElement} root */
+  const wire = (root) => {
+    const found = [
+      ...(root.matches?.('.jdr-editor input, .jdr-editor textarea') ? [root] : []),
+      ...(root.querySelectorAll?.('.jdr-editor input, .jdr-editor textarea') ?? []),
+    ];
+    for (const el of found) {
+      const field = /** @type {HTMLInputElement} */ (el);
+      diag.push({ at: at(), ev: 'field-added', value: field.value });
+      field.addEventListener(
+        'blur',
+        () => diag.push({ at: at(), ev: 'blur', value: field.value }),
+        true,
+      );
+      field.addEventListener('input', () =>
+        diag.push({ at: at(), ev: 'input', value: field.value }),
+      );
+    }
+  };
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) {
+        if (!(n instanceof HTMLElement)) continue;
+        if (n.className && String(n.className).includes('jdr-toast')) {
+          diag.push({ at: at(), ev: 'toast', text: (n.textContent ?? '').slice(0, 60) });
+        }
+        wire(n);
+      }
+      for (const n of m.removedNodes) {
+        if (!(n instanceof HTMLElement)) continue;
+        if (n.matches?.('.jdr-editor input, .jdr-editor textarea')) {
+          diag.push({
+            at: at(),
+            ev: 'field-removed',
+            value: /** @type {HTMLInputElement} */ (n).value,
+          });
+        } else if (n.querySelector?.('.jdr-editor input, .jdr-editor textarea')) {
+          diag.push({ at: at(), ev: 'field-removed-subtree' });
+        }
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+for (let probe = 1; probe <= 6; probe += 1) {
+  test(`DIAG ${probe}: 편집 중 머리글 클릭(정렬)`, async ({ page }) => {
+    /** @type {string[]} */
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(String(err.message).slice(0, 200)));
+    const { table, name } = await seed(page);
+    await page.evaluate(installProbe);
+    await cell(page, 0, 0).dblclick();
+    await expect(page.locator('.jdr-editor input')).toBeVisible();
+    await page.locator('.jdr-editor input').fill('머리글클릭확정');
+    await header(page, '나이').click();
+    await expect(header(page, '나이')).toHaveAttribute('aria-sort', 'ascending');
+    await expect(page.locator('.jdr-editor')).toBeHidden();
+    const sql = `SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`;
+    const immediate = (await hook(page).query(sql)).rows[0]?.[0];
+    const diag = await page.evaluate(
+      () => /** @type {{ __jdrDiag: unknown }} */ (/** @type {unknown} */ (window)).__jdrDiag,
+    );
+    await page.waitForTimeout(1500);
+    const later = (await hook(page).query(sql)).rows[0]?.[0];
+    console.log(
+      `DIAG-${probe} ${JSON.stringify({ ok: immediate === '머리글클릭확정', immediate, later, pageErrors, diag })}`,
+    );
+  });
+}
