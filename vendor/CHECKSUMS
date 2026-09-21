@@ -3,3 +3,10 @@
 a6d3fe46aa3f924e7686329f97b0564549ef1f787e0c19924179aef7f72bcc01  sqlite3.mjs
 2ee8f3dab694532afc8840e07703127287662d08b74e6ff50491ce63f00d5752  sqlite3.wasm
 ed942b7da4c559615d105cdf9230978ee1f3731e2c2dc98e94cf81a0abe8ee17  sqlite3.d.mts
+# SheetJS CE 0.18.12 (Apache-2.0) - GitHub mirror SheetJS/sheetjs at commit 515d1c6f2e1d3ca422ee9198b177cfd926434936
+#   https://raw.githubusercontent.com/SheetJS/sheetjs/515d1c6f2e1d3ca422ee9198b177cfd926434936/dist/xlsx.full.min.js
+#   https://raw.githubusercontent.com/SheetJS/sheetjs/515d1c6f2e1d3ca422ee9198b177cfd926434936/types/index.d.ts (as xlsx.full.min.d.ts)
+#   https://raw.githubusercontent.com/SheetJS/sheetjs/515d1c6f2e1d3ca422ee9198b177cfd926434936/LICENSE (as LICENSE.sheetjs)
+8e87b0a7d62ec8bfc55bae04eebf8acc92f1b688e81f6bbfb8f17064e1323235  xlsx.full.min.js
+310d907760b76adcd725756960e2b672361671842dbf9f125fa934f8d2cac3fd  xlsx.full.min.d.ts
+4d2a38ac35cda06a555c84074a819d413339cd3691b822cae50f8f322fe01f64  LICENSE.sheetjs
