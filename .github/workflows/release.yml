@@ -1,0 +1,54 @@
+name: release
+
+# 릴리스 빌드(Step 10). `v*` 태그에서 검사·빌드·검증을 거친 dist/jdrdatabase.html을 GitHub 릴리스에 첨부한다.
+# dist/는 저장소에 커밋하지 않고 릴리스 태그에서만 배포한다(CLAUDE.md 7.1·8장).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Check (lint + typecheck + unit)
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify artifact
+        run: npm run verify
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E
+        run: npm run test:e2e
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum jdrdatabase.html > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/jdrdatabase.html
+            dist/SHA256SUMS
+          generate_release_notes: true
