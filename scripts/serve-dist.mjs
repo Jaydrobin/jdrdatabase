@@ -28,7 +28,8 @@ const TYPES = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${port}`);
   const file = path.normalize(path.join(ROOT, decodeURIComponent(url.pathname)));
-  if (!file.startsWith(ROOT)) {
+  // 접두사 비교는 형제 디렉터리(`<ROOT>-backup` 등)를 루트 안으로 본다. 경계에 구분자를 붙여 막는다.
+  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) {
     res.writeHead(403).end();
     return;
   }
