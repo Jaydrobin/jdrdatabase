@@ -28,7 +28,7 @@ grep -n 미확인 docs/sessions.md
 | F | 7 + 8 (CSV·XLSX 가져오기) | 완료 |
 | F 점검 | 세션 F 산출물 코드 점검과 수정 | 완료 |
 | F 점검 후속 | 간헐 실패 E2E 원인 규명과 수정 | 완료 |
-| G | 9 (내보내기·백업·압축·클라우드 안내) | 대기 |
+| G | 9 (내보내기·백업·압축·클라우드 안내) | 완료 |
 | H | 10 (성능·하드닝·접근성) | 대기 |
 | I | 11 (타우리 셸·네이티브 엔진) | 대기 |
 
@@ -974,3 +974,69 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - 이 브랜치에서 관측한 CI 빨강은 전부 이 검사 하나였습니다(`9b78bd0`, `3c9f3b5`, `80780ff`,
   `634819f`). 다른 간헐 실패가 숨어 있는지는 전수로 확인할 수 없습니다.
 - 세션 F 점검의 나머지 미확인 항목(SheetJS 0.20.3 갱신, 브라우저별 실측 등)은 그대로입니다.
+
+### 세션 G (Step 9) — 2026-09-21
+
+커밋: `26bf92c` docs(design) 착수 전 내보내기 조각 스트림·gzip·자동 저장·백업 복원 확정 → `9d6c49a` feat(export) Step 9 CSV·XLSX 내보내기, .db.gz 저장, 백업 복원, 자동 저장, 클라우드 안내 → 이 기록.
+
+시작 상태: 원격이 강제 갱신되어 있어 로컬 브랜치를 원격 `6a27c2f`로 맞춘 뒤 `npm run check`(302개)가 초록임을 확인하고 시작했습니다. 세션 F 점검·후속의 미확인 항목은 아래 "미확인"에 이어받았습니다.
+
+**설계 변경 (코드보다 먼저 DESIGN.md v0.9에 반영, 리뷰어 확인 필요)**
+
+- **내보내기는 Worker가 조각으로 흘려보낸다.** `export.stream` `{ tableId, viewSpec, format, options? }` op 하나가 뷰 순서로 5,000행씩 읽어(정렬·필터·검색이 없는 뷰는 `WHERE "id" > ? ORDER BY "id"` 키셋, 있으면 `OFFSET`) CSV 조각을 만들 때마다 새 메시지 종류 `{ id, chunk }`(transfer)로 메인에 보내고, 끝나면 `{ rows, bytes, blobCells }`를 돌려줍니다. 메인은 조각을 바이트 싱크(`filesystem.openSink`: FSA `createWritable()` / 다운로드 폴백)에 차례로 쓰고, 취소·실패는 `abort()`로 파일을 남기지 않습니다. 6장 프로토콜에 조각 이벤트를 더했고 `db/client.js`에 `onChunk`, `db/worker.js`의 `HandlerContext`에 `chunk`를 더했습니다. 역압은 두지 않습니다(메인이 들고 있을 수 있는 상한이 DB 크기이고 DB는 이미 메모리에 있습니다).
+- **`export.stream`은 배타 op입니다.** 읽기지만 페이지 사이에서 이벤트 루프로 돌아오므로 쓰기가 끼어들면 앞뒤 페이지가 다른 상태를 봅니다. 행 수 캐시는 무효화하지 않습니다(읽기 집합).
+- **gzip 저장은 스냅샷 전에 지원을 확인합니다.** 순서는 지원 확인 → `db.snapshot`(revision+1) → gzip → 기존 파일 백업 → 쓰기. 지원 확인이 뒤에 있으면 파일에는 아무것도 쓰이지 않았는데 revision만 오른 DB가 남습니다. 열기는 매직 `1f 8b`로 판별하고 압축 해제 뒤 크기로 `warnFileBytes`·`maxFileBytes`를 다시 검사합니다(압축 파일은 작아 보입니다). "저장"은 현재 파일의 형식을 유지하고(`state.file.gzip`), 폴백(다운로드) 경로에서는 설정의 "압축 저장"이 제안 이름을 `.db.gz`로 만듭니다.
+- **자동 저장은 기본 꺼짐으로 확정(9장 미확정 해소).** 정본 핸들이 있고 dirty일 때만 시도하고, 다운로드 폴백으로는 자동 저장하지 않습니다. 저장 뮤텍스(`state.saving`) 아래에서 사용자 저장은 `file.saveBusy`로 알리고 자동 저장은 조용히 다음 틱으로 미룹니다. `E_DB_BUSY`(가져오기·내보내기 진행 중)도 자동 저장에서는 알리지 않습니다.
+- **백업 복원은 바이트 그대로 새 파일로.** IDB `backups[db_id]`를 `pickSaveAs('backup-<이름>')`로 고른 곳에 씁니다(압축 여부도 그대로. 열린 DB는 건드리지 않음). 백업 생략(200 MB 초과)·`E_QUOTA`·그 밖의 실패는 `state.backupNote`로 상태바에 남고 다음 저장 성공이 지웁니다. 데스크톱 `.bak`은 Step 11에서 채우며 그 전에는 `E_UNSUPPORTED`.
+- **새 오류 코드 없음.** 취소는 `E_IMPORT_CANCELLED`(7장 설명에 내보내기 추가), XLSX 행 상한 1,048,575 초과는 `E_FILE_TOO_LARGE`(`detail.format = 'xlsx'`, 7장 설명 갱신), gzip 미지원은 기존 `E_GZIP_UNSUPPORTED`.
+- 3.1에 `export/rows.js`(페이지 이터레이터), `app/settings.js`(IDB settings 읽기·쓰기), `ui/dialogs/export.js`·`settings.js`, `docs/cloud-sync.md`.
+
+**Step 9 완료 기준**
+- [x] 왕복 테스트(내보낸 CSV를 다시 가져오면 타입·값이 동일: 날짜, 불리언, NULL, 따옴표 포함 텍스트): `test/unit/export/csv.test.js` "왕복: …"(text·longtext·integer·real·boolean·date·datetime·select 8열, 따옴표·쉼표·CRLF가 든 텍스트, NULL 행, 2^53−1, 3e2 → `run()`으로 다시 가져와 타입 동일·값 동일. select는 새 테이블에서 text로 받고, 기존 select 열에 넣으면 항목이 자동으로 채워짐) + 수식 주입 방지를 끈 왕복(`=1+1`, `-x`) + E2E `export.spec.js`(`types.csv`를 가져온 테이블을 CSV로 내려받아 다시 가져오면 8열의 타입·행이 동일). XLSX도 같은 왕복(`xlsx.test.js`: 날짜·일시·불리언·NULL·따옴표 텍스트가 Step 8 어댑터로 같은 타입·값으로 돌아옴, `preview`의 추론도 원본 타입과 같음 + E2E).
+- [x] `.db.gz` 저장 → 열기 왕복: `store.test.js`(설정 켜고 다운로드 → 이름 `database.db.gz`·매직·`file.gzip` → 새 DB → 다시 열면 같은 db_id·revision·데이터, "저장"이 형식 유지) + E2E `export.spec.js`(설정 대화상자에서 압축 저장을 켜고 저장 → 내려받은 파일이 `1f 8b`로 시작 → `<input type="file">`로 열면 같은 db_id·revision 1·행 3개·`saved_by`가 바꾼 기기 이름). `CompressionStream`·`DecompressionStream`의 `file://` 가용성을 이 검사로 실측해 지원 매트릭스에 적었습니다.
+- [x] `docs/cloud-sync.md`: "PC A에서 저장 → 동기화 완료 확인 → 탭 닫기 → PC B 동기화 확인 → 열기" 절차, 경고 7종(오래된 파일, 저널 복구, 다른 버전 위의 기록, 다른 탭, 새 스키마, 원본 변경(데스크톱), 저널 정지 배너)의 뜻과 권하는 행동, 직전 저장본, 자동 저장, 권장 사항. README에서 링크.
+- Step 9 예외 처리 대응(어디서 확인했는지):
+  - 구분자·개행·따옴표 인용, BOM 기본: 단위(`quoteField`, `exportCsv` 바이트 검사) + E2E(BOM 있음·없음).
+  - 수식 주입 방지 옵션(기본 켜짐): 단위(`=`,`+`,`-`,`@` 네 글자, 텍스트 계열만, 숫자 `-42`는 그대로) + E2E(대화상자 기본 체크).
+  - 취소·실패 시 파일을 남기지 않음: 단위(`readPages`가 페이지 사이에서 `E_IMPORT_CANCELLED`, `store.exportTable`이 실패·취소에 싱크 `abort()`; FSA 경로의 `abort()`는 헤드리스에서 미확인).
+  - XLSX 행 수 경고·거부: 단위(`count(*)`를 가짜로 넘겨 `E_FILE_TOO_LARGE`·`detail.format`), 대화상자 문구는 코드 경로만.
+  - BLOB 값: 단위(`cellText`·`cellObject`가 빈 값, `blobCells` 집계). 외부 테이블 실데이터로는 미확인.
+  - gzip 미지원: `store.test.js`(저장은 스냅샷 전에 멈춰 revision 그대로, 열기 거부). 손상 gzip은 `E_FILE_CORRUPT`(`filesystem.test.js`·`store.test.js`).
+  - 저장 뮤텍스: `store.test.js`(쓰기를 붙잡은 채 두 번째 저장 → `file.saveBusy`, 자동 저장은 조용히 false).
+  - 백업 용량 부족: `store.test.js`(`backups` put이 `E_QUOTA`를 던져도 저장되고 `backupNote = 'quota'`, 다음 저장 성공이 지움). 상태바 표시는 코드 경로만.
+  - 백업 복원 중 쓰기 실패: 코드 경로만(`fs.write`가 던지면 `E_FILE_WRITE` 토스트, DB·정본 그대로).
+- 자동 저장 타이머: `autosave.test.js`(dirty 뒤 간격, 미룸이면 같은 간격 뒤 재시도, 저장되면 쉼, 겹쳐 잡지 않음, 사용자 저장이 먼저 끝나면 틱 삭제, 간격 0, dispose, `save`가 던져도 재시도, 저장 중 들어온 dirty를 잃지 않음). 실제 타이머로 30초 뒤 저장되는 시나리오는 헤드리스(핸들 없음)에서 미확인.
+- 설정: `settings.test.js`(기기 이름 생성·저장, 정규화, IDB 없음) + E2E(기기 이름·압축 저장이 새로고침 뒤에도 유지, 빈 이름 거부, 취소 시 미반영).
+
+**검증 결과**
+- [x] `npm run check`: eslint 0건, prettier 통과, tsc 0오류, 단위 테스트 **332개 통과**(세션 F 점검 후속 302 + 30). 새 파일: `test/unit/export/csv.test.js` 8, `xlsx.test.js` 4, `test/unit/app/settings.test.js` 4, `test/unit/io/filesystem.test.js` 2. 기존 파일에 `store.test.js` 9, `autosave.test.js` 2, `rpc.test.js` 1.
+- [x] `npm run build && npm run verify`: `verify OK`, 외부 참조 0건(허용 vendor URL 리터럴 160건), vendor 체크섬 6개 일치, 두 변형 CSP 외 동일.
+- [x] `npm run test:e2e`: Chromium `file://`에서 **57개 통과**(52 + `export.spec.js` 5).
+- [x] 7.1 grep: `innerHTML` 0건, 모드 문자열 허용 위치 밖 0건, `src/export`의 SQL 템플릿 리터럴은 `rows.js`의 두 문장뿐이고 식별자는 `quoteIdent`, 뷰 조각은 `buildViewClauses`, 값(`lastId`·`limit`·`offset`·필터 값)은 전부 바인딩.
+- [x] 새 오류 코드 없음. 새 RPC op 1개(`export.stream`)는 6장 표, `db/worker.js` OpMap·핸들러·배타 집합·읽기 집합, `db/client.js`, `rpc.test.js`에 함께 반영. i18n ko/en 키 동일(단위 테스트). 문구 53개 추가, 코드에 리터럴 문구 없음.
+- [x] `docs/support-matrix.md`: `CompressionStream`/`DecompressionStream` 행을 실측으로 바꾸고, 비ASCII `<a download>` 이름과 조각 다운로드 왕복 행을 더했습니다.
+- [ ] `npm run test:perf`: 돌리지 않았습니다(내보내기는 렌더·창 질의 핫 경로를 바꾸지 않습니다). 30만 행 내보내기 시간은 아래 미확인.
+
+**산출물 크기 (`verify` 출력)**
+- `dist/jdrdatabase.html` 3,739,528 bytes (3.57 MiB / 예산 6 MiB). 세션 F 점검 후속(3,707,254) 대비 +32,274 bytes(내보내기 모듈·대화상자 2개·문구).
+- `dist/tauri/index.html` 3,739,336 bytes.
+
+**점검했지만 고치지 않은 것 (판단 근거와 함께)**
+- **헤드리스 Chromium은 비ASCII 이름의 `<a download>`를 `download`로 보고합니다.** `download.suggestedFilename()`이 `원본.csv` 대신 `download`였습니다. 앱이 주는 이름은 `a.download`에 그대로 들어가고 ASCII 이름(`src.csv`, `database.db.gz`)은 유지되므로 앱의 문제가 아니라 헤드리스의 동작으로 보고, E2E는 ASCII 테이블 이름으로 검사합니다. 실제 브라우저에서 한글 이름이 유지되는지는 미확인(지원 매트릭스).
+- **XLSX 날짜는 로컬 시각으로 씁니다.** SheetJS는 일련번호를 로컬 시각으로 만들고 Step 8 어댑터도 로컬 시각 부품으로 읽으므로, 같은 기기에서의 왕복은 같습니다. 시간대가 다른 PC에서 열어도 엑셀의 날짜는 시간대가 없는 값이라 같은 날짜로 보이지만, 일광 절약 시간 전환 시각에 걸친 `datetime`은 SheetJS 쪽 변환에서 1시간 어긋날 수 있습니다(픽스처로 재지 않음).
+- **`select` 열은 CSV로 다시 가져올 때 text가 됩니다.** 새 테이블의 타입 선택지에 select가 없기 때문이며(세션 F의 판단), 값은 같습니다. 왕복 테스트가 이를 그대로 검사합니다.
+- **내보내기에 역압이 없습니다.** FSA 싱크의 `write`가 느리면 조각이 메인 메모리에 쌓입니다. 상한은 DB 크기(이미 메모리에 있음)라 두었고, 필요하면 Worker가 `chunk` 확인 응답을 기다리게 바꿀 수 있습니다(RPC 형식 변경).
+- **폴백 다운로드 싱크는 조각을 모두 모아 Blob 하나로 만듭니다.** 300 MB CSV면 그만큼의 조각이 메인에 머무릅니다. Blob은 조각 배열을 복사 없이 감싸므로 두 배가 되지는 않습니다.
+- **자동 저장은 dirty 전환 때만 틱을 잡습니다.** 이미 dirty인 동안의 추가 편집은 틱을 다시 잡지 않으므로(디바운스가 아님) 계속 편집해도 간격마다 저장됩니다. 저장이 실패하면(`E_FILE_WRITE` 등) 간격마다 토스트가 반복될 수 있는데, 데이터 안전에 관한 알림이라 그대로 두었습니다(설정에서 끄면 멈춥니다).
+- **내보내기 버튼은 읽기 전용 상태에서도 켜져 있습니다.** 내보내기는 읽기라 다른 탭이 점유한 DB나 새 스키마 파일도 내보낼 수 있습니다.
+- **`export.stream` 진행률의 `total`은 `query.count`입니다.** 필터가 있는 30만 행 뷰에서 `count(*)`가 한 번 더 도는 비용(35 ms 수준)은 받아들였습니다.
+
+**미확인 (후속 세션에서 이어받음)**
+- 30만 행 × 20열 테이블의 CSV·XLSX 내보내기 시간과 메모리(8장에는 예산이 없지만 Step 10의 측정 항목으로 권합니다). XLSX 10만 행 경고 문구와 1,048,575행 거부 문구의 실제 표시.
+- FSA 경로의 내보내기(`showSaveFilePicker` → `createWritable()` 싱크의 순서 쓰기, 실패·취소 시 `abort()`)와 `.db.gz` 종류 제안(`accept: { 'application/gzip': ['.gz'] }`가 실제 선택기에서 받아들여지는지), 백업 복원의 FSA 경로, 자동 저장이 실제 타이머로 정본 핸들에 쓰는 시나리오. 모두 헤드리스에서 파일 선택기를 자동화할 수 없어 코드 경로만 있습니다(Chrome/Edge 데스크톱에서 손으로 확인).
+- 실제 브라우저에서 한글 파일 이름의 `<a download>`(위 "점검했지만 고치지 않은 것").
+- 내보내기 실행 중 실제 취소 버튼 클릭과 "취소하는 중…" 문구(픽스처가 작아 누를 틈이 없음. 취소 뒤 파일이 만들어지지 않는 것은 단위·스토어 테스트로만).
+- Firefox·Safari의 `CompressionStream`(Safari 16.4+, Firefox 113+로 알려져 있으나 실측 없음)과 다운로드 싱크. 데스크톱 WebView의 `CompressionStream`(R8).
+- 외부(비STRICT) 테이블의 BLOB 값 내보내기 실데이터, 백업 복원 중 쓰기 실패 문구, 백업 용량 부족의 상태바 표시(코드 경로만).
+- 내보내기·설정 대화상자의 키보드만 조작·스크린 리더(포커스 트랩은 `dialog.js`).
+- 세션 F 점검·후속의 미확인 목록(SheetJS 0.20.3 갱신(CVE 2건), 8장 환경의 가져오기 시간, 가져오기 취소 버튼 클릭, 100 MB 넘는 xlsx 문구, 실제 파일 선택기·인라인 전송, Firefox·Safari의 `TextDecoderStream('euc-kr')`·SheetJS, 가져오기 대화상자 접근성, 다른 간헐 실패의 존재 여부)과 세션 E 점검·D 점검에서 이어진 항목은 그대로 남습니다.
