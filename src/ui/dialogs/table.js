@@ -2,6 +2,7 @@
 /**
  * 테이블 대화상자(Step 3): 이름 입력(만들기·이름 바꾸기), 삭제 확인(되돌리기 불가).
  */
+import { MAX_NAME_LENGTH } from '../../db/tables.js';
 import { t } from '../../i18n/index.js';
 import { confirmDialog, promptText } from './dialog.js';
 
@@ -15,6 +16,7 @@ export function nameValidator(taken) {
   return (value) => {
     const name = value.trim();
     if (!name) return t('validate.nameEmpty');
+    if (name.length > MAX_NAME_LENGTH) return t('validate.nameTooLong', { limit: MAX_NAME_LENGTH });
     if (names.has(name)) return t('validate.nameDuplicate');
     return null;
   };

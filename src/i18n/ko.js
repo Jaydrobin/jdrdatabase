@@ -121,6 +121,7 @@ export const ko = Object.freeze({
     '열이 {count}개입니다. SQLite는 테이블당 2,000개까지만 허용하며 열이 많으면 느려집니다.',
   'validate.nameEmpty': '이름을 입력하세요.',
   'validate.nameDuplicate': '같은 이름이 이미 있습니다.',
+  'validate.nameTooLong': '이름은 {limit}자까지입니다.',
   'validate.choicesEmpty': '선택 항목을 한 개 이상 입력하세요.',
   'grid.label': '데이터 그리드',
   'grid.noTable': '왼쪽에서 테이블을 선택하거나 "+ 테이블"로 만드세요.',

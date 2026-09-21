@@ -119,6 +119,7 @@ export const en = Object.freeze({
     'This table has {count} columns. SQLite allows 2,000 per table and many columns slow things down.',
   'validate.nameEmpty': 'Enter a name.',
   'validate.nameDuplicate': 'That name is already in use.',
+  'validate.nameTooLong': 'A name can be at most {limit} characters.',
   'validate.choicesEmpty': 'Enter at least one choice.',
   'grid.label': 'Data grid',
   'grid.noTable': 'Select a table on the left or create one with "+ Table".',
