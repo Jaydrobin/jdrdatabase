@@ -24,6 +24,7 @@ import { AppError } from '../util/errors.js';
 /** @typedef {import('../db/engine.js').SqlValue} SqlValue */
 /** @typedef {import('../db/engine.js').SqlParams} SqlParams */
 /** @typedef {import('../db/query.js').FullRow} FullRow */
+/** @typedef {import('../db/query.js').ViewClauses} ViewClauses */
 
 /** 되돌리기 스냅샷 상한(행, D-08). 넘는 삭제·붙여넣기는 확인 뒤 되돌릴 수 없는 커맨드로 적용한다. */
 export const UNDO_SNAPSHOT_MAX_ROWS = 10_000;
@@ -255,20 +256,35 @@ export function deleteRows(input) {
 }
 
 /**
- * 스냅샷 상한을 넘는 행 범위를 되돌릴 수 없이 지운다(D-08). 뷰 순서(`id`)로 `offset`부터 `count`개.
+ * 뷰 순서로 `offset`부터 `count`개 행의 id를 고르는 부분 질의. `clauses`(`query.buildViewClauses`)가 있으면
+ * 뷰의 필터·검색·정렬을 그대로 붙여 그리드의 행 순번과 같은 행을 가리킨다(Step 6). 없으면 `id` 순서다.
+ * @param {string} table 인용된 테이블 식별자
+ * @param {ViewClauses | undefined} clauses
+ * @returns {{ sql: string, params: SqlValue[] }}
+ */
+function rangeSubquery(table, clauses) {
+  return {
+    sql: `SELECT "id" FROM ${table}${clauses?.where ?? ''} ORDER BY ${clauses?.orderBy ?? '"id"'} LIMIT ? OFFSET ?`,
+    params: clauses ? [...clauses.params] : [],
+  };
+}
+
+/**
+ * 스냅샷 상한을 넘는 행 범위를 되돌릴 수 없이 지운다(D-08). 뷰 순서로 `offset`부터 `count`개.
  * UI가 "되돌릴 수 없는 작업"임을 확인받은 뒤에만 만든다.
- * @param {{ tableId: string, offset: number, count: number }} input
+ * @param {{ tableId: string, offset: number, count: number, clauses?: ViewClauses }} input
  * @returns {Command}
  */
 export function deleteRowRange(input) {
   const table = quoteIdent(input.tableId);
+  const range = rangeSubquery(table, input.clauses);
   return {
     type: 'row.deleteRange',
     tableId: input.tableId,
     do: [
       {
-        sql: `DELETE FROM ${table} WHERE "id" IN (SELECT "id" FROM ${table} ORDER BY "id" LIMIT ? OFFSET ?)`,
-        params: [input.count, input.offset],
+        sql: `DELETE FROM ${table} WHERE "id" IN (${range.sql})`,
+        params: [...range.params, input.count, input.offset],
       },
     ],
     undo: [],
@@ -283,7 +299,7 @@ export function deleteRowRange(input) {
  * 필요 없고, 옛 값을 읽으려면 범위 전체를 메인 스레드로 가져와야 한다(30만 행이면 수 GB).
  * 이미 모두 NULL인 행은 건드리지 않아 `_updated_at`이 헛돌지 않는다(되돌릴 수 있는 경로와 같다).
  * UI가 "되돌릴 수 없는 작업"임을 확인받은 뒤에만 만든다.
- * @param {{ tableId: string, colIds: string[], offset: number, count: number, now: string }} input
+ * @param {{ tableId: string, colIds: string[], offset: number, count: number, now: string, clauses?: ViewClauses }} input
  * @returns {Command}
  */
 export function clearRowRange(input) {
@@ -295,6 +311,7 @@ export function clearRowRange(input) {
   const table = quoteIdent(input.tableId);
   const sets = input.colIds.map((colId) => `${quoteIdent(colId)} = NULL`).join(', ');
   const anyFilled = input.colIds.map((colId) => `${quoteIdent(colId)} IS NOT NULL`).join(' OR ');
+  const range = rangeSubquery(table, input.clauses);
   return {
     type: 'cell.clearRange',
     tableId: input.tableId,
@@ -302,8 +319,8 @@ export function clearRowRange(input) {
       {
         sql:
           `UPDATE ${table} SET ${sets}, "_updated_at" = ? ` +
-          `WHERE "id" IN (SELECT "id" FROM ${table} ORDER BY "id" LIMIT ? OFFSET ?) AND (${anyFilled})`,
-        params: [input.now, input.count, input.offset],
+          `WHERE "id" IN (${range.sql}) AND (${anyFilled})`,
+        params: [input.now, ...range.params, input.count, input.offset],
       },
     ],
     undo: [],

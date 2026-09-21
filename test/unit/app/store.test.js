@@ -495,3 +495,173 @@ test('열기: 저널을 복구하면 복구된 테이블이 스토어 목록에�
   assert.equal(b.store.getState().dirty, true, '복구한 변경은 아직 저장되지 않았다');
   b.client.close();
 });
+
+// ---- Step 6: 뷰 상태 ----
+
+/**
+ * 테이블 하나(텍스트·정수 열)를 만든다.
+ * @param {import('../../../src/app/store.js').Store} store
+ */
+async function viewFixture(store) {
+  const created = await store.runSchemaOp('schema.create', { name: '고객' });
+  if (!created) throw new Error('create failed');
+  const tableId = created.tableId;
+  const name = await store.runSchemaOp('schema.addColumn', { tableId, name: '이름', type: 'text' });
+  const age = await store.runSchemaOp('schema.addColumn', {
+    tableId,
+    name: '나이',
+    type: 'integer',
+  });
+  if (!name || !age) throw new Error('addColumn failed');
+  return { tableId, name: name.columnId, age: age.columnId };
+}
+
+test('뷰 상태: 정렬·필터·검색·숨김 설정과 viewSpecOf, view:changed 이벤트, clearFilters', async () => {
+  const { store, client } = await setup();
+  const { tableId, name, age } = await viewFixture(store);
+  let changed = 0;
+  store.on('view:changed', () => {
+    changed += 1;
+  });
+  store.toggleSort(tableId, age);
+  store.toggleSort(tableId, name, true);
+  store.setFilter(tableId, { logic: 'or', conditions: [{ colId: age, op: '>', value: '3' }] });
+  store.setSearch(tableId, '  홍 ');
+  store.setSearch(tableId, '홍');
+  store.toggleHidden(tableId, name);
+  assert.equal(changed, 5, '같은 검색어는 이벤트를 내지 않는다');
+  assert.deepEqual(store.viewSpecOf(tableId), {
+    hidden: [name],
+    sort: [
+      { colId: age, dir: 'asc' },
+      { colId: name, dir: 'asc' },
+    ],
+    filter: { logic: 'or', conditions: [{ colId: age, op: '>', value: '3' }] },
+    search: '홍',
+  });
+  const view = store.getViewState(tableId);
+  assert.equal(view.viewId, null);
+  assert.deepEqual(view.hidden, [name]);
+  // 복사본이라 바깥에서 고쳐도 상태가 바뀌지 않는다.
+  view.sort.push({ colId: age, dir: 'desc' });
+  assert.equal(store.getViewState(tableId).sort.length, 2);
+  store.toggleHidden(tableId, name);
+  store.clearFilters(tableId);
+  store.clearFilters(tableId);
+  assert.equal(changed, 7);
+  assert.deepEqual(store.viewSpecOf(tableId).filter, null);
+  assert.equal(store.viewSpecOf(tableId).search, '');
+  assert.deepEqual(store.viewSpecOf(tableId).hidden, []);
+  assert.equal(store.viewSpecOf(tableId).sort.length, 2, '정렬은 남는다');
+  client.close();
+});
+
+test('뷰 상태: 열이 소프트 삭제되면 그 열의 정렬·필터·숨김 항목이 빠지고 안내한다', async () => {
+  const { store, client, notices } = await setup();
+  const { tableId, name, age } = await viewFixture(store);
+  store.setSort(tableId, [
+    { colId: age, dir: 'desc' },
+    { colId: name, dir: 'asc' },
+  ]);
+  store.setFilter(tableId, { logic: 'and', conditions: [{ colId: age, op: 'empty' }] });
+  store.toggleHidden(tableId, age);
+  notices.length = 0;
+  await store.runSchemaOp('schema.softDeleteColumn', { tableId, columnId: age });
+  assert.deepEqual(store.viewSpecOf(tableId), {
+    hidden: [],
+    sort: [{ colId: name, dir: 'asc' }],
+    filter: null,
+    search: '',
+  });
+  assert.deepEqual(
+    notices.filter((n) => n.value === 'view.pruned'),
+    [{ kind: 'info', value: 'view.pruned' }],
+  );
+  // 복원해도 뷰에 저절로 돌아오지는 않는다(사용자가 다시 고른다).
+  notices.length = 0;
+  await store.runSchemaOp('schema.restoreColumn', { tableId, columnId: age });
+  assert.deepEqual(store.viewSpecOf(tableId).sort, [{ colId: name, dir: 'asc' }]);
+  assert.equal(
+    notices.some((n) => n.value === 'view.pruned'),
+    false,
+  );
+  client.close();
+});
+
+test('saveView·listViews·applyView·deleteView: 저장은 커맨드(dirty)이고 불러오기는 뷰 상태만 바꾼다', async () => {
+  const { store, client, notices } = await setup();
+  const { tableId, name, age } = await viewFixture(store);
+  store.setSort(tableId, [{ colId: age, dir: 'desc' }]);
+  store.setSearch(tableId, '홍');
+  store.setColumnWidth(tableId, name, 240);
+  store.setFrozenColumns(tableId, 1);
+  const viewId = await store.saveView(tableId, ' 기본 ');
+  assert.ok(viewId);
+  assert.equal(store.getState().dirty, true);
+  assert.equal(store.getViewState(tableId).viewId, viewId);
+  assert.ok(notices.some((n) => n.value === 'view.saved'));
+  const listed = await store.listViews(tableId);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.name, '기본');
+  assert.deepEqual(listed[0]?.spec.widths, { [name]: 240 });
+  assert.equal(listed[0]?.spec.frozen, 1);
+
+  // 같은 이름으로 다시 저장하면 덮어쓴다(뷰 수는 그대로).
+  store.setSearch(tableId, '김');
+  assert.equal(await store.saveView(tableId, '기본'), viewId);
+  assert.equal((await store.listViews(tableId)).length, 1);
+  assert.equal((await store.listViews(tableId))[0]?.spec.search, '김');
+
+  // 상태를 바꾼 뒤 불러오면 저장된 대로 돌아온다. dirty에는 영향이 없다(저장 뒤 깨끗한 상태에서 확인).
+  await store.save();
+  assert.equal(store.getState().dirty, false);
+  store.clearFilters(tableId);
+  store.setSort(tableId, []);
+  store.setColumnWidth(tableId, name, 100);
+  const saved = (await store.listViews(tableId))[0];
+  assert.ok(saved);
+  store.applyView(tableId, saved);
+  const view = store.getViewState(tableId);
+  assert.deepEqual(view.sort, [{ colId: age, dir: 'desc' }]);
+  assert.equal(view.search, '김');
+  assert.equal(view.widths[name], 240);
+  assert.equal(view.frozenColumns, 1);
+  assert.equal(view.viewId, viewId);
+  assert.equal(store.getState().dirty, false, '불러오기는 DB를 바꾸지 않는다');
+
+  // 저장된 뷰가 지워진 열을 가리키면 그 항목을 빼고 안내한다.
+  await store.runSchemaOp('schema.softDeleteColumn', { tableId, columnId: age });
+  notices.length = 0;
+  store.applyView(tableId, saved);
+  assert.deepEqual(store.getViewState(tableId).sort, []);
+  assert.ok(notices.some((n) => n.value === 'view.pruned'));
+
+  assert.equal(await store.deleteView(tableId, viewId), true);
+  assert.equal(store.getViewState(tableId).viewId, null);
+  assert.deepEqual(await store.listViews(tableId), []);
+  assert.equal(store.getState().dirty, true);
+  client.close();
+});
+
+test('enableSearch·disableSearch: 진행률·취소를 거쳐 커맨드로 반영되고 테이블 목록의 ftsEnabled가 바뀐다', async () => {
+  const { store, client } = await setup();
+  const { tableId } = await viewFixture(store);
+  /** @type {string[]} */
+  const phases = [];
+  assert.equal(
+    await store.enableSearch(tableId, { onProgress: (p) => phases.push(p.phase) }),
+    true,
+  );
+  assert.ok(phases.includes('index'));
+  assert.equal(store.getState().tables[0]?.ftsEnabled, true);
+  // 이미 켜져 있으면 실패를 알리고 false.
+  assert.equal(await store.enableSearch(tableId), false);
+  assert.equal(await store.disableSearch(tableId), true);
+  assert.equal(store.getState().tables[0]?.ftsEnabled, false);
+  // 취소: 시작 전에 abort된 신호는 E_IMPORT_CANCELLED로 거절되고 플래그는 그대로다.
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(await store.enableSearch(tableId, { signal: controller.signal }), false);
+  assert.equal(store.getState().tables[0]?.ftsEnabled, false);
+  client.close();
+});

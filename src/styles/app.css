@@ -466,3 +466,79 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
+
+/* 표 도구 줄(Step 6) */
+.jdr-toolbar__tools {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 4px;
+  border-top: 1px dashed var(--jdr-border);
+}
+
+.jdr-toolbar__tools[hidden] {
+  display: none;
+}
+
+.jdr-toolbar__search {
+  min-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.jdr-toolbar__search:focus-visible,
+.jdr-toolbar__view-select:focus-visible {
+  outline: 2px solid var(--jdr-accent);
+  outline-offset: 1px;
+}
+
+.jdr-toolbar__view {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--jdr-fg-muted);
+}
+
+.jdr-toolbar__view-select {
+  max-width: 200px;
+  font: inherit;
+}
+
+/* 정렬·필터 대화상자의 조건 행 */
+.jdr-dialog__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.jdr-dialog__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.jdr-dialog__input--inline {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.jdr-dialog__input--inline[hidden] {
+  display: none;
+}
+
+.jdr-dialog__button--small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.jdr-sidebar__column--hidden .jdr-sidebar__column-name {
+  color: var(--jdr-fg-muted);
+  font-style: italic;
+}

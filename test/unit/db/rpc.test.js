@@ -232,8 +232,12 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
     'db.close',
     'db.snapshot',
     'import.run',
+    'search.disable',
     'search.enable',
+    'views.delete',
+    'views.save',
   ]);
+  assert.equal(isExclusiveOp('views.list'), false);
   assert.equal(isExclusiveOp('schema.create'), true);
   assert.equal(isExclusiveOp('schema.list'), false);
   assert.equal(isExclusiveOp('query.window'), false);
@@ -577,7 +581,9 @@ test('query.window / query.count / query.row: 창 질의 op (Step 4)', async () 
   assert.deepEqual(window.rows[0]?.lengths, [null, 300]);
   assert.ok(typeof window.elapsedMs === 'number' && window.elapsedMs >= 0);
 
-  assert.deepEqual(await client.call('query.count', { tableId, viewSpec: {} }), { count: 2 });
+  const counted = await client.call('query.count', { tableId, viewSpec: {} });
+  assert.equal(counted.count, 2);
+  assert.ok(typeof counted.elapsedMs === 'number' && counted.elapsedMs >= 0);
 
   const full = await client.call('query.row', { tableId, rowId: 1, colIds: [body] });
   assert.deepEqual(full, {
@@ -628,4 +634,111 @@ test('query.*는 읽기라 배타 op가 아니고, 쓰기 op 도중에도 허용
   assert.equal(isExclusiveOp('query.row'), false);
   assert.equal(isExclusiveOp('query.rows'), false);
   assert.equal(isExclusiveOp('query.stats'), false);
+});
+
+test('search.enable/disable·views.list/save/delete op (Step 6): 커맨드를 돌려주고 뷰 조건이 창 질의에 붙는다', async () => {
+  const { client } = await readyClient();
+  const { tableId } = await client.call('schema.create', { name: '고객' });
+  const name = (await client.call('schema.addColumn', { tableId, name: '이름', type: 'text' }))
+    .columnId;
+  const age = (await client.call('schema.addColumn', { tableId, name: '나이', type: 'integer' }))
+    .columnId;
+  await client.call('command.apply', {
+    cmd: {
+      type: 'test.insert',
+      tableId,
+      do: [
+        {
+          sql: `INSERT INTO "${tableId}" ("${name}", "${age}") VALUES (?, ?)`,
+          params: ['서울특별시', 1],
+        },
+        {
+          sql: `INSERT INTO "${tableId}" ("${name}", "${age}") VALUES (?, ?)`,
+          params: ['부산광역시', 2],
+        },
+        {
+          sql: `INSERT INTO "${tableId}" ("${name}", "${age}") VALUES (?, ?)`,
+          params: ['대전광역시', 3],
+        },
+      ],
+      undo: [],
+      summary: 'insert',
+    },
+  });
+
+  // 정렬·필터·검색이 창 질의·행 수·행 읽기에 같은 순서로 붙는다.
+  const viewSpec = {
+    sort: [{ colId: age, dir: /** @type {const} */ ('desc') }],
+    filter: {
+      logic: /** @type {const} */ ('and'),
+      conditions: [{ colId: age, op: /** @type {const} */ ('>'), value: '1' }],
+    },
+    search: '광역시',
+  };
+  const window = await client.call('query.window', {
+    tableId,
+    viewSpec,
+    offset: 0,
+    limit: 10,
+    seq: 1,
+  });
+  assert.deepEqual(
+    window.rows.map((r) => r.cells[0]),
+    ['대전광역시', '부산광역시'],
+  );
+  assert.equal((await client.call('query.count', { tableId, viewSpec })).count, 2);
+  const rows = await client.call('query.rows', {
+    tableId,
+    viewSpec,
+    offset: 1,
+    limit: 1,
+    colIds: [name],
+  });
+  assert.deepEqual(
+    rows.rows.map((r) => r.cells[name]),
+    ['부산광역시'],
+  );
+  // 행 수 캐시는 뷰 조건마다 따로다.
+  assert.equal((await client.call('query.count', { tableId, viewSpec: {} })).count, 3);
+  await assert.rejects(
+    client.call('query.count', {
+      tableId,
+      viewSpec: { filter: { logic: 'and', conditions: [{ colId: age, op: '>', value: 'x' }] } },
+    }),
+    (err) => err instanceof AppError && err.code === 'E_VALUE_INVALID',
+  );
+
+  /** @type {import('../../../src/db/worker.js').RpcProgress[]} */
+  const progress = [];
+  const enabled = await client.call(
+    'search.enable',
+    { tableId },
+    { onProgress: (p) => progress.push(p) },
+  );
+  assert.equal(enabled.cmd.type, 'search.enable');
+  assert.ok(progress.some((p) => p.phase === 'index'));
+  assert.equal((await client.call('schema.list')).tables[0]?.ftsEnabled, true);
+  assert.equal(
+    (await client.call('query.count', { tableId, viewSpec: { search: '광역시' } })).count,
+    2,
+  );
+  const disabled = await client.call('search.disable', { tableId });
+  assert.equal(disabled.cmd.type, 'search.disable');
+  assert.equal((await client.call('schema.list')).tables[0]?.ftsEnabled, false);
+
+  const saved = await client.call('views.save', {
+    tableId,
+    name: '큰 나이',
+    spec: { ...viewSpec, hidden: [], widths: { [name]: 200 }, frozen: 1 },
+  });
+  assert.equal(saved.cmd.type, 'view.create');
+  const listed = await client.call('views.list', { tableId });
+  assert.equal(listed.views.length, 1);
+  assert.equal(listed.views[0]?.id, saved.viewId);
+  assert.deepEqual(listed.views[0]?.spec.sort, viewSpec.sort);
+  assert.equal(listed.views[0]?.spec.widths[name], 200);
+  const removed = await client.call('views.delete', { viewId: saved.viewId });
+  assert.equal(removed.cmd.type, 'view.delete');
+  assert.deepEqual((await client.call('views.list', { tableId })).views, []);
+  client.close();
 });

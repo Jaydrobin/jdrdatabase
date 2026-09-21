@@ -27,7 +27,12 @@ export function dumpDb(engine) {
       info: engine.exec(`SELECT name, type FROM pragma_table_info(?) ORDER BY cid LIMIT 2000`, [
         t.name,
       ]).rows,
-      rows: engine.exec(`SELECT * FROM ${ident} ORDER BY rowid LIMIT 10000`).rows,
+      // WITHOUT ROWID 테이블(FTS5 그림자 테이블 등)은 기본 키 순서로 읽힌다.
+      rows: engine.exec(
+        /WITHOUT ROWID/i.test(t.sql)
+          ? `SELECT * FROM ${ident} LIMIT 10000`
+          : `SELECT * FROM ${ident} ORDER BY rowid LIMIT 10000`,
+      ).rows,
     };
   }
   return out;

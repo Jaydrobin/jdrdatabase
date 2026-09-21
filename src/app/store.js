@@ -6,6 +6,7 @@
  * 엔진에는 `db/client.js`로만 접근한다(CLAUDE.md 4장).
  */
 import { judge } from './revision.js';
+import { normalizeViewSpec, pruneViewSpec, toggleSort } from '../db/query.js';
 import { AppError, toAppError } from '../util/errors.js';
 
 /** @typedef {import('../db/client.js').Client} Client */
@@ -23,6 +24,12 @@ import { AppError, toAppError } from '../util/errors.js';
 /** @typedef {import('../io/filesystem.js').SaveTarget} SaveTarget */
 /** @typedef {import('../i18n/index.js').MessageKey} MessageKey */
 /** @typedef {import('../i18n/index.js').MessageParams} MessageParams */
+/** @typedef {import('../db/query.js').ViewSpec} ViewSpec */
+/** @typedef {import('../db/query.js').NormalizedViewSpec} NormalizedViewSpec */
+/** @typedef {import('../db/query.js').SortSpec} SortSpec */
+/** @typedef {import('../db/query.js').FilterSpec} FilterSpec */
+/** @typedef {import('../db/views.js').View} View */
+/** @typedef {import('../db/views.js').SavedViewSpec} SavedViewSpec */
 
 /** 저장 직전 백업을 IDB에 남기는 파일 크기 상한(D-04). */
 export const BACKUP_MAX_BYTES = 200 * 1024 * 1024;
@@ -69,10 +76,15 @@ export const MIN_COLUMN_WIDTH = 40;
 /** @typedef {'none' | 'newerSchema' | 'otherTab'} ReadOnlyReason */
 
 /**
- * 테이블별 뷰 상태(Step 4). 메모리에만 있고, 파일에 남기는 것은 Step 6의 뷰 저장이 맡는다.
+ * 테이블별 뷰 상태(Step 4·6). 메모리에만 있고, 파일에 남기는 것은 `saveView`(`_jdr_views`)다.
  * @typedef {object} TableViewState
  * @property {Record<string, number>} widths 열 id → 너비(px). 없는 열은 `_jdr_columns.width`
  * @property {number} frozenColumns 왼쪽에 고정하는 열 수
+ * @property {string[]} hidden 숨긴 열 id
+ * @property {SortSpec[]} sort
+ * @property {FilterSpec | null} filter
+ * @property {string} search 전문 검색어
+ * @property {string | null} viewId 마지막으로 불러오거나 저장한 뷰. 없으면 null
  */
 
 /**
@@ -96,8 +108,8 @@ export const MIN_COLUMN_WIDTH = 40;
  */
 
 /**
- * 스키마 op 이름(`schema.*` 중 쓰기). 결과는 적용된 커맨드를 담는다.
- * @typedef {'schema.create' | 'schema.rename' | 'schema.drop' | 'schema.addColumn' | 'schema.renameColumn' | 'schema.reorderColumns' | 'schema.softDeleteColumn' | 'schema.restoreColumn' | 'schema.changeColumnType'} SchemaOp
+ * Worker가 커맨드를 만들어 적용하고 `{ cmd }`를 돌려주는 op(`schema.*` 중 쓰기, 검색 인덱스, 뷰 저장·삭제).
+ * @typedef {'schema.create' | 'schema.rename' | 'schema.drop' | 'schema.addColumn' | 'schema.renameColumn' | 'schema.reorderColumns' | 'schema.softDeleteColumn' | 'schema.restoreColumn' | 'schema.changeColumnType' | 'search.enable' | 'search.disable' | 'views.save' | 'views.delete'} SchemaOp
  */
 
 /**
@@ -136,6 +148,19 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(tableId: string) => TableViewState} getViewState 테이블의 뷰 상태(복사본)
  * @property {(tableId: string, columnId: string, width: number) => void} setColumnWidth
  * @property {(tableId: string, count: number) => void} setFrozenColumns
+ * @property {(tableId: string) => NormalizedViewSpec} viewSpecOf 그리드·Worker에 넘기는 뷰 사양(숨김·정렬·필터·검색)
+ * @property {(tableId: string, sort: SortSpec[]) => void} setSort
+ * @property {(tableId: string, columnId: string, append?: boolean) => void} toggleSort 머리글 클릭(없음 → 오름 → 내림 → 없음). `append`면 보조 정렬
+ * @property {(tableId: string, filter: FilterSpec | null) => void} setFilter
+ * @property {(tableId: string, search: string) => void} setSearch
+ * @property {(tableId: string, columnId: string) => void} toggleHidden
+ * @property {(tableId: string) => void} clearFilters 필터와 검색을 함께 지운다
+ * @property {(tableId: string, view: View) => void} applyView 저장된 뷰를 뷰 상태에 적용한다(살아 있지 않은 열의 항목은 빼고 안내)
+ * @property {(tableId: string) => Promise<View[]>} listViews
+ * @property {(tableId: string, name: string) => Promise<string | null>} saveView 지금 뷰 상태를 그 이름으로 저장(같은 이름이 있으면 덮어쓴다). 저장한 뷰 id
+ * @property {(tableId: string, viewId: string) => Promise<boolean>} deleteView
+ * @property {(tableId: string, options?: CallOptions) => Promise<boolean>} enableSearch 검색 인덱스 만들기(진행률·취소는 options)
+ * @property {(tableId: string) => Promise<boolean>} disableSearch
  */
 
 /**
@@ -180,10 +205,36 @@ export function createStore(deps) {
   function viewOf(tableId) {
     let view = views.get(tableId);
     if (!view) {
-      view = { widths: {}, frozenColumns: 0 };
+      view = {
+        widths: {},
+        frozenColumns: 0,
+        hidden: [],
+        sort: [],
+        filter: null,
+        search: '',
+        viewId: null,
+      };
       views.set(tableId, view);
     }
     return view;
+  }
+
+  /**
+   * 살아 있지 않은 열을 가리키는 정렬·필터·숨김 항목을 뷰 상태에서 뺀다. 뺀 것이 있으면 안내한다.
+   * @param {string} tableId
+   * @param {TableInfo} table
+   * @returns {boolean} 바뀌었는가
+   */
+  function pruneView(tableId, table) {
+    const view = views.get(tableId);
+    if (!view) return false;
+    const pruned = pruneViewSpec(view, table);
+    if (!pruned.changed) return false;
+    view.sort = pruned.spec.sort;
+    view.filter = pruned.spec.filter;
+    view.hidden = pruned.spec.hidden;
+    notify.info('view.pruned', { name: table.name });
+    return true;
   }
 
   /** @param {StoreEvent} event */
@@ -238,6 +289,9 @@ export function createStore(deps) {
     if (!tables.some((t) => t.id === state.currentTableId)) {
       state.currentTableId = tables[0]?.id ?? null;
     }
+    // 열이 소프트 삭제되면 그 열의 정렬·필터·숨김 항목은 뷰에서 빠진다(Step 6 예외 처리). 뒤따르는
+    // `tables:changed`에서 그리드 호스트가 새 사양으로 다시 마운트한다.
+    for (const table of tables) pruneView(table.id, table);
   }
 
   /**
@@ -714,7 +768,134 @@ export function createStore(deps) {
 
     getViewState(tableId) {
       const view = viewOf(tableId);
-      return { widths: { ...view.widths }, frozenColumns: view.frozenColumns };
+      return {
+        widths: { ...view.widths },
+        frozenColumns: view.frozenColumns,
+        hidden: [...view.hidden],
+        sort: view.sort.map((s) => ({ ...s })),
+        filter: view.filter
+          ? { logic: view.filter.logic, conditions: view.filter.conditions.map((c) => ({ ...c })) }
+          : null,
+        search: view.search,
+        viewId: view.viewId,
+      };
+    },
+
+    viewSpecOf(tableId) {
+      return normalizeViewSpec(viewOf(tableId));
+    },
+
+    setSort(tableId, sort) {
+      const view = viewOf(tableId);
+      view.sort = normalizeViewSpec({ sort }).sort;
+      emit('view:changed');
+    },
+
+    toggleSort(tableId, columnId, append = false) {
+      const view = viewOf(tableId);
+      view.sort = toggleSort(view.sort, columnId, append);
+      emit('view:changed');
+    },
+
+    setFilter(tableId, filter) {
+      const view = viewOf(tableId);
+      view.filter = normalizeViewSpec({ filter }).filter;
+      emit('view:changed');
+    },
+
+    setSearch(tableId, search) {
+      const view = viewOf(tableId);
+      const next = typeof search === 'string' ? search.trim() : '';
+      if (view.search === next) return;
+      view.search = next;
+      emit('view:changed');
+    },
+
+    toggleHidden(tableId, columnId) {
+      const view = viewOf(tableId);
+      view.hidden = view.hidden.includes(columnId)
+        ? view.hidden.filter((id) => id !== columnId)
+        : [...view.hidden, columnId];
+      emit('view:changed');
+    },
+
+    clearFilters(tableId) {
+      const view = viewOf(tableId);
+      if (view.filter === null && view.search === '') return;
+      view.filter = null;
+      view.search = '';
+      emit('view:changed');
+    },
+
+    applyView(tableId, saved) {
+      const view = viewOf(tableId);
+      const spec = saved.spec;
+      view.widths = { ...spec.widths };
+      view.frozenColumns = Math.max(0, Math.trunc(spec.frozen));
+      view.hidden = [...spec.hidden];
+      view.sort = spec.sort.map((s) => ({ ...s }));
+      view.filter = spec.filter
+        ? { logic: spec.filter.logic, conditions: spec.filter.conditions.map((c) => ({ ...c })) }
+        : null;
+      view.search = spec.search;
+      view.viewId = saved.id;
+      const table = state.tables.find((t) => t.id === tableId);
+      if (table) pruneView(tableId, table);
+      emit('view:changed');
+    },
+
+    async listViews(tableId) {
+      try {
+        const { views: listed } = await client.call('views.list', { tableId });
+        return listed;
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return [];
+      }
+    },
+
+    async saveView(tableId, name) {
+      const view = viewOf(tableId);
+      const existing = (await store.listViews(tableId)).find((v) => v.name === name.trim());
+      /** @type {SavedViewSpec} */
+      const spec = {
+        sort: view.sort,
+        filter: view.filter,
+        hidden: view.hidden,
+        search: view.search,
+        widths: view.widths,
+        frozen: view.frozenColumns,
+      };
+      const result = await store.runSchemaOp('views.save', {
+        tableId,
+        name,
+        spec,
+        ...(existing ? { viewId: existing.id } : {}),
+      });
+      if (!result) return null;
+      viewOf(tableId).viewId = result.viewId;
+      emit('view:changed');
+      notify.info('view.saved', { name: name.trim() });
+      return result.viewId;
+    },
+
+    async deleteView(tableId, viewId) {
+      const result = await store.runSchemaOp('views.delete', { viewId });
+      if (!result) return false;
+      const view = viewOf(tableId);
+      if (view.viewId === viewId) {
+        view.viewId = null;
+        emit('view:changed');
+      }
+      return true;
+    },
+
+    async enableSearch(tableId, options) {
+      return (await store.runSchemaOp('search.enable', { tableId }, options)) !== null;
+    },
+
+    async disableSearch(tableId) {
+      return (await store.runSchemaOp('search.disable', { tableId })) !== null;
     },
 
     setColumnWidth(tableId, columnId, width) {

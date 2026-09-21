@@ -12,6 +12,8 @@
  *   지우기·삭제는 문장 하나(`clearRowRange`·`deleteRowRange`)이고, 붙여넣기만 덮어쓸 행의 id가
  *   필요해 그 행들을 읽는다(붙여넣는 셀 수가 100만으로 묶여 있어 범위가 한정된다).
  * - 복사는 `navigator.clipboard.writeText`, 붙여넣기는 그리드가 받는 `paste` 이벤트다.
+ * - 뷰(Step 6): 행 읽기(`query.rows`)와 되돌릴 수 없는 범위 커맨드에 그리드의 뷰 사양을 그대로 넘겨,
+ *   정렬·필터·검색이 있어도 그리드의 행 순번이 가리키는 행을 다룬다.
  */
 import {
   bulkEdit,
@@ -24,6 +26,7 @@ import {
   UNDO_SNAPSHOT_MAX_ROWS,
 } from '../../app/commands.js';
 import { MAX_RESULT_ROWS } from '../../db/engine.js';
+import { buildViewClauses, normalizeViewSpec } from '../../db/query.js';
 import { nowIso } from '../../db/schema.js';
 import { toAppError } from '../../util/errors.js';
 import { formatInteger } from '../../util/format.js';
@@ -223,8 +226,14 @@ export function createEditingController(deps) {
     );
   }
 
+  /** 필터나 검색이 있어 새 행이 보이지 않을 수 있는가(Step 6 예외 처리). */
+  function filteredView() {
+    const spec = normalizeViewSpec(grid.viewSpec());
+    return spec.filter !== null || spec.search !== '';
+  }
+
   /**
-   * 뷰 순서로 범위의 전문 행을 읽는다(1만 행 단위로 나눠서).
+   * 뷰 순서로 범위의 전문 행을 읽는다(1만 행 단위로 나눠서). 그리드와 같은 뷰 사양을 넘긴다.
    * @param {string} tableId
    * @param {number} offset
    * @param {number} count
@@ -234,10 +243,11 @@ export function createEditingController(deps) {
   async function readRows(tableId, offset, count, colIds) {
     /** @type {FullRow[]} */
     const out = [];
+    const viewSpec = grid.viewSpec();
     for (let done = 0; done < count; done += MAX_RESULT_ROWS) {
       const { rows } = await client.call('query.rows', {
         tableId,
-        viewSpec: {},
+        viewSpec,
         offset: offset + done,
         limit: Math.min(MAX_RESULT_ROWS, count - done),
         colIds,
@@ -266,6 +276,7 @@ export function createEditingController(deps) {
           offset: range.r0,
           count,
           now: nowIso(),
+          clauses: buildViewClauses(table, grid.viewSpec()),
         }),
       );
       return;
@@ -422,6 +433,7 @@ export function createEditingController(deps) {
       toasts.error(toAppError(err));
       return;
     }
+    if (plan.newRows > 0 && filteredView()) toasts.info('edit.rowHiddenByFilter');
     if (plan.droppedColumns > 0) {
       toasts.info('paste.columnsDropped', { count: formatInteger(plan.droppedColumns) });
     }
@@ -451,6 +463,13 @@ export function createEditingController(deps) {
       insertRows({ tableId: table.id, count: 1, firstId, now: nowIso() }),
     );
     if (!result) return;
+    if (filteredView()) {
+      // 빈 새 행은 필터·검색에 걸려 보이지 않을 수 있다. 행 수는 다시 세어 온다.
+      toasts.info('edit.rowHiddenByFilter');
+      grid.focus();
+      return;
+    }
+    // 정렬만 있으면 빈 값은 `NULLS LAST`라 새 행이 끝에 붙는다.
     grid.setRowCount(before + 1);
     grid.moveCursor(before, grid.selection().getActive().col);
     grid.focus();
@@ -464,7 +483,14 @@ export function createEditingController(deps) {
     if (grid.rowCount() === 0) return;
     if (count > UNDO_SNAPSHOT_MAX_ROWS) {
       if (!(await deps.confirmIrreversible({ count }))) return;
-      await history.apply(deleteRowRange({ tableId: table.id, offset: range.r0, count }));
+      await history.apply(
+        deleteRowRange({
+          tableId: table.id,
+          offset: range.r0,
+          count,
+          clauses: buildViewClauses(table, grid.viewSpec()),
+        }),
+      );
     } else {
       /** @type {FullRow[]} */
       let rows;

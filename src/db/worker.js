@@ -10,7 +10,9 @@ import { AppError, serializeError } from '../util/errors.js';
 import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
 import * as query from './query.js';
+import * as search from './search.js';
 import * as tables from './tables.js';
+import * as views from './views.js';
 import {
   adoptExternal,
   bumpRevision,
@@ -39,6 +41,8 @@ import {
 /** @typedef {import('./query.js').WindowRow} WindowRow */
 /** @typedef {import('./query.js').FullRow} FullRow */
 /** @typedef {import('./query.js').RowStats} RowStats */
+/** @typedef {import('./views.js').View} View */
+/** @typedef {import('./views.js').SavedViewSpec} SavedViewSpec */
 
 /**
  * `db.open`·`schema.adopt`의 결과.
@@ -80,10 +84,15 @@ import {
  *   'schema.changeColumnType': { args: { tableId: string, columnId: string, type: LogicalType, policy?: CoercePolicy, options?: ColumnOptions | null }, result: { columnId: string, cmd: Command, result: ApplyResult } },
  *   'command.apply': { args: { cmd: Command, direction?: Direction }, result: ApplyResult },
  *   'query.window': { args: { tableId: string, viewSpec: ViewSpec, offset: number, limit: number, seq: number }, result: { rows: WindowRow[], columnIds: string[], seq: number, elapsedMs: number } },
- *   'query.count': { args: { tableId: string, viewSpec: ViewSpec }, result: { count: number } },
+ *   'query.count': { args: { tableId: string, viewSpec: ViewSpec }, result: { count: number, elapsedMs: number } },
  *   'query.row': { args: { tableId: string, rowId: number, colIds?: string[] }, result: { row: FullRow | null } },
  *   'query.rows': { args: { tableId: string, viewSpec: ViewSpec, offset: number, limit: number, colIds?: string[] }, result: { rows: FullRow[] } },
  *   'query.stats': { args: { tableId: string }, result: RowStats },
+ *   'search.enable': { args: { tableId: string }, result: { cmd: Command } },
+ *   'search.disable': { args: { tableId: string }, result: { cmd: Command } },
+ *   'views.list': { args: { tableId: string }, result: { views: View[] } },
+ *   'views.save': { args: { tableId: string, name: string, spec: SavedViewSpec, viewId?: string }, result: { viewId: string, cmd: Command } },
+ *   'views.delete': { args: { viewId: string }, result: { cmd: Command } },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -123,6 +132,9 @@ export const EXCLUSIVE_OPS = new Set([
   'command.apply',
   'import.run',
   'search.enable',
+  'search.disable',
+  'views.save',
+  'views.delete',
   'db.snapshot',
   'db.close',
 ]);
@@ -189,22 +201,32 @@ export function createDispatcher(options) {
    * 동안의 창 질의가 행 수를 다시 세지 않고(30만 행에서 35 ms) id 연속 여부를 판정할 수 있게 한다.
    */
   let writeSerial = 0;
-  /** @type {Map<string, { serial: number, count: number }>} */
+  /**
+   * 테이블 id와 뷰 조건(필터·검색. 정렬은 행 수를 바꾸지 않는다)을 키로 한다. `elapsedMs`는 처음 센
+   * 시간이며 캐시에서 돌려줄 때도 그대로 보고한다(8장 측정은 첫 계산을 본다).
+   * @type {Map<string, { serial: number, count: number, elapsedMs: number }>}
+   */
   const countCache = new Map();
 
   /**
-   * 테이블의 행 수. 마지막 쓰기 뒤에 센 값이 있으면 그것을 쓴다.
+   * 테이블의 행 수(뷰 조건 포함). 마지막 쓰기 뒤에 같은 조건으로 센 값이 있으면 그것을 쓴다.
    * @param {Engine} active
    * @param {TableInfo} table
    * @param {ViewSpec} viewSpec
-   * @returns {number}
+   * @returns {{ count: number, elapsedMs: number }}
    */
   function countRows(active, table, viewSpec) {
-    const cached = countCache.get(table.id);
-    if (cached && cached.serial === writeSerial) return cached.count;
+    const spec = query.normalizeViewSpec(viewSpec);
+    const key = `${table.id}\u0000${JSON.stringify([spec.filter, spec.search])}`;
+    const cached = countCache.get(key);
+    if (cached && cached.serial === writeSerial) {
+      return { count: cached.count, elapsedMs: cached.elapsedMs };
+    }
+    const started = performance.now();
     const count = query.count(active, table, viewSpec);
-    countCache.set(table.id, { serial: writeSerial, count });
-    return count;
+    const elapsedMs = performance.now() - started;
+    countCache.set(key, { serial: writeSerial, count, elapsedMs });
+    return { count, elapsedMs };
   }
 
   /** @returns {Engine} */
@@ -347,7 +369,7 @@ export function createDispatcher(options) {
         table,
         viewSpec,
         { offset: args.offset, limit: args.limit },
-        { count: countRows(active, table, viewSpec) },
+        { count: countRows(active, table, viewSpec).count },
       );
       return { ...result, seq };
     },
@@ -355,7 +377,7 @@ export function createDispatcher(options) {
     'query.count': async (args) => {
       const active = requireEngine();
       const table = tables.requireTable(active, args.tableId);
-      return { count: countRows(active, table, args.viewSpec ?? {}) };
+      return countRows(active, table, args.viewSpec ?? {});
     },
 
     'query.row': async (args) => {
@@ -388,6 +410,22 @@ export function createDispatcher(options) {
       return query.stats(active, tables.requireTable(active, args.tableId));
     },
 
+    'search.enable': async (args, ctx) =>
+      search.enable(requireEngine(), args.tableId, { signal: ctx.signal, progress: ctx.progress }),
+
+    'search.disable': async (args) => search.disable(requireEngine(), args.tableId),
+
+    'views.list': async (args) => ({ views: views.list(requireEngine(), args.tableId) }),
+
+    'views.save': async (args) =>
+      views.save(requireEngine(), args.tableId, {
+        name: args.name,
+        spec: args.spec,
+        viewId: args.viewId,
+      }),
+
+    'views.delete': async (args) => views.remove(requireEngine(), args.viewId),
+
     'db.close': async () => {
       await requireEngine().close();
       return null;
@@ -411,6 +449,7 @@ export function createDispatcher(options) {
     'query.row',
     'query.rows',
     'query.stats',
+    'views.list',
     'db.snapshot',
   ]);
 

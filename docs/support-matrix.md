@@ -22,6 +22,8 @@
 | 300 MB DB(30만 행)를 `<input type="file">`로 열기 | ✓ (세션 C, `test:perf`: 읽기 → transfer → deserialize → integrity_check까지 약 2~3초) | 미확인 | 미확인 | 미확인 |
 | 클립보드: `navigator.clipboard.writeText`(복사), 포커스된 비편집 요소(`role="grid"` div)에 오는 `paste` 이벤트(Ctrl+V), `window.isSecureContext` | ✓ (세션 D, E2E `edit.spec.js`. `file://`도 secure context이며 Playwright가 `clipboard-read`·`clipboard-write` 권한을 준 컨텍스트에서 실제 Ctrl+C·Ctrl+V로 확인). 권한 프롬프트가 있는 실제 브라우저에서의 동작은 미확인 | 미확인 | 미확인 | 미확인 |
 | 한글 IME 조합 중 Enter 무시(`isComposing`) | 시뮬레이션만 ✓ (세션 D, 합성 `compositionstart/end` + `isComposing: true` keydown). 실제 IME는 헤드리스에서 미확인 | 미확인 | 미확인 | 미확인 |
+| FTS5 external-content 테이블 + `AFTER UPDATE OF` 트리거 + `{ index }` 청크 인덱싱을 Blob Worker 안에서 커맨드(트랜잭션) 하나로 만들고 되돌리기 | ✓ (세션 E, E2E `view.spec.js`: 인덱스 생성 → 셀 편집이 인덱스를 따라감 → Ctrl+Z로 인덱스 삭제 → Ctrl+Y로 재생성) | 미확인 | 미확인 | 미확인 |
+| `<input type="search">`의 `input`·`compositionend`로 검색어 디바운스(조합 중 `InputEvent.isComposing` 무시) | 디바운스만 ✓ (세션 E, `fill` 뒤 300 ms 안에 반영). 실제 IME 조합 중의 동작은 미확인 | 미확인 | 미확인 | 미확인 |
 
 ## 데스크톱 모드 (타우리 WebView)
 

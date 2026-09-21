@@ -18,7 +18,7 @@ import {
 } from '../../../src/app/commands.js';
 import { applyCommand, isCommand } from '../../../src/db/command.js';
 import { MAX_BATCH_PARAMS } from '../../../src/db/engine.js';
-import { fetchRows, stats } from '../../../src/db/query.js';
+import { buildViewClauses, fetchRows, stats } from '../../../src/db/query.js';
 import { migrate } from '../../../src/db/schema.js';
 import * as tables from '../../../src/db/tables.js';
 import { AppError } from '../../../src/util/errors.js';
@@ -318,4 +318,48 @@ test('chunkParams: 건수 상한과 직렬화 예산으로 나눈다', () => {
     now: NOW,
   });
   assert.equal(cmd.do.length, 2, '배치 문장이 상한 단위로 나뉜다');
+});
+
+test('deleteRowRange·clearRowRange: 뷰 조각(clauses)이 있으면 부분 질의에 필터·정렬이 붙고 값은 바인딩', async () => {
+  const { engine, table, tableId, name, age } = await setup();
+  const clauses = buildViewClauses(table, {
+    sort: [{ colId: age, dir: 'desc' }],
+    filter: { logic: 'and', conditions: [{ colId: name, op: 'contains', value: "O'" }] },
+  });
+  const del = deleteRowRange({ tableId, offset: 0, count: 1, clauses });
+  const stmt = /** @type {{ sql: string, params: unknown[] }} */ (del.do[0]);
+  assert.match(
+    stmt.sql,
+    /WHERE "id" IN \(SELECT "id" FROM "t_[0-9a-f]{8}" WHERE \(.*LIKE \? ESCAPE '\\'\) ORDER BY "[^"]+" DESC NULLS LAST, "id" LIMIT \? OFFSET \?\)/,
+  );
+  assert.ok(!stmt.sql.includes("O'"));
+  assert.deepEqual(stmt.params, ["%O'%", 1, 0]);
+  await applyCommand(engine, del);
+  assert.deepEqual(
+    fetchRows(engine, table, {}, { offset: 0, limit: 10 }).map((r) => r.id),
+    [1, 3],
+    "O'Brien 행만 지운다",
+  );
+
+  const clear = clearRowRange({
+    tableId,
+    colIds: [name],
+    offset: 0,
+    count: 1,
+    now: LATER,
+    clauses: buildViewClauses(table, { sort: [{ colId: age, dir: 'desc' }] }),
+  });
+  const cstmt = /** @type {{ sql: string, params: unknown[] }} */ (clear.do[0]);
+  assert.deepEqual(cstmt.params, [LATER, 1, 0]);
+  await applyCommand(engine, clear);
+  // 나이 내림차순의 첫 행(id 3, 나이 30)의 이름만 비운다.
+  const rows = fetchRows(engine, table, {}, { offset: 0, limit: 10 }, [name]);
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.cells[name]]),
+    [
+      [1, '하나'],
+      [3, null],
+    ],
+  );
+  await engine.close();
 });

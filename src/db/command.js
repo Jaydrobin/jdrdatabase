@@ -3,9 +3,10 @@
  * 커맨드 실행기(D-08). `do` 또는 `undo` 문장 목록을 하나의 트랜잭션으로 실행한다.
  *
  * 문장은 `{ sql, params }`이며, Step 5의 붙여넣기·다중 편집·행 삭제가 쓰는 `{ batch }` 단계는
- * `engine.runBatch()`로, Step 3의 열 타입 변경이 더하는 `{ convert }` 단계는 이 파일의 `runConvert`가
- * 처리한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록되고 Worker 경계를 넘는다).
+ * `engine.runBatch()`로, Step 3의 열 타입 변경이 더하는 `{ convert }` 단계는 이 파일의 `runConvert`가,
+ * Step 6의 검색 인덱스 생성이 더하는 `{ index }` 단계는 `runIndex`가 처리한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록되고 Worker 경계를 넘는다).
  */
+import { estimateCloneBytes, MB } from '../util/bytes.js';
 import { AppError } from '../util/errors.js';
 import { quoteIdent } from './schema.js';
 import { coerce, isLogicalType } from './values.js';
@@ -35,10 +36,22 @@ import { coerce, isLogicalType } from './values.js';
  * 커맨드 생성기(`app/commands.js`)가 그 단위로 나눈다.
  * @typedef {{ batch: { sql: string, paramsList: SqlParams[] } }} BatchStatement
  */
-/** @typedef {SqlStatement | ConvertStatement | BatchStatement} Statement */
+/**
+ * 검색 인덱스(D-07)의 초기 인덱싱 단계(D-08). `table`의 `columns`를 id 순으로 청크마다 읽어 FTS 테이블 `fts`에 넣는다.
+ * @typedef {object} IndexStep
+ * @property {string} table 물리 테이블 이름
+ * @property {string} fts FTS5 테이블 이름
+ * @property {string[]} columns 인덱스에 담는 물리 열
+ */
+/** @typedef {{ index: IndexStep }} IndexStatement */
+/** @typedef {SqlStatement | ConvertStatement | BatchStatement | IndexStatement} Statement */
 
 /** 변환 복사가 한 번에 읽는 행 수. `runBatch` 상한(1만)보다 작게 둔다. */
 export const CONVERT_CHUNK_ROWS = 5_000;
+/** 인덱싱이 한 번에 읽는 행 수. */
+export const INDEX_CHUNK_ROWS = 5_000;
+/** 인덱싱 배치 하나의 직렬화 크기 예산. 장문 열이 커서 행 수만으로는 `runBatch` 상한(64 MB)을 지킬 수 없다. */
+export const INDEX_CHUNK_BYTES = 16 * MB;
 
 /**
  * 이벤트 루프의 태스크 큐로 한 번 돌아간다.
@@ -90,12 +103,29 @@ function isConvertStep(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is IndexStep}
+ */
+function isIndexStep(value) {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = /** @type {Record<string, unknown>} */ (value);
+  return (
+    typeof v.table === 'string' &&
+    typeof v.fts === 'string' &&
+    Array.isArray(v.columns) &&
+    v.columns.length > 0 &&
+    v.columns.every((c) => typeof c === 'string')
+  );
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is Statement}
  */
 export function isStatement(value) {
   if (typeof value !== 'object' || value === null) return false;
   const v = /** @type {Record<string, unknown>} */ (value);
   if ('convert' in v) return isConvertStep(v.convert);
+  if ('index' in v) return isIndexStep(v.index);
   if ('batch' in v) return isBatchStep(v.batch);
   return typeof v.sql === 'string';
 }
@@ -219,6 +249,64 @@ export async function runConvert(engine, step, ctx) {
 }
 
 /**
+ * 초기 인덱싱(Step 6): 원본 테이블을 id 순으로 청크마다 읽어 FTS 테이블에 `runBatch`로 넣는다.
+ * 바깥 트랜잭션 안에서 실행되며 취소는 청크 사이에서 확인한다. 장문 셀이 커서 청크의 직렬화 크기가
+ * 예산을 넘으면 그 안에서 더 잘게 보낸다.
+ * @param {Engine} engine
+ * @param {IndexStep} step
+ * @param {ApplyContext} ctx
+ * @returns {Promise<{ rows: number }>}
+ */
+export async function runIndex(engine, step, ctx) {
+  const table = quoteIdent(step.table);
+  const fts = quoteIdent(step.fts);
+  const cols = step.columns.map(quoteIdent).join(', ');
+  const marks = step.columns.map(() => '?').join(', ');
+  const total = Number(engine.exec(`SELECT count(*) FROM ${table}`).rows[0]?.[0] ?? 0);
+  const selectFirst = engine.prepareCached(
+    `SELECT "id", ${cols} FROM ${table} ORDER BY "id" LIMIT ${INDEX_CHUNK_ROWS}`,
+  );
+  const selectNext = engine.prepareCached(
+    `SELECT "id", ${cols} FROM ${table} WHERE "id" > ? ORDER BY "id" LIMIT ${INDEX_CHUNK_ROWS}`,
+  );
+  const insert = engine.prepareCached(`INSERT INTO ${fts}(rowid, ${cols}) VALUES (?, ${marks})`);
+  /** @type {number | null} */
+  let lastId = null;
+  let rows = 0;
+  ctx.progress?.({ phase: 'index', done: 0, total });
+  for (;;) {
+    if (ctx.signal?.aborted) {
+      throw new AppError('E_IMPORT_CANCELLED', 'search index build cancelled', {
+        detail: { table: step.table, done: rows, total },
+      });
+    }
+    /** @type {SqlValue[][]} */
+    const chunk =
+      lastId === null ? engine.exec(selectFirst).rows : engine.exec(selectNext, [lastId]).rows;
+    if (chunk.length === 0) break;
+    /** @type {SqlValue[][]} */
+    let params = [];
+    let bytes = 0;
+    for (const row of chunk) {
+      const size = estimateCloneBytes(row);
+      if (params.length > 0 && bytes + size > INDEX_CHUNK_BYTES) {
+        await engine.runBatch(insert, params);
+        params = [];
+        bytes = 0;
+      }
+      params.push(/** @type {SqlValue[]} */ (row));
+      bytes += size;
+      lastId = Number(row[0]);
+    }
+    if (params.length > 0) await engine.runBatch(insert, params);
+    rows += chunk.length;
+    ctx.progress?.({ phase: 'index', done: rows, total });
+    await yieldToEventLoop();
+  }
+  return { rows };
+}
+
+/**
  * 커맨드를 한 방향으로 적용한다. 한 문장이라도 실패하면 전체를 롤백한다.
  * @param {Engine} engine
  * @param {Command} cmd
@@ -248,6 +336,9 @@ export async function applyCommand(engine, cmd, direction = 'do', ctx = {}) {
         const converted = await runConvert(engine, statement.convert, ctx);
         result.affected += converted.rows;
         result.nulled = (result.nulled ?? 0) + converted.nulled;
+      } else if ('index' in statement) {
+        const indexed = await runIndex(engine, statement.index, ctx);
+        result.affected += indexed.rows;
       } else if ('batch' in statement) {
         // 배치 하나가 비어 있으면 건너뛴다(붙여넣기가 기존 행 없이 새 행만 만들 때 등).
         if (statement.batch.paramsList.length === 0) continue;

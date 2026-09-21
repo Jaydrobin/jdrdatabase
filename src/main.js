@@ -305,6 +305,23 @@ async function start(shell) {
           const s = await ready;
           return s.client.call('engine.exec', { sql });
         },
+        /**
+         * 메인 세션에 RPC op를 직접 보낸다(Step 6 성능 측정: `query.count`의 `elapsedMs`, `search.enable`).
+         * 스토어를 거치지 않으므로 저널·dirty에는 반영되지 않는다.
+         * @template {import('./db/worker.js').OpName} K
+         * @param {K} op
+         * @param {import('./db/worker.js').OpMap[K]['args']} args
+         */
+        async call(op, args) {
+          const s = await ready;
+          return s.client.call(op, args);
+        },
+        /** 지금 고른 테이블의 뷰 상태(Step 6 E2E용). */
+        view: () => {
+          if (!store) return null;
+          const id = store.getState().currentTableId;
+          return id ? store.getViewState(id) : null;
+        },
         /** 열린 그리드의 렌더·질의 통계(Step 4 성능 측정용). 그리드가 없으면 null. */
         grid: () => (gridHost ? gridHost.stats() : null),
         /** 히스토리 스택 크기(Step 5 E2E용). */
@@ -345,7 +362,7 @@ async function start(shell) {
   });
 
   historyRef = history;
-  mountToolbar(shell.toolbarHost, active, history);
+  mountToolbar(shell.toolbarHost, active, history, { toasts: shell.toasts });
   const sidebar = mountSidebar(shell.body, {
     store: active,
     commands: createSchemaCommands(active),

@@ -72,6 +72,25 @@ export function userTableDdl(tableId) {
 }
 
 /**
+ * 검색 인덱스(D-07)의 FTS5 테이블 이름. 메타 접두사를 쓰므로 사용자 테이블 목록에서 자동으로 빠진다.
+ * @param {string} tableId
+ * @returns {string}
+ */
+export function ftsTableFor(tableId) {
+  return `${META_PREFIX}fts_${tableId}`;
+}
+
+/**
+ * 검색 인덱스를 원본 테이블과 동기화하는 트리거 이름 셋.
+ * @param {string} tableId
+ * @returns {{ insert: string, delete: string, update: string }}
+ */
+export function ftsTriggersFor(tableId) {
+  const base = ftsTableFor(tableId);
+  return { insert: `${base}_ai`, delete: `${base}_ad`, update: `${base}_au` };
+}
+
+/**
  * 식별자(테이블·열 이름)를 SQL에 넣을 때는 반드시 이 함수를 거친다(CLAUDE.md 5.3).
  * @param {string} name
  * @returns {string}

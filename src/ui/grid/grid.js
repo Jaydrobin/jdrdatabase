@@ -10,10 +10,13 @@
  * - 사용자 데이터는 `cells.render`가 textContent로만 넣는다.
  * - 편집(Step 5): 선택 모델(`selection.js`)을 그리고, 편집·삭제·복사·붙여넣기·행 추가·삭제 요청은
  *   `hooks`로 편집 컨트롤러(`editing.js`)에 넘긴다. 커맨드는 이 파일에서 만들지 않는다.
+ * - 뷰(Step 6): `viewSpec`(숨김·정렬·필터·검색)은 마운트 때 받아 창 질의·행 수에 그대로 넘긴다. 머리글
+ *   클릭은 스토어의 정렬을 바꾸고(Shift+클릭은 보조 정렬), 정렬 표시와 `aria-sort`를 머리글에 그린다.
+ *   필터 결과가 0건이면 "필터 지우기" 버튼이 있는 빈 상태를 보인다.
  */
 import { resolveShortcut } from '../../app/shortcuts.js';
 import { MIN_COLUMN_WIDTH } from '../../app/store.js';
-import { PREVIEW_CHARS, visibleColumns } from '../../db/query.js';
+import { normalizeViewSpec, PREVIEW_CHARS, visibleColumns } from '../../db/query.js';
 import { t } from '../../i18n/index.js';
 import { toAppError } from '../../util/errors.js';
 import { formatInteger } from '../../util/format.js';
@@ -207,6 +210,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {() => Selection} selection 선택 모델(읽기용)
  * @property {(row: number, col: number, extend?: boolean) => void} moveCursor 활성 셀 이동(+스크롤). `extend`면 범위를 넓힌다
  * @property {() => TableInfo | null} table
+ * @property {() => ViewSpec} viewSpec 지금 그리는 뷰 사양. 편집 컨트롤러가 행 읽기·범위 커맨드에 같은 사양을 넘긴다
  * @property {() => ColumnInfo[]} columns 지금 그리는 열(살아 있고 숨기지 않은 열, 표시 순서)
  * @property {() => number} rowCount
  * @property {(row: number, col: number) => CellInfo | null} cellInfo 캐시에 있는 셀의 값·행 id. 아직 읽지 않았으면 null
@@ -311,7 +315,19 @@ export function createGrid(deps) {
   header.setAttribute('aria-rowindex', '1');
   const canvas = div('jdr-grid__canvas', 'rowgroup');
   scroller.append(header, canvas);
-  el.append(bar, scroller);
+  // 필터·검색 결과가 0건일 때의 빈 상태(Step 6 예외 처리). 정렬만 있는 빈 테이블에는 보이지 않는다.
+  const noMatch = div('jdr-grid__nomatch');
+  noMatch.setAttribute('role', 'status');
+  const noMatchText = document.createElement('span');
+  noMatchText.textContent = t('grid.noMatch');
+  const clearFiltersButton = document.createElement('button');
+  clearFiltersButton.type = 'button';
+  clearFiltersButton.className = 'jdr-grid__button';
+  clearFiltersButton.dataset.action = 'clear-filters';
+  clearFiltersButton.textContent = t('grid.clearFilters');
+  noMatch.append(noMatchText, clearFiltersButton);
+  noMatch.hidden = true;
+  el.append(bar, scroller, noMatch);
 
   /** @type {TableInfo | null} */
   let table = null;
@@ -416,6 +432,7 @@ export function createGrid(deps) {
     rowNumber.style.width = `${ROW_NUMBER_WIDTH}px`;
     header.append(rowNumber);
     headerCells.push(rowNumber);
+    const sort = normalizeViewSpec(viewSpec).sort;
     columns.forEach((column, index) => {
       const cell = div('jdr-grid__hcell', 'columnheader');
       cell.dataset.col = String(index);
@@ -423,15 +440,40 @@ export function createGrid(deps) {
       const name = document.createElement('span');
       name.className = 'jdr-grid__hname';
       name.textContent = column.name;
+      cell.append(name);
+      // 정렬 표시(Step 6): 방향 기호와, 다중 정렬이면 순번. `aria-sort`는 첫 정렬 열에만 둔다(ARIA 규칙).
+      const order = sort.findIndex((s) => s.colId === column.id);
+      const entry = order >= 0 ? sort[order] : undefined;
+      if (entry) {
+        const mark = document.createElement('span');
+        mark.className = 'jdr-grid__hsort';
+        mark.textContent =
+          (entry.dir === 'desc' ? t('grid.sortDescMark') : t('grid.sortAscMark')) +
+          (sort.length > 1 ? formatInteger(order + 1) : '');
+        mark.setAttribute(
+          'aria-label',
+          entry.dir === 'desc' ? t('grid.sortedDesc') : t('grid.sortedAsc'),
+        );
+        cell.append(mark);
+        if (order === 0)
+          cell.setAttribute('aria-sort', entry.dir === 'desc' ? 'descending' : 'ascending');
+      }
       const resizer = div('jdr-grid__resizer');
       resizer.setAttribute('role', 'separator');
       resizer.setAttribute('aria-orientation', 'vertical');
       resizer.setAttribute('aria-label', t('grid.resizeHandle', { name: column.name }));
-      cell.append(name, resizer);
+      cell.append(resizer);
       header.append(cell);
       headerCells.push(cell);
     });
     header.style.height = `${HEADER_HEIGHT}px`;
+  }
+
+  /** 필터·검색 결과 0건 여부에 따라 빈 상태 블록을 보이거나 숨긴다. */
+  function renderNoMatch() {
+    const spec = normalizeViewSpec(viewSpec);
+    const filtered = spec.filter !== null || spec.search !== '';
+    noMatch.hidden = !(table !== null && rowCount === 0 && filtered);
   }
 
   /**
@@ -809,6 +851,23 @@ export function createGrid(deps) {
     if (!table) return;
     store.setFrozenColumns(table.id, Number(frozenSelect.value));
   };
+  const onClearFilters = () => {
+    if (table) store.clearFilters(table.id);
+  };
+  /**
+   * 머리글 클릭 → 정렬 토글(Step 6). 손잡이를 끈 뒤 오는 click은 손잡이가 target이라 걸러진다.
+   * @param {MouseEvent} ev
+   */
+  const onHeaderClick = (ev) => {
+    const target = /** @type {HTMLElement | null} */ (ev.target);
+    if (!(target instanceof HTMLElement) || !table) return;
+    if (target.closest('.jdr-grid__resizer')) return;
+    const cell = target.closest('.jdr-grid__hcell[data-col]');
+    if (!(cell instanceof HTMLElement)) return;
+    const column = columns[Number(cell.dataset.col ?? -1)];
+    if (!column) return;
+    store.toggleSort(table.id, column.id, ev.shiftKey);
+  };
 
   /** @type {{ col: number, startX: number, startWidth: number, pointerId: number, target: HTMLElement } | null} */
   let resizing = null;
@@ -1057,6 +1116,8 @@ export function createGrid(deps) {
     header.addEventListener('pointermove', onHeaderPointerMove);
     header.addEventListener('pointerup', onHeaderPointerUp);
     header.addEventListener('pointercancel', onHeaderPointerUp);
+    header.addEventListener('click', onHeaderClick);
+    clearFiltersButton.addEventListener('click', onClearFilters);
     canvas.addEventListener('pointerdown', onCanvasPointerDown);
     canvas.addEventListener('pointermove', onCanvasPointerMove);
     canvas.addEventListener('pointerup', onCanvasPointerUp);
@@ -1075,6 +1136,8 @@ export function createGrid(deps) {
     header.removeEventListener('pointermove', onHeaderPointerMove);
     header.removeEventListener('pointerup', onHeaderPointerUp);
     header.removeEventListener('pointercancel', onHeaderPointerUp);
+    header.removeEventListener('click', onHeaderClick);
+    clearFiltersButton.removeEventListener('click', onClearFilters);
     canvas.removeEventListener('pointerdown', onCanvasPointerDown);
     canvas.removeEventListener('pointermove', onCanvasPointerMove);
     canvas.removeEventListener('pointerup', onCanvasPointerUp);
@@ -1120,6 +1183,7 @@ export function createGrid(deps) {
       scroller.scrollLeft = 0;
       rowCountLabel.textContent = '';
       scroller.setAttribute('aria-colcount', String(columns.length + 1));
+      renderNoMatch();
       void recount(table.id, generation);
       scheduleRender();
     },
@@ -1153,6 +1217,7 @@ export function createGrid(deps) {
       rowCountLabel.textContent = t('grid.rowCount', { count: formatInteger(rowCount) });
       selection.setBounds(rowCount, columns.length);
       rowDeleteButton.disabled = rowCount === 0;
+      renderNoMatch();
       scheduleRender();
     },
 
@@ -1220,6 +1285,7 @@ export function createGrid(deps) {
       cache.invalidate();
       clearRows();
       table = null;
+      noMatch.hidden = true;
       el.remove();
       mounted = false;
     },
@@ -1235,6 +1301,7 @@ export function createGrid(deps) {
     },
 
     table: () => table,
+    viewSpec: () => viewSpec,
     columns: () => columns,
     rowCount: () => rowCount,
 
@@ -1321,6 +1388,8 @@ export function mountGridHost(container, deps) {
 
   /** @type {string | null} */
   let openTableId = null;
+  /** 열린 그리드의 뷰 사양 키. 정렬·필터·검색·숨김이 바뀌면 다시 마운트한다(Step 6). */
+  let openSpecKey = '';
   let gridMounted = false;
 
   const grid = createGrid({
@@ -1351,7 +1420,7 @@ export function mountGridHost(container, deps) {
     openTableId = null;
   }
 
-  /** @param {'grid.noTable' | 'grid.noColumns' | null} key */
+  /** @param {'grid.noTable' | 'grid.noColumns' | 'grid.allHidden' | null} key */
   function showEmpty(key) {
     empty.hidden = key === null;
     empty.textContent = key === null ? '' : t(key);
@@ -1370,12 +1439,26 @@ export function mountGridHost(container, deps) {
       showEmpty('grid.noColumns');
       return;
     }
+    const viewSpec = store.viewSpecOf(table.id);
+    if (visibleColumns(table, viewSpec).length === 0) {
+      closeGrid();
+      showEmpty('grid.allHidden');
+      return;
+    }
     showEmpty(null);
+    const specKey = JSON.stringify(viewSpec);
     // 열 이름만 바뀐 경우까지 다시 마운트하면 스크롤 위치·활성 셀·열 너비가 처음으로 돌아간다.
-    if (gridMounted && openTableId === table.id && grid.applyTable(table)) return;
-    grid.mount(el, { table, viewSpec: {}, view: store.getViewState(table.id) });
+    if (
+      gridMounted &&
+      openTableId === table.id &&
+      openSpecKey === specKey &&
+      grid.applyTable(table)
+    )
+      return;
+    grid.mount(el, { table, viewSpec, view: store.getViewState(table.id) });
     gridMounted = true;
     openTableId = table.id;
+    openSpecKey = specKey;
   }
 
   const unsubscribe = [
@@ -1383,7 +1466,10 @@ export function mountGridHost(container, deps) {
     store.on('tables:changed', sync),
     store.on('file:opened', sync),
     store.on('view:changed', () => {
-      if (openTableId) grid.applyView(store.getViewState(openTableId));
+      if (!openTableId) return;
+      // 정렬·필터·검색·숨김이 바뀌면 다른 행 집합·순서이므로 다시 마운트하고, 너비·고정 열만 바뀌면 배치만 고친다.
+      if (JSON.stringify(store.viewSpecOf(openTableId)) !== openSpecKey) sync();
+      else grid.applyView(store.getViewState(openTableId));
     }),
     store.on('data:changed', () => {
       if (openTableId) grid.invalidate();

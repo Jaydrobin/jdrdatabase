@@ -112,10 +112,21 @@ export function mountSidebar(parent, deps) {
     type.textContent = typeLabel(column.type);
     li.append(name, type);
 
-    if (!table.strict) return li;
     const actions = document.createElement('span');
     actions.className = 'jdr-sidebar__column-actions';
     const data = { tableId: table.id, columnId: column.id };
+    if (!deleted) {
+      // 숨김·표시는 뷰 상태(Step 6)라 외부 테이블에서도 할 수 있고 커맨드가 아니다.
+      const hidden = store.getViewState(table.id).hidden.includes(column.id);
+      if (hidden) li.classList.add('jdr-sidebar__column--hidden');
+      actions.append(
+        makeButton(t(hidden ? 'column.show' : 'column.hide'), 'column-visibility', data),
+      );
+    }
+    if (!table.strict) {
+      li.append(actions);
+      return li;
+    }
     if (deleted) {
       actions.append(makeButton(t('column.restore'), 'column-restore', data));
     } else {
@@ -304,6 +315,9 @@ export function mountSidebar(parent, deps) {
       }
       case 'column-restore':
         if (table && column) await commands.restoreColumn(tableId, columnId);
+        return;
+      case 'column-visibility':
+        if (table && column) store.toggleHidden(tableId, columnId);
         return;
       default:
         return;

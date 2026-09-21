@@ -207,3 +207,31 @@
 .jdr-grid__canvas {
   user-select: none;
 }
+
+/* 정렬 표시와 필터 결과 없음(Step 6) */
+.jdr-grid__hcell[data-col] {
+  cursor: pointer;
+  user-select: none;
+}
+
+.jdr-grid__hname {
+  display: inline;
+}
+
+.jdr-grid__hsort {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--jdr-accent);
+}
+
+.jdr-grid__nomatch {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 24px;
+  color: var(--jdr-fg-muted);
+}
+
+.jdr-grid__nomatch[hidden] {
+  display: none;
+}

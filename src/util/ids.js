@@ -6,6 +6,8 @@
 
 export const TABLE_PREFIX = 't_';
 export const COLUMN_PREFIX = 'c_';
+/** 저장된 뷰(`_jdr_views.id`)의 접두사. */
+export const VIEW_PREFIX = 'v_';
 /** 접두사 뒤의 16진수 자릿수. */
 export const HEX_LENGTH = 8;
 
@@ -45,6 +47,14 @@ export function newTableId(existing) {
  */
 export function newColumnId(existing) {
   return newId(COLUMN_PREFIX, existing);
+}
+
+/**
+ * @param {Iterable<string>} [existing] 이미 쓰는 뷰 id
+ * @returns {string} `v_<8hex>`
+ */
+export function newViewId(existing) {
+  return newId(VIEW_PREFIX, existing);
 }
 
 const TABLE_RE = new RegExp(`^${TABLE_PREFIX}[0-9a-f]{${HEX_LENGTH}}$`);

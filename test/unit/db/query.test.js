@@ -7,16 +7,23 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MAX_RESULT_ROWS } from '../../../src/db/engine.js';
 import {
+  buildOrderBy,
+  buildWhere,
   buildWindowSQL,
   count,
   denseFromId,
   fetchRow,
   fetchRows,
   fetchWindow,
+  isPlainView,
+  normalizeViewSpec,
   PREVIEW_CHARS,
+  pruneViewSpec,
   stats,
+  toggleSort,
   visibleColumns,
 } from '../../../src/db/query.js';
+import { AppError } from '../../../src/util/errors.js';
 import { migrate } from '../../../src/db/schema.js';
 import * as tables from '../../../src/db/tables.js';
 import { openWasmEngine } from './helpers.js';
@@ -234,4 +241,279 @@ test('fetchWindow: 연속 id의 빠른 경로와 OFFSET 경로가 같은 창을 
   );
   assert.match(sql, /WHERE "id" >= \? ORDER BY "id" LIMIT \?$/);
   assert.ok(!sql.includes('OFFSET'));
+});
+
+// ---- Step 6: 뷰 스펙·필터·정렬 빌더 ----
+
+test('buildWhere: 값은 항상 바인딩(따옴표가 든 값이 SQL에 나타나지 않음), 연산자별 SQL', async () => {
+  const { engine, table, name, age, flag } = await setup();
+  const columns = visibleColumns(table);
+  const evil = "O'Brien; DROP TABLE x --";
+  const where = buildWhere(
+    {
+      logic: 'and',
+      conditions: [
+        { colId: name, op: '=', value: evil },
+        { colId: name, op: 'contains', value: "50%_'" },
+        { colId: age, op: '>=', value: '30' },
+        { colId: flag, op: '=', value: '참' },
+      ],
+    },
+    columns,
+  );
+  assert.ok(!where.sql.includes("O'Brien"), '값이 SQL 문자열에 들어가지 않는다');
+  assert.ok(!where.sql.includes('50%'));
+  assert.equal(
+    where.sql,
+    `("${name}" COLLATE NOCASE = ? AND "${name}" LIKE ? ESCAPE '\\' AND "${age}" >= ? AND "${flag}" = ?)`,
+  );
+  assert.deepEqual(where.params, [evil, "%50\\%\\_'%", 30, 1]);
+
+  // 실제 DB에서: 대소문자 무시 등호, 부분 일치, 숫자 비교, OR.
+  const again = tables.requireTable(engine, table.id);
+  const cols = visibleColumns(again);
+  /** @param {import('../../../src/db/query.js').FilterSpec} filter */
+  const ids = (filter) =>
+    fetchWindow(engine, again, { filter }, { offset: 0, limit: 10 }).rows.map((r) => r.id);
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: name, op: '=', value: "o'brien" }] }),
+    [1],
+  );
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: name, op: 'starts', value: 'o' }] }),
+    [1],
+  );
+  assert.deepEqual(
+    ids({
+      logic: 'or',
+      conditions: [
+        { colId: age, op: '<', value: '35' },
+        { colId: name, op: 'empty' },
+      ],
+    }),
+    [1, 3],
+  );
+  assert.deepEqual(ids({ logic: 'and', conditions: [{ colId: age, op: 'not_empty' }] }), [1, 3]);
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: age, op: '!=', value: '30' }] }),
+    [2, 3],
+    '!=는 빈 값도 포함',
+  );
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: age, op: 'in', values: ['40', '30'] }] }),
+    [1, 3],
+  );
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: name, op: 'in', values: ['둘', 'x'] }] }),
+    [2],
+  );
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: age, op: 'contains', value: '4' }] }),
+    [3],
+    '숫자 열의 contains는 문자열로',
+  );
+  assert.deepEqual(
+    ids({ logic: 'and', conditions: [{ colId: name, op: '=', value: '' }] }),
+    [3],
+    '빈 값과의 =는 IS NULL',
+  );
+  assert.equal(
+    count(engine, again, {
+      filter: { logic: 'and', conditions: [{ colId: age, op: '>', value: '0' }] },
+    }),
+    2,
+  );
+  void cols;
+  await engine.close();
+});
+
+test('buildWhere: 타입에 맞지 않는 값은 E_VALUE_INVALID, 빈 in 목록도, 살아 있지 않은 열은 무시, 조건 없음은 빈 조각', async () => {
+  const { table, age, name } = await setup();
+  const columns = visibleColumns(table);
+  assert.throws(
+    () =>
+      buildWhere({ logic: 'and', conditions: [{ colId: age, op: '>', value: 'abc' }] }, columns),
+    (e) =>
+      e instanceof AppError &&
+      e.code === 'E_VALUE_INVALID' &&
+      /** @type {{ reason?: string, columnName?: string }} */ (e.detail ?? {}).reason ===
+        'not_integer' &&
+      /** @type {{ columnName?: string }} */ (e.detail ?? {}).columnName === '나이',
+  );
+  assert.throws(
+    () => buildWhere({ logic: 'and', conditions: [{ colId: age, op: 'in', values: [] }] }, columns),
+    (e) => e instanceof AppError && e.code === 'E_VALUE_INVALID',
+  );
+  assert.deepEqual(
+    buildWhere(
+      { logic: 'and', conditions: [{ colId: 'c_nope0000', op: '=', value: 'x' }] },
+      columns,
+    ),
+    { sql: '', params: [] },
+  );
+  assert.deepEqual(buildWhere(null, columns), { sql: '', params: [] });
+  assert.deepEqual(buildWhere({ logic: 'and', conditions: [] }, columns), { sql: '', params: [] });
+  void name;
+});
+
+test('buildOrderBy: 타입별 정렬(NOCASE·수치), NULLS LAST, 항상 id로 끝나고 빈 정렬은 "id"', async () => {
+  const { engine, table, tableId, name, age } = await setup();
+  const columns = visibleColumns(table);
+  assert.equal(buildOrderBy([], columns), '"id"');
+  assert.equal(buildOrderBy(undefined, columns), '"id"');
+  assert.equal(
+    buildOrderBy(
+      [
+        { colId: name, dir: 'desc' },
+        { colId: age, dir: 'asc' },
+        { colId: 'c_nope0000', dir: 'asc' },
+      ],
+      columns,
+    ),
+    `"${name}" COLLATE NOCASE DESC NULLS LAST, "${age}" ASC NULLS LAST, "id"`,
+  );
+  await engine.transaction(() => {
+    engine.run(`INSERT INTO "${tableId}" ("${name}", "${age}") VALUES (?, ?)`, ['apple', 5]);
+  });
+  const rows = (/** @type {import('../../../src/db/query.js').SortSpec[]} */ sort) =>
+    fetchWindow(engine, table, { sort }, { offset: 0, limit: 10 }).rows.map((r) => r.id);
+  // 이름 오름차순: apple(4) < O'Brien(1) < 둘(2), NULL(3)은 마지막.
+  assert.deepEqual(rows([{ colId: name, dir: 'asc' }]), [4, 1, 2, 3]);
+  assert.deepEqual(
+    rows([{ colId: name, dir: 'desc' }]),
+    [2, 1, 4, 3],
+    '내림차순에서도 빈 값은 마지막',
+  );
+  assert.deepEqual(rows([{ colId: age, dir: 'desc' }]), [3, 1, 4, 2]);
+  // 정렬이 있으면 id 탐색 빠른 경로를 쓰지 않는다(stats를 줘도 같은 결과).
+  assert.deepEqual(
+    fetchWindow(
+      engine,
+      table,
+      { sort: [{ colId: age, dir: 'desc' }] },
+      { offset: 1, limit: 2 },
+      { count: 4 },
+    ).rows.map((r) => r.id),
+    [1, 4],
+  );
+  await assert.rejects(
+    async () =>
+      buildWindowSQL(
+        table,
+        columns,
+        { sort: [{ colId: age, dir: 'asc' }] },
+        { offset: 0, limit: 1, fromId: 1 },
+      ),
+    /plain view/,
+  );
+  await engine.close();
+});
+
+test('fetchRows: 뷰의 정렬·필터가 창 질의와 같은 순서로 붙는다', async () => {
+  const { engine, table, name, age } = await setup();
+  const viewSpec = {
+    sort: [{ colId: age, dir: /** @type {const} */ ('desc') }],
+    filter: {
+      logic: /** @type {const} */ ('and'),
+      conditions: [{ colId: age, op: /** @type {const} */ ('not_empty') }],
+    },
+  };
+  const window = fetchWindow(engine, table, viewSpec, { offset: 0, limit: 10 }).rows.map(
+    (r) => r.id,
+  );
+  const rows = fetchRows(engine, table, viewSpec, { offset: 0, limit: 10 }, [name]).map(
+    (r) => r.id,
+  );
+  assert.deepEqual(window, [3, 1]);
+  assert.deepEqual(rows, window);
+  assert.deepEqual(
+    fetchRows(engine, table, viewSpec, { offset: 1, limit: 10 }, [name]).map((r) => r.id),
+    [1],
+  );
+  await engine.close();
+});
+
+test('normalizeViewSpec·isPlainView·toggleSort·pruneViewSpec', async () => {
+  const { engine, table, tableId, name, age } = await setup();
+  assert.deepEqual(normalizeViewSpec(undefined), {
+    hidden: [],
+    sort: [],
+    filter: null,
+    search: '',
+  });
+  assert.deepEqual(
+    normalizeViewSpec({
+      hidden: [name, name, 3],
+      sort: [{ colId: age, dir: 'x' }],
+      filter: { logic: 'or', conditions: [] },
+      search: ' a ',
+    }),
+    { hidden: [name], sort: [{ colId: age, dir: 'asc' }], filter: null, search: 'a' },
+  );
+  assert.equal(isPlainView({ hidden: [name] }), true);
+  assert.equal(isPlainView({ search: ' ' }), true);
+  assert.equal(isPlainView({ sort: [{ colId: age, dir: 'asc' }] }), false);
+
+  assert.deepEqual(toggleSort([], age), [{ colId: age, dir: 'asc' }]);
+  assert.deepEqual(toggleSort([{ colId: age, dir: 'asc' }], age), [{ colId: age, dir: 'desc' }]);
+  assert.deepEqual(toggleSort([{ colId: age, dir: 'desc' }], age), []);
+  assert.deepEqual(
+    toggleSort([{ colId: age, dir: 'asc' }], name),
+    [{ colId: name, dir: 'asc' }],
+    '보통 클릭은 이 열만 남긴다',
+  );
+  assert.deepEqual(toggleSort([{ colId: age, dir: 'asc' }], name, true), [
+    { colId: age, dir: 'asc' },
+    { colId: name, dir: 'asc' },
+  ]);
+  assert.deepEqual(
+    toggleSort(
+      [
+        { colId: age, dir: 'asc' },
+        { colId: name, dir: 'asc' },
+      ],
+      age,
+      true,
+    ),
+    [
+      { colId: age, dir: 'desc' },
+      { colId: name, dir: 'asc' },
+    ],
+  );
+  assert.deepEqual(
+    toggleSort(
+      [
+        { colId: age, dir: 'desc' },
+        { colId: name, dir: 'asc' },
+      ],
+      age,
+      true,
+    ),
+    [{ colId: name, dir: 'asc' }],
+  );
+
+  await tables.softDeleteColumn(engine, tableId, age);
+  const after = tables.requireTable(engine, tableId);
+  const pruned = pruneViewSpec(
+    {
+      sort: [
+        { colId: age, dir: 'asc' },
+        { colId: name, dir: 'desc' },
+      ],
+      filter: { logic: 'and', conditions: [{ colId: age, op: 'empty' }] },
+      hidden: [age],
+      search: 'x',
+    },
+    after,
+  );
+  assert.equal(pruned.changed, true);
+  assert.deepEqual(pruned.spec, {
+    hidden: [],
+    sort: [{ colId: name, dir: 'desc' }],
+    filter: null,
+    search: 'x',
+  });
+  assert.equal(pruneViewSpec({ sort: [{ colId: name, dir: 'asc' }] }, after).changed, false);
+  void table;
+  await engine.close();
 });
