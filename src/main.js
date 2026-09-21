@@ -86,36 +86,42 @@ function mount(root) {
 }
 
 /**
- * 시작 실패 화면. 원인과 지원 브라우저를 보여 주고 앱을 잠근다.
+ * 잠금 화면. 시작 실패는 원인과 지원 브라우저를, 기동 뒤 엔진 종료(Step 10)는 저널 상태를 보여 주고 앱을 잠근다.
  * @param {Shell} shell
  * @param {AppError} err
+ * @param {{ title?: MessageKey, message?: MessageKey }} [options] 없으면 시작 실패 문구(`lock.title`, `error.<code>`, 지원 브라우저)
  */
-function showLock(shell, err) {
+function showLock(shell, err, options = {}) {
   shell.main.textContent = '';
   const box = document.createElement('section');
   box.className = 'jdr-lock';
   box.setAttribute('role', 'alert');
 
+  const titleKey = options.title ?? 'lock.title';
   const title = document.createElement('h2');
   title.className = 'jdr-lock__title';
-  title.textContent = t('lock.title');
+  title.textContent = t(titleKey);
 
   const message = document.createElement('p');
   message.className = 'jdr-lock__message';
-  message.textContent = t(/** @type {MessageKey} */ (`error.${err.code}`));
+  message.textContent = t(options.message ?? /** @type {MessageKey} */ (`error.${err.code}`));
+  box.append(title, message);
 
-  const supported = document.createElement('p');
-  supported.className = 'jdr-lock__message';
-  supported.textContent = t('lock.supportedBrowsers');
+  if (!options.message) {
+    const supported = document.createElement('p');
+    supported.className = 'jdr-lock__message';
+    supported.textContent = t('lock.supportedBrowsers');
+    box.append(supported);
+  }
 
   const detail = document.createElement('p');
   detail.className = 'jdr-lock__detail';
   const cause = err.cause instanceof Error ? err.cause.message : err.message;
   detail.textContent = t('lock.cause', { message: `${err.code}: ${cause.slice(0, 300)}` });
 
-  box.append(title, message, supported, detail);
+  box.append(detail);
   shell.main.append(box);
-  shell.statusbar.setStatus('lock.title');
+  shell.statusbar.setStatus(titleKey);
   shell.statusbar.setDanger(true);
 }
 
@@ -433,6 +439,24 @@ async function start(shell) {
     ev.returnValue = t('unload.dirty');
   };
   window.addEventListener('beforeunload', onBeforeUnload);
+
+  // 기동 뒤 Worker가 죽으면(처리되지 않은 예외) client가 이후의 모든 RPC를 즉시 거부한다. 메모리 DB는
+  // 사라졌으므로 앱을 잠그고, 미저장 변경이 어디에 남았는지(저널)만 정확히 알린다. wasm 폴백은 없다(Step 10).
+  session.client.onFatal((err) => {
+    saveTimer.dispose();
+    // 저장할 수단이 없으므로 떠나기 확인은 뜻이 없다. 저널이 있으면 새로 고치는 것이 복구 절차다.
+    window.removeEventListener('beforeunload', onBeforeUnload);
+    const s = active.getState();
+    /** @type {MessageKey} */
+    let message = 'lock.engineStopped.clean';
+    if (s.dirty) {
+      if (!idb) message = 'lock.engineStopped.noJournal';
+      else if (s.journalStop !== 'none') message = 'lock.engineStopped.lost';
+      else message = 'lock.engineStopped.recoverable';
+    }
+    console.error(err);
+    showLock(shell, err, { title: 'lock.engineStopped', message });
+  });
 
   /** @type {Record<import('./app/store.js').BackupNote, MessageKey | null>} */
   const BACKUP_NOTES = {

@@ -16,6 +16,14 @@ export const ko = Object.freeze({
   'lock.supportedBrowsers':
     '지원 브라우저: Chrome·Edge 최신 2개 버전(권장), Firefox·Safari 최신 버전. WebAssembly가 켜져 있어야 합니다.',
   'lock.cause': '원인: {message}',
+  'lock.engineStopped': '데이터베이스 엔진이 멈췄습니다',
+  'lock.engineStopped.clean': '저장되지 않은 변경은 없습니다. 페이지를 새로 고쳐 다시 시작하세요.',
+  'lock.engineStopped.recoverable':
+    '저장되지 않은 변경은 이 브라우저의 저널에 남아 있습니다. 페이지를 새로 고친 뒤 같은 파일을 열면 복구를 제안합니다.',
+  'lock.engineStopped.lost':
+    '가져오기처럼 저널에 남길 수 없는 변경이 있어, 마지막으로 저장한 뒤의 변경은 잃었습니다. 페이지를 새로 고쳐 다시 시작하세요.',
+  'lock.engineStopped.noJournal':
+    '이 브라우저에는 저널(IndexedDB)이 없어, 마지막으로 저장한 뒤의 변경은 잃었습니다. 페이지를 새로 고쳐 다시 시작하세요.',
   'status.readOnly': '읽기 전용',
   'status.noIdb': 'IndexedDB 없음: 저널·백업·최근 파일 꺼짐',
   'device.defaultName': '기기-{id}',

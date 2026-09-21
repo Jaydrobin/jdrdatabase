@@ -113,3 +113,40 @@ test('statement 캐시: 64개를 넘어도 오래된 것이 정리되고 결과�
   assert.deepEqual(engine.exec('SELECT 0 AS n').rows, [[0]]);
   await engine.close();
 });
+
+test('메모리 한계(Step 10): SQLITE_NOMEM은 삽입·직렬화 모두 E_MEM이고 롤백 뒤 DB는 계속 쓸 수 있다', async () => {
+  // wasm 메모리를 10 MB 블롭으로 채운다(약 2 GB에서 sqlite가 NOMEM을 낸다. 실측 6초 안팎).
+  // 이전에는 롤백까지 실패해 E_DB_QUERY "rollback failed"로 가려졌고, 직렬화의 NOMEM은 결과 코드가 1이라
+  // 일반 질의 오류로 안내됐다.
+  const engine = await openWasmEngine();
+  await engine.transaction(() =>
+    engine.exec('CREATE TABLE big (id INTEGER PRIMARY KEY, b BLOB) STRICT'),
+  );
+  /** @type {AppError | null} */
+  let failure = null;
+  let inserted = 0;
+  for (let i = 0; i < 400 && !failure; i += 1) {
+    try {
+      await engine.transaction(() =>
+        engine.exec('INSERT INTO big (b) VALUES (zeroblob(?))', [10 * MB]),
+      );
+      inserted += 1;
+    } catch (err) {
+      failure = err instanceof AppError ? err : null;
+      assert.ok(failure, `AppError여야 한다: ${String(err)}`);
+    }
+  }
+  assert.ok(failure, '400개(4 GB)를 넣기 전에 메모리 한계에 닿아야 한다');
+  assert.equal(failure.code, 'E_MEM', failure.message);
+  assert.ok(inserted > 50, `한계 전에 상당량이 들어가야 한다(${inserted})`);
+  // 직렬화도 같은 코드. `sqlite3_js_db_export`의 NOMEM은 결과 코드 없이 메시지로만 온다.
+  await assert.rejects(
+    async () => engine.snapshot(),
+    (err) => err instanceof AppError && err.code === 'E_MEM',
+  );
+  // 실패한 트랜잭션은 롤백됐고 DB는 계속 쓸 수 있다(작업 중단 → 저장 유도).
+  const { rows } = engine.exec('SELECT count(*) FROM big');
+  assert.deepEqual(rows, [[inserted]]);
+  await engine.transaction(() => engine.exec('DELETE FROM big'));
+  await engine.close();
+});

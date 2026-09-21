@@ -39,6 +39,8 @@ import { createDispatcher } from './worker.js';
  * @typedef {object} Client
  * @property {Transport} transport
  * @property {<K extends OpName>(op: K, args?: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result']>} call
+ * @property {(handler: (err: AppError) => void) => () => void} onFatal 전송 계층이 죽은 뒤 한 번 알린다. 이미 죽었으면 즉시. 해제 함수를 돌려준다
+ * @property {() => AppError | null} fatalError 전송 계층이 죽었으면 그 오류, 아니면 null
  * @property {() => void} close
  */
 
@@ -219,11 +221,21 @@ export function createClient(options) {
     else entry.reject(deserializeError(message.error));
   });
 
+  /** 전송 계층이 죽었을 때의 오류. 그 뒤의 호출은 보내지 않고 이 오류로 즉시 거부한다. */
+  /** @type {AppError | null} */
+  let dead = null;
+  /** @type {Set<(err: AppError) => void>} */
+  const fatalHandlers = new Set();
+
   // 전송 계층이 죽으면 그 호출들은 응답을 받을 수 없다. 조용히 매달아 두지 않고 거부한다(CLAUDE.md 5.6).
+  // 죽은 Worker에 보낸 새 요청도 영원히 응답이 없으므로, 그 뒤의 호출은 `call`에서 바로 거부한다(Step 10).
   transport.onFatal((err) => {
+    if (dead) return;
+    dead = err;
     const waiting = [...pending.values()];
     pending.clear();
     for (const entry of waiting) entry.reject(err);
+    for (const handler of fatalHandlers) handler(err);
   });
 
   return {
@@ -232,6 +244,10 @@ export function createClient(options) {
       const id = nextId;
       nextId += 1;
       return new Promise((resolve, reject) => {
+        if (dead) {
+          reject(dead);
+          return;
+        }
         if (callOptions.signal?.aborted) {
           reject(new AppError('E_IMPORT_CANCELLED', 'cancelled before start'));
           return;
@@ -252,6 +268,17 @@ export function createClient(options) {
         transport.post({ id, op, args }, callOptions.transfer);
       });
     },
+    onFatal(handler) {
+      if (dead) {
+        handler(dead);
+        return () => {};
+      }
+      fatalHandlers.add(handler);
+      return () => {
+        fatalHandlers.delete(handler);
+      };
+    },
+    fatalError: () => dead,
     close() {
       transport.close();
       for (const entry of pending.values()) {

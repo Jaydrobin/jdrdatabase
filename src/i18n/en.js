@@ -16,6 +16,14 @@ export const en = Object.freeze({
   'lock.supportedBrowsers':
     'Supported browsers: the latest two versions of Chrome/Edge (recommended), latest Firefox/Safari. WebAssembly must be enabled.',
   'lock.cause': 'Cause: {message}',
+  'lock.engineStopped': 'The database engine has stopped',
+  'lock.engineStopped.clean': 'There are no unsaved changes. Reload the page to start again.',
+  'lock.engineStopped.recoverable':
+    "Unsaved changes remain in this browser's journal. Reload the page and open the same file to be offered recovery.",
+  'lock.engineStopped.lost':
+    'Some changes (such as an import) could not be journaled, so changes since the last save are lost. Reload the page to start again.',
+  'lock.engineStopped.noJournal':
+    'This browser has no journal (IndexedDB), so changes since the last save are lost. Reload the page to start again.',
   'status.readOnly': 'Read-only',
   'status.noIdb': 'No IndexedDB: journal, backup and recent file are off',
   'device.defaultName': 'Device-{id}',

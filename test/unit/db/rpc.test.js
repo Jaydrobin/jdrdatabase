@@ -313,10 +313,14 @@ test('client: 부팅 후 Worker가 죽으면 대기 중인 호출이 거부된�
   // RPC에는 타임아웃이 없으므로, 전송 계층이 치명적 오류를 알리지 않으면 호출이 영원히 멈춘다.
   /** @type {((err: AppError) => void)[]} */
   const fatals = [];
+  /** @type {unknown[]} */
+  const posted = [];
   /** @type {import('../../../src/db/client.js').Transport} */
   const silent = {
     kind: 'worker',
-    post: () => {},
+    post: (message) => {
+      posted.push(message);
+    },
     onMessage: () => {},
     onFatal: (h) => {
       fatals.push(h);
@@ -325,10 +329,32 @@ test('client: 부팅 후 Worker가 죽으면 대기 중인 호출이 거부된�
   };
   const client = createClient({ transport: silent });
   const pending = client.call('engine.exec', { sql: 'SELECT 1' });
+  /** @type {AppError[]} */
+  const notified = [];
+  const off = client.onFatal((err) => notified.push(err));
+  assert.equal(client.fatalError(), null);
   const fatal = fatals.at(-1);
   assert.ok(fatal, 'client가 전송 계층의 치명적 오류를 구독해야 한다');
   fatal(new AppError('E_ENV_NO_WORKER', 'worker terminated'));
   await assert.rejects(pending, (err) => err instanceof AppError && err.code === 'E_ENV_NO_WORKER');
+  assert.equal(notified.length, 1);
+  assert.equal(client.fatalError()?.code, 'E_ENV_NO_WORKER');
+
+  // 죽은 Worker에 보낸 새 요청은 영원히 응답이 없다(Step 10). 보내지 않고 같은 오류로 즉시 거부한다.
+  posted.length = 0;
+  await assert.rejects(
+    client.call('engine.exec', { sql: 'SELECT 2' }),
+    (err) => err instanceof AppError && err.code === 'E_ENV_NO_WORKER',
+  );
+  assert.equal(posted.length, 0, '죽은 전송 계층에는 보내지 않는다');
+  // 두 번째 치명 알림은 무시되고, 죽은 뒤의 구독은 즉시 알림을 받는다.
+  fatal(new AppError('E_UNKNOWN', 'again'));
+  assert.equal(notified.length, 1);
+  off();
+  /** @type {AppError[]} */
+  const late = [];
+  client.onFatal((err) => late.push(err));
+  assert.equal(late[0]?.code, 'E_ENV_NO_WORKER');
 });
 
 test('createProgressReporter: 250 ms 간격, 단계 변경·완료는 즉시', () => {

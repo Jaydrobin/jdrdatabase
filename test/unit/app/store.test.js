@@ -146,15 +146,24 @@ function fakePrompts(answers = {}) {
 }
 
 /**
- * @param {{ idb?: ReturnType<typeof createMemoryIdb> | null, prompts?: Partial<Parameters<typeof fakePrompts>[0]>, caps?: Partial<import('../../../src/db/engine.js').EngineCapabilities> }} [options]
+ * @param {{ idb?: ReturnType<typeof createMemoryIdb> | null, prompts?: Partial<Parameters<typeof fakePrompts>[0]>, caps?: Partial<import('../../../src/db/engine.js').EngineCapabilities>, failOp?: { op: string, error: unknown } }} [options] `failOp`은 그 op의 호출을 주어진 오류로 거부한다(오류 주입, Step 10)
  */
 async function setup(options = {}) {
-  const client = createClient({ transport: createInlineTransport() });
-  const init = await client.call('engine.init', {
+  const raw = createClient({ transport: createInlineTransport() });
+  const init = await raw.call('engine.init', {
     mode: 'wasm',
     wasmBinary: await loadWasmBinary(),
     appVersion: 'test',
   });
+  const failOp = options.failOp;
+  /** @type {import('../../../src/db/client.js').Client} */
+  const client = failOp
+    ? {
+        ...raw,
+        call: (op, args, callOptions) =>
+          op === failOp.op ? Promise.reject(failOp.error) : raw.call(op, args, callOptions),
+      }
+    : raw;
   const idb = options.idb === undefined ? createMemoryIdb() : options.idb;
   const fsx = fakeFs();
   const p = fakePrompts(options.prompts);
@@ -1229,5 +1238,91 @@ test('저장 중에 저널이 멈추면 저장 뒤에도 dirty와 정지가 남�
   assert.equal(store.getState().journalStop, 'limit', '저장이 정지를 풀어서는 안 된다');
   assert.equal(store.getState().journalFull, true);
   assert.equal(autosave.isFull(), true);
+  client.close();
+});
+
+test('오류 주입(Step 10): 스냅샷의 메모리 부족은 E_MEM으로 알리고 dirty·파일 상태를 그대로 둔다', async () => {
+  // 브라우저는 큰 ArrayBuffer 할당 실패를 RangeError로 낸다. wasm 엔진의 SQLITE_NOMEM은 Worker에서 E_MEM으로 온다.
+  const { store, client, fsx, notices, autosave } = await setup({
+    failOp: { op: 'db.snapshot', error: new RangeError('Array buffer allocation failed') },
+  });
+  const dbId = store.getState().meta.db_id ?? '';
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  assert.equal(await store.save(), false);
+  assert.deepEqual(notices.at(-1), { kind: 'error', value: 'E_MEM' });
+  const s = store.getState();
+  assert.equal(s.dirty, true, '저장되지 않았으므로 dirty 유지');
+  assert.equal(s.file.name, null);
+  assert.equal(s.meta.revision, '0');
+  assert.equal(s.saving, false, '저장 뮤텍스가 풀린다');
+  assert.equal(fsx.downloads.length, 0);
+  assert.equal((await autosave.recoverable(dbId))?.commands.length, 1, '저널은 그대로');
+  client.close();
+});
+
+test('오류 주입(Step 10): 파일 쓰기 중 예외는 E_FILE_WRITE로 알리고, 다음 저장이 모든 변경을 담는다', async () => {
+  const { store, client, fsx, notices, autosave } = await setup();
+  const dbId = store.getState().meta.db_id ?? '';
+  let failWrites = true;
+  const realWrite = fsx.fs.write;
+  fsx.fs.write = async (handle, bytes) => {
+    if (failWrites) throw new AppError('E_FILE_WRITE', 'write: disk full');
+    await realWrite(handle, bytes);
+  };
+  const handle = /** @type {FileSystemFileHandle} */ (
+    /** @type {unknown} */ ({
+      name: 'w.db',
+      kind: 'file',
+      getFile: async () => new File([], 'w.db'),
+    })
+  );
+  fsx.setSaveTarget({ kind: 'handle', handle });
+
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  assert.equal(await store.saveAs(), false);
+  assert.deepEqual(notices.at(-1), { kind: 'error', value: 'E_FILE_WRITE' });
+  const failed = store.getState();
+  assert.equal(failed.dirty, true);
+  assert.equal(failed.file.name, null, '쓰지 못한 핸들은 정본이 되지 않는다');
+  assert.equal(failed.saving, false);
+  assert.equal(fsx.written.has('w.db'), false, '원본(없음)은 그대로');
+  assert.equal((await autosave.recoverable(dbId))?.commands.length, 1, '저널은 그대로');
+  // 스냅샷이 올린 revision은 DB(메모리)에만 남고 스토어의 meta는 성공한 저장에서만 바뀐다. 다음 저장에서
+  // 한 번 더 오른다(파일 revision은 단조 증가만 보장하면 된다).
+  assert.equal(failed.meta.revision, '0');
+  assert.deepEqual(
+    (
+      await client.call('engine.exec', {
+        sql: "SELECT value FROM _jdr_meta WHERE key = 'revision'",
+      })
+    ).rows,
+    [['1']],
+  );
+
+  const INSERT = /** @type {Command} */ ({
+    type: 'row.insert',
+    tableId: null,
+    do: [{ sql: 'INSERT INTO t (s) VALUES (?)', params: ['둘'] }],
+    undo: [{ sql: 'DELETE FROM t WHERE s = ?', params: ['둘'] }],
+    summary: 'insert',
+  });
+  await client.call('command.apply', { cmd: INSERT });
+  await store.recordCommand(INSERT);
+  failWrites = false;
+  assert.equal(await store.saveAs(), true);
+  const saved = store.getState();
+  assert.equal(saved.dirty, false);
+  assert.equal(saved.file.name, 'w.db');
+  assert.equal(saved.meta.revision, '2');
+  assert.equal(await autosave.recoverable(dbId), null, '성공한 저장이 저널을 비운다');
+  const bytes = fsx.written.get('w.db');
+  assert.ok(bytes);
+  assert.equal(await store.openPicked(pickedFile('w.db', bytes)), true);
+  assert.deepEqual(
+    (await client.call('engine.exec', { sql: 'SELECT s FROM t ORDER BY id' })).rows,
+    [['하나'], ['둘']],
+  );
   client.close();
 });

@@ -98,7 +98,8 @@ function toQueryError(err, sql, extra = {}) {
   if (resultCode === 26) {
     return new AppError('E_FILE_NOT_SQLITE', message, { cause: err, detail });
   }
-  if (resultCode === 7) {
+  // 7은 SQLITE_NOMEM. `sqlite3_js_db_export`의 NOMEM은 결과 코드 없이(1, SQLITE_ERROR) 메시지로만 온다.
+  if (resultCode === 7 || /SQLITE_NOMEM/.test(message)) {
     return new AppError('E_MEM', message, { cause: err, detail });
   }
   return new AppError('E_DB_QUERY', message, { cause: err, detail });
@@ -429,15 +430,22 @@ export function createWasmEngine(options) {
         execRaw(depth === 0 ? 'COMMIT' : `RELEASE ${savepoint}`);
         return result;
       } catch (err) {
+        const original = toAppError(err, 'E_DB_QUERY');
         try {
           execRaw(depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
         } catch (rollbackErr) {
-          throw new AppError('E_DB_QUERY', 'rollback failed after error', {
-            cause: rollbackErr,
-            detail: { original: err instanceof Error ? err.message : String(err) },
+          // 메모리 부족은 롤백도 실패시킨다. 롤백 실패로 원래 코드(E_MEM)를 가리면 UI가 "저장 후
+          // 다시 시작" 대신 일반 질의 오류로 안내하게 되므로 원래 오류를 그대로 던지고 롤백 실패는 detail에 남긴다.
+          throw new AppError(original.code, original.message, {
+            cause: original,
+            detail: {
+              ...(typeof original.detail === 'object' && original.detail ? original.detail : {}),
+              rollbackFailed:
+                rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+            },
           });
         }
-        throw toAppError(err, 'E_DB_QUERY');
+        throw original;
       } finally {
         txDepth -= 1;
       }
