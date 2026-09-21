@@ -142,43 +142,6 @@ test.beforeEach(async ({ page }) => {
     const w = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window));
     delete w.showOpenFilePicker;
     delete w.showSaveFilePicker;
-    // 임시 진단(세션 F 점검 후속): 맨 아래 검사가 CI에서만 간헐적으로 실패한다. 관측이 타이밍을
-    // 바꾸면 경합이 숨으므로 비용이 없는 것만 건다. blur는 검사당 몇 번뿐이고, 토스트는 상자가
-    // 생긴 뒤 그 상자 하나만 본다(토스트가 뜰 때만 콜백이 돈다). 원인을 특정하면 지운다.
-    /** @type {Array<Record<string, unknown>>} */
-    const blurs = [];
-    /** @type {Array<Record<string, unknown>>} */
-    const toasts = [];
-    w.__jdrBlur = blurs;
-    w.__jdrToasts = toasts;
-    const at = () => Math.round(performance.now());
-    document.addEventListener(
-      'blur',
-      (ev) => {
-        const t = ev.target;
-        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) {
-          blurs.push({ at: at(), cls: t.className, value: t.value.slice(0, 40) });
-        }
-      },
-      true,
-    );
-    const watchToasts = () => {
-      const box = document.querySelector('.jdr-toasts');
-      if (!box) {
-        requestAnimationFrame(watchToasts);
-        return;
-      }
-      new MutationObserver((muts) => {
-        for (const m of muts) {
-          for (const n of m.addedNodes) {
-            if (n instanceof HTMLElement) {
-              toasts.push({ at: at(), cls: n.className, text: (n.textContent ?? '').slice(0, 60) });
-            }
-          }
-        }
-      }).observe(box, { childList: true });
-    };
-    requestAnimationFrame(watchToasts);
   });
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto(PAGE_URL);
@@ -449,14 +412,7 @@ test('정렬 대상 열을 삭제하면 뷰에서 그 정렬 항목이 빠지고
   await expect(cell(page, 0, 0)).toHaveText('이름1');
 });
 
-/**
- * 임시 진단(세션 F 점검 후속): 이 시나리오가 CI에서만 간헐적으로 실패한다. 샘플을 늘리려고
- * 같은 본문을 여러 번 등록한다. `seed()`와 `dblclick()` 사이에 아무것도 넣지 않는 것이 중요하다
- * (왕복을 하나만 끼워도 실패가 사라졌다. 경합이 그 구간에 있다는 뜻이다).
- * 원인을 특정하면 반복 등록을 지우고 검사 하나만 남긴다.
- * @param {import('@playwright/test').Page} page
- */
-async function headerClickWhileEditing(page) {
+test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
   const { table, name } = await seed(page);
   // 그리드가 다시 마운트되며 편집기를 닫는 경로다. 닫히기 전에 blur 확정이 먼저 일어나야
   // Step 5의 "다른 곳 클릭 → 확정 시도"가 지켜진다(입력이 조용히 사라지지 않는다).
@@ -466,27 +422,10 @@ async function headerClickWhileEditing(page) {
   await header(page, '나이').click();
   await expect(header(page, '나이')).toHaveAttribute('aria-sort', 'ascending');
   await expect(page.locator('.jdr-editor')).toBeHidden();
+  // 편집기가 닫힌 것은 확정이 끝났다는 뜻이 아니다. 정렬이 그리드를 다시 마운트하며 부르는
+  // `hooks.onReset` → `inline.cancel()`이 진행 중인 확정과 무관하게 편집기를 먼저 닫는다.
+  // 확정은 `query.row` → `command.apply` 왕복이라 그 뒤에 끝나므로 값이 닿을 때까지 기다린다.
+  // 확정이 아예 일어나지 않는 회귀라면 값이 끝내 닿지 않아 시간 초과로 잡힌다.
   const sql = `SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`;
-  const stored = await hook(page).query(sql);
-  if (stored.rows[0]?.[0] !== '머리글클릭확정') {
-    // 실패할 때만 증거를 모은다(성공 경로에는 아무 비용도 붙지 않는다).
-    const seen = await page.evaluate(() => ({
-      blurs: /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window)).__jdrBlur,
-      toasts: /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window)).__jdrToasts,
-    }));
-    await page.waitForTimeout(2000);
-    const later = (await hook(page).query(sql)).rows[0]?.[0];
-    console.log(`DIAG ${JSON.stringify({ immediate: stored.rows[0]?.[0], later, ...seen })}`);
-  }
-  expect(stored.rows[0]?.[0]).toBe('머리글클릭확정');
-}
-
-test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
-  await headerClickWhileEditing(page);
+  await expect.poll(async () => (await hook(page).query(sql)).rows[0]?.[0]).toBe('머리글클릭확정');
 });
-
-for (let n = 2; n <= 8; n += 1) {
-  test(`편집 중 머리글 클릭(정렬) 반복 ${n} (임시 진단)`, async ({ page }) => {
-    await headerClickWhileEditing(page);
-  });
-}
