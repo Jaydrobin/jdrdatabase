@@ -9,9 +9,8 @@ import { expect, test } from '@playwright/test';
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { PAGE_URL } from './page-url.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const FILE_INPUT_CLASS = 'jdr-file-input';
 const ROWS = 200;
 

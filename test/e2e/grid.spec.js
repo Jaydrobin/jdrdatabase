@@ -5,11 +5,9 @@
  * 열 고정, 키보드 이동, 빈 상태(열 없음·테이블 삭제)를 실제 산출물(`file://`)에서 확인한다.
  */
 import { expect, test } from '@playwright/test';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { delayTransport } from './delay-transport.js';
+import { PAGE_URL } from './page-url.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const ROWS = 5_000;
 
 /**

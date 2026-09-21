@@ -9,9 +9,8 @@ import { expect, test } from '@playwright/test';
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { PAGE_URL } from './page-url.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const FIXTURES = path.resolve('test/fixtures');
 /** 폴백 열기 경로의 숨은 입력 요소(io/filesystem.js의 FILE_INPUT_CLASS와 같은 값). E2E는 산출물만 열므로 소스를 import하지 않는다. */
 const FILE_INPUT_CLASS = 'jdr-file-input';

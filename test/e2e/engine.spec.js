@@ -1,9 +1,6 @@
 // @ts-check
 import { expect, test } from '@playwright/test';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
+import { PAGE_URL } from './page-url.js';
 
 /**
  * @typedef {object} TestHook

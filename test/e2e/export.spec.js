@@ -8,9 +8,8 @@ import { expect, test } from '@playwright/test';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { PAGE_URL } from './page-url.js';
 
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
 const FIXTURES = path.resolve('test/fixtures/import');
 const IMPORT_INPUT = 'input.jdr-import-input';
 const FILE_INPUT = 'input.jdr-file-input';

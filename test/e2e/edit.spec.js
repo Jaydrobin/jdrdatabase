@@ -6,11 +6,8 @@
  * 클립보드는 컨텍스트에 권한을 주고 실제 Ctrl+C·Ctrl+V로 검사한다.
  */
 import { expect, test } from '@playwright/test';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { delayTransport } from './delay-transport.js';
-
-const PAGE_URL = pathToFileURL(path.resolve('dist/test/jdrdatabase.html')).href;
+import { PAGE_URL } from './page-url.js';
 
 /**
  * @typedef {object} TestHook
