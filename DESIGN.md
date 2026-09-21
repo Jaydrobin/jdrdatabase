@@ -107,7 +107,7 @@
 
 - 공식 배포본 `sqlite3.mjs` + `sqlite3.wasm`(SQLite 3.53.4)은 FTS5(trigram 토크나이저 포함), JSON, `sqlite3_interrupt`, `sqlite3_deserialize`, `sqlite3_js_db_export`를 포함한다. 실제 사용 버전의 `PRAGMA compile_options` 결과를 Step 1 테스트로 고정한다.
 - ESM 배포본은 빌드가 esbuild로 Worker용 IIFE 번들에 접어 넣는다. 번들 안에서는 `import.meta.url`이 비어 있으므로 `sqlite3InitModule({ wasmBinary, locateFile: (name) => name })`처럼 base64를 디코딩한 ArrayBuffer와 파일 이름을 그대로 돌려주는 `locateFile`을 함께 넘긴다. 이렇게 하면 wasm·프록시 스크립트를 위한 별도 파일 요청이 일어나지 않는다. 단일 파일화가 복잡하다는 이전 판단은 이 조합으로 해소되었고, `file://`에서 연 문서의 Blob Worker 안에서 FTS5 trigram 질의가 동작함을 세션 A에서 실측했다.
-- DB는 항상 메모리 DB다. 파일 열기는 바이트를 `sqlite3_deserialize`로 넘기고, 저장은 `sqlite3_js_db_export`로 바이트를 얻는다. OPFS VFS 설치 실패는 경고 로그로만 남고 동작에 영향이 없다.
+- DB는 항상 메모리 DB다. 파일 열기는 바이트를 `sqlite3_deserialize`로 넘기고, 저장은 `sqlite3_serialize`로 바이트를 얻는다. deserialize로 연 DB(memdb)는 `SQLITE_SERIALIZE_NOCOPY`로 wasm 힙의 파일 바이트를 그 자리에서 JS로 한 번만 복사하고, memdb가 아닌 새 DB는 `sqlite3_js_db_export`(wasm 안에 사본을 만든 뒤 복사)로 간다. wasm 메모리는 줄어들지 않으므로 기본 export의 사본은 300 MB DB의 저장 시점 최대 메모리를 300 MB 올렸다(세션 H 실측). OPFS VFS 설치 실패는 경고 로그로만 남고 동작에 영향이 없다.
 - Worker는 `<script type="text/plain">` 블록의 소스를 Blob URL로 만들어 생성한다. Worker 생성이 막힌 환경에서는 같은 API를 메인 스레드에서 실행하는 인라인 전송 계층으로 자동 폴백한다(D-11 RPC 추상화 덕분에 비용이 낮다).
 - 중요한 특성: `sqlite3_js_db_export`는 DB를 닫지 않으므로 export 자체가 prepared statement를 무효화하지는 않는다. 그래도 엔진 인터페이스의 `snapshot()`은 **statement 캐시를 비우고 PRAGMA를 다시 적용하는 계약**을 유지한다. 호출자가 특정 wasm 빌드의 동작에 기대지 않게 하기 위해서이며, `snapshot()` 바깥에서 export를 직접 부르는 코드는 두지 않는다.
 - 이 결정은 브라우저 모드의 엔진 구현(`engine-wasm.js`)에 관한 것이다. 두 모드가 공유하는 엔진 인터페이스와 데스크톱 모드의 네이티브 구현은 D-15에서 정한다.
@@ -234,7 +234,7 @@ run(sql, params)               // 쓰기 한 문장. { changes, lastId }
 runBatch(sql, paramsList)      // 같은 문장을 파라미터 목록만큼 반복. 하나의 트랜잭션. 가져오기·붙여넣기 전용
 transaction(fn)                // BEGIN / COMMIT / ROLLBACK
 prepareCached(sql)             // wasm 전용 최적화. native는 no-op 핸들
-snapshot()                     // wasm: Uint8Array(sqlite3_js_db_export) / native: E_UNSUPPORTED
+snapshot()                     // wasm: Uint8Array(sqlite3_serialize NOCOPY, 폴백 sqlite3_js_db_export) / native: E_UNSUPPORTED
 saveTo(originalPath, expected) // native 전용. VACUUM INTO 임시 → 원자적 교체
 interrupt()                    // 진행 중 문장 중단
 ```
@@ -551,7 +551,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **주요 함수**
 - `engine.js`: D-15 인터페이스의 JSDoc `@typedef Engine`, `selectEngine(mode)`, 공통 검증 래퍼(결과 1만 행 상한, `runBatch` 파라미터 목록 1만 건 상한, 배치 직렬화 크기 64 MB 상한)
-- `engine-wasm.js`: `init({ wasmBinary })`, `open(bytes?)`, `close()`, `exec(sql, params)`, `run(sql, params)`, `runBatch(sql, paramsList)`(하나의 트랜잭션에서 prepared statement를 bind → step → reset 반복), `prepareCached(sql)`, `transaction(fn)`, `snapshot()`(`sqlite3_js_db_export`를 감싸고 statement 캐시 무효화·PRAGMA 재적용 수행), `applyPragmas()`, `interrupt()`, `capabilities()` → `{ mode: 'wasm', warnFileBytes: 700 MB, maxFileBytes: 1.5 GB, persistence: 'snapshot' }`
+- `engine-wasm.js`: `init({ wasmBinary })`, `open(bytes?)`, `close()`, `exec(sql, params)`, `run(sql, params)`, `runBatch(sql, paramsList)`(하나의 트랜잭션에서 prepared statement를 bind → step → reset 반복), `prepareCached(sql)`, `transaction(fn)`, `snapshot()`(`sqlite3_serialize` NOCOPY 또는 `sqlite3_js_db_export`를 감싸고 statement 캐시 무효화·PRAGMA 재적용 수행), `applyPragmas()`, `interrupt()`, `capabilities()` → `{ mode: 'wasm', warnFileBytes: 700 MB, maxFileBytes: 1.5 GB, persistence: 'snapshot' }`
 - `client.createClient({ transport })`, `client.call(op, args, { transfer, onProgress, signal })`
 - `worker.js`: `dispatch(msg)` → `handlers[op]`. 진행 이벤트 `{ id, progress: { done, total, phase } }`
 - `createTransport()`: Worker 생성 시도 → 실패 시 `InlineTransport`(같은 스레드에서 `dispatch` 직접 호출)

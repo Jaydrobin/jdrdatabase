@@ -150,3 +150,31 @@ test('메모리 한계(Step 10): SQLITE_NOMEM은 삽입·직렬화 모두 E_MEM�
   await engine.transaction(() => engine.exec('DELETE FROM big'));
   await engine.close();
 });
+
+test('snapshot: deserialize로 연 DB는 NOCOPY 경로로도 같은 파일을 내고, 새 :memory: DB는 기본 export로 간다', async () => {
+  // 세션 H: memdb(deserialize로 연 DB)는 SQLITE_SERIALIZE_NOCOPY로 wasm 사본 없이 내보낸다. 결과는 기본 export와
+  // 같은 SQLite 파일이어야 하고, 쓰기 뒤의 스냅샷에 그 변경이 들어 있어야 한다.
+  const fresh = await openWasmEngine();
+  await fresh.transaction(() => {
+    fresh.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, s TEXT) STRICT');
+    fresh.exec('INSERT INTO a (s) VALUES (?)', ['하나']);
+  });
+  const first = await fresh.snapshot();
+  assert.equal(new TextDecoder().decode(first.subarray(0, 15)), 'SQLite format 3');
+  await fresh.close();
+
+  const reopened = await openWasmEngine(first);
+  await reopened.transaction(() => reopened.exec('INSERT INTO a (s) VALUES (?)', ['둘']));
+  const second = await reopened.snapshot();
+  assert.equal(new TextDecoder().decode(second.subarray(0, 15)), 'SQLite format 3');
+  assert.ok(second.byteLength >= first.byteLength);
+  // 스냅샷 뒤에도 같은 엔진을 계속 쓸 수 있고(statement 캐시 재구성), 한 번 더 찍어도 같은 바이트다.
+  assert.deepEqual(reopened.exec('SELECT count(*) FROM a').rows, [[2]]);
+  const again = await reopened.snapshot();
+  assert.deepEqual(again, second);
+  await reopened.close();
+
+  const verify = await openWasmEngine(second);
+  assert.deepEqual(verify.exec('SELECT s FROM a ORDER BY id').rows, [['하나'], ['둘']]);
+  await verify.close();
+});

@@ -81,6 +81,62 @@ function normalizeParams(params) {
 }
 
 /**
+ * `exportNoCopy`가 쓰는 wasm 도우미의 형태. 상류 d.mts에 없는 내부 export(`sqlite3__wasm_db_serialize`)까지 이 함수가
+ * 쓰는 부분만 적는다.
+ * @typedef {object} WasmHelpers
+ * @property {boolean} bigIntEnabled
+ * @property {{ sqlite3__wasm_db_serialize?: (pDb: number, zSchema: number, ppOut: number, pSize: number, flags: number) => number }} exports
+ * @property {() => number} scopedAllocPush
+ * @property {(scope: number) => void} scopedAllocPop
+ * @property {(bytes: number) => number} scopedAlloc
+ * @property {(text: string) => number} scopedAllocCString
+ * @property {{ size: number, add: (ptr: number, offset: number) => number }} ptr
+ * @property {(addr: number, value: number, type: string) => unknown} poke
+ * @property {(addr: number) => number | bigint} peekPtr
+ * @property {(addr: number, type: string) => number | bigint} peek
+ * @property {() => Uint8Array<ArrayBuffer>} heap8u
+ */
+
+/**
+ * `sqlite3_deserialize`로 연 DB(memdb)는 파일 바이트가 wasm 힙에 그대로 있다. `SQLITE_SERIALIZE_NOCOPY`로 그 자리를
+ * 가리키는 포인터를 받아 JS로 한 번만 복사하면, 기본 export(`sqlite3_js_db_export`)처럼 wasm 안에 사본을 하나 더
+ * 만들지 않는다. wasm 메모리는 줄어들지 않으므로 그 사본은 300 MB DB에서 저장 시점 최대 메모리를 300 MB 올렸다
+ * (세션 H 실측: 렌더러 RSS 1.37 GiB → 8장 예산 1.2 GB 초과). memdb가 아닌 DB(`:memory:`로 새로 만든 것)는
+ * NOCOPY가 포인터를 주지 않으므로 null을 돌려주고 호출자가 기본 export로 간다.
+ * @param {Sqlite3Static} lib
+ * @param {Database} database
+ * @returns {Uint8Array<ArrayBuffer> | null}
+ */
+function exportNoCopy(lib, database) {
+  const wasm = /** @type {WasmHelpers} */ (/** @type {unknown} */ (lib.wasm));
+  const serialize = wasm.exports.sqlite3__wasm_db_serialize;
+  if (!wasm.bigIntEnabled || typeof serialize !== 'function') return null;
+  const scope = wasm.scopedAllocPush();
+  try {
+    // pSize(i64) 뒤에 ppOut. 순서가 바뀌면 8바이트 정렬이 깨져 크기를 잘못 읽는다(상류 주석과 같은 배치).
+    const pSize = wasm.scopedAlloc(8 + wasm.ptr.size);
+    const ppOut = wasm.ptr.add(pSize, 8);
+    wasm.poke(ppOut, 0, '*');
+    const zSchema = wasm.scopedAllocCString('main');
+    const rc = serialize(
+      database.pointer ?? 0,
+      zSchema,
+      ppOut,
+      pSize,
+      lib.capi.SQLITE_SERIALIZE_NOCOPY,
+    );
+    if (rc !== 0) return null;
+    const pOut = Number(wasm.peekPtr(ppOut));
+    const nOut = Number(wasm.peek(pSize, 'i64'));
+    if (!pOut || nOut <= 0) return null;
+    // slice()는 새 ArrayBuffer로 복사한다(transfer 가능). NOCOPY 포인터는 DB 소유이므로 해제하지 않는다.
+    return wasm.heap8u().slice(pOut, pOut + nOut);
+  } finally {
+    wasm.scopedAllocPop(scope);
+  }
+}
+
+/**
  * sqlite3 예외를 AppError로 바꾼다. 결과 코드 26(SQLITE_NOTADB)은 파일이 SQLite가 아닌 경우다.
  * @param {unknown} err
  * @param {string} sql
@@ -466,7 +522,7 @@ export function createWasmEngine(options) {
       /** @type {Uint8Array<ArrayBuffer>} */
       let bytes;
       try {
-        bytes = lib.capi.sqlite3_js_db_export(database);
+        bytes = exportNoCopy(lib, database) ?? lib.capi.sqlite3_js_db_export(database);
       } catch (err) {
         throw toQueryError(err, 'snapshot');
       }
