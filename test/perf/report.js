@@ -26,7 +26,18 @@ export const NOISE_FLOOR_BYTES = 16 * 1024 * 1024;
  * @returns {number}
  */
 export function noiseFloor(key) {
-  return key.endsWith('Bytes') ? NOISE_FLOOR_BYTES : NOISE_FLOOR_MS;
+  return isBytes(key) ? NOISE_FLOOR_BYTES : NOISE_FLOOR_MS;
+}
+
+/**
+ * 메모리·크기 항목인가. 러너 속도 보정(calibrate.js)은 CPU가 얼마나 빠른가를 잰 값이므로 시간 항목에만
+ * 적용한다. 바이트 항목에 곱하면 양쪽으로 틀린다: 느린 기계에서는 8장 예산(1.2 GB)을 넘는 메모리 회귀가
+ * 기대값 안으로 들어와 통과하고, 빠른 기계에서는 코드가 그대로인데도 `memory.rssLastBytes`가 회귀로 잡힌다.
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isBytes(key) {
+  return key.endsWith('Bytes');
 }
 /** CI에서 기준선 비교를 켜는 환경 변수. 로컬 기본 실행은 8장의 절대 예산으로만 판정한다. */
 export const COMPARE_ENV = 'JDR_PERF_COMPARE';
@@ -68,10 +79,10 @@ export async function record(name, metrics, info = {}) {
 
 /**
  * 기준선 비교. `baseline`에 없는 항목은 건너뛴다(새 측정값은 다음 기준선 갱신에서 들어간다).
- * 회귀 = 기준선 × 러너 속도 비(`scale`, calibrate.js) × 1.3 + 잡음 바닥을 넘는 값.
+ * 회귀 = 기준선 × 러너 속도 비(`scale`, calibrate.js. 시간 항목에만) × 1.3 + 잡음 바닥을 넘는 값.
  * @param {Record<string, Record<string, number>>} baseline spec 이름 → metrics
  * @param {PerfReport[]} reports
- * @param {number} [scale] 이번 러너가 기준선 러너보다 느린 비(1이면 같은 속도)
+ * @param {number} [scale] 이번 러너가 기준선 러너보다 느린 비(1이면 같은 속도). 바이트 항목에는 쓰지 않는다
  * @returns {{ regressions: string[], compared: number, skipped: string[] }}
  */
 export function compareWithBaseline(baseline, reports, scale = 1) {
@@ -89,11 +100,13 @@ export function compareWithBaseline(baseline, reports, scale = 1) {
         continue;
       }
       compared += 1;
-      const expected = ref * scale;
+      // 바이트 항목은 기계 속도와 무관하다(위 `isBytes`).
+      const keyScale = isBytes(key) ? 1 : scale;
+      const expected = ref * keyScale;
       const limit = expected * REGRESSION_RATIO + noiseFloor(key);
       if (value > limit) {
         regressions.push(
-          `${report.name}.${key}: ${value} > ${ref} × ${scale.toFixed(2)} × ${REGRESSION_RATIO} + ${noiseFloor(key)} (${((value / expected - 1) * 100).toFixed(0)}% 회귀)`,
+          `${report.name}.${key}: ${value} > ${ref} × ${keyScale.toFixed(2)} × ${REGRESSION_RATIO} + ${noiseFloor(key)} (${((value / expected - 1) * 100).toFixed(0)}% 회귀)`,
         );
       }
     }

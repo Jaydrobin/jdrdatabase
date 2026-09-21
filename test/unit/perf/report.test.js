@@ -45,6 +45,29 @@ test('compareWithBaseline: 비율과 잡음 바닥을 둘 다 넘어야 회귀',
   assert.equal(same.regressions.length, 1);
 });
 
+test('compareWithBaseline: 러너 속도 보정은 시간 항목에만 적용한다', () => {
+  // 보정값은 CPU 고정 작업을 잰 것이라 메모리에는 뜻이 없다. 바이트 항목에 곱하면 양쪽으로 틀린다.
+  const baseline = {
+    memory: { rssLastBytes: 318_459_904 },
+    'app-300k': { peakRssBytes: 856_301_568 },
+  };
+
+  // 빠른 기계(비 0.7): 코드가 그대로라 측정값이 기준선과 같은데도 회귀로 잡혔다.
+  const unchanged = [{ name: 'memory', metrics: { rssLastBytes: 318_459_904 } }];
+  assert.deepEqual(compareWithBaseline(baseline, unchanged, 0.7).regressions, []);
+  assert.deepEqual(compareWithBaseline(baseline, unchanged, 1.4).regressions, []);
+
+  // 느린 기계(비 1.38): 8장 예산(1.2 GB)을 넘는 1.4 GB짜리 메모리 회귀가 기대값 안으로 들어와 통과했다.
+  const regressed = [{ name: 'app-300k', metrics: { peakRssBytes: 1_400_000_000 } }];
+  for (const scale of [1, 1.38, 2]) {
+    assert.equal(
+      compareWithBaseline(baseline, regressed, scale).regressions.length,
+      1,
+      `속도 비 ${scale}에서도 메모리 회귀를 잡아야 한다`,
+    );
+  }
+});
+
 test('speedRatio: 기준선·현재 보정값의 비를 [0.5, 2]로 자르고, 없으면 1', () => {
   assert.equal(speedRatio(600, 840), 1.4);
   assert.equal(speedRatio(600, 300), 0.5);
