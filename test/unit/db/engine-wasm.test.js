@@ -159,18 +159,18 @@ test('snapshot: deserialize로 연 DB는 NOCOPY 경로로도 같은 파일을 �
     fresh.exec('CREATE TABLE a (id INTEGER PRIMARY KEY, s TEXT) STRICT');
     fresh.exec('INSERT INTO a (s) VALUES (?)', ['하나']);
   });
-  const first = await fresh.snapshot();
+  const first = fresh.snapshot();
   assert.equal(new TextDecoder().decode(first.subarray(0, 15)), 'SQLite format 3');
   await fresh.close();
 
   const reopened = await openWasmEngine(first);
   await reopened.transaction(() => reopened.exec('INSERT INTO a (s) VALUES (?)', ['둘']));
-  const second = await reopened.snapshot();
+  const second = reopened.snapshot();
   assert.equal(new TextDecoder().decode(second.subarray(0, 15)), 'SQLite format 3');
   assert.ok(second.byteLength >= first.byteLength);
   // 스냅샷 뒤에도 같은 엔진을 계속 쓸 수 있고(statement 캐시 재구성), 한 번 더 찍어도 같은 바이트다.
   assert.deepEqual(reopened.exec('SELECT count(*) FROM a').rows, [[2]]);
-  const again = await reopened.snapshot();
+  const again = reopened.snapshot();
   assert.deepEqual(again, second);
   await reopened.close();
 
