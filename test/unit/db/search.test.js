@@ -51,6 +51,16 @@ function objectsOf(engine, tableId) {
     .rows.map((r) => `${r[0]}:${r[1]}`);
 }
 
+/**
+ * 파일에서 실제로 쓰이는(재사용할 수 없는) 페이지의 바이트 수.
+ * @param {Engine} engine
+ */
+function livePages(engine) {
+  const n = (/** @type {string} */ pragma) =>
+    Number(engine.exec(`PRAGMA ${pragma}`).rows[0]?.[0] ?? 0);
+  return (n('page_count') - n('freelist_count')) * n('page_size');
+}
+
 test('searchableColumns: 물리 타입이 TEXT인 살아 있는 열만', async () => {
   const { engine, tableId, name, body, day } = await setup();
   const table = tables.requireTable(engine, tableId);
@@ -231,6 +241,22 @@ test('fetchWindow: 검색이 창 질의에 붙고 정렬과 함께 동작한다'
   assert.deepEqual(
     result.rows.map((r) => r.cells[result.columnIds.indexOf(name)]),
     ['김철수'],
+  );
+  await engine.close();
+});
+
+test('table.drop: 검색 인덱스를 함께 지워 파일에 고아 FTS 테이블이 남지 않는다', async () => {
+  const { engine, tableId } = await setup();
+  await search.enable(engine, tableId);
+  assert.ok(objectsOf(engine, tableId).length > 0, '삭제 전에는 인덱스 객체가 있다');
+  const livePagesBefore = livePages(engine);
+  await tables.drop(engine, tableId);
+  // 트리거는 원본 테이블과 함께 사라지지만 FTS5 가상 테이블과 그림자 테이블(_data·_idx·_docsize·_config)은
+  // 남아, 메타에서 손잡이가 사라진 뒤에도 파일을 영영 차지한다.
+  assert.deepEqual(objectsOf(engine, tableId), [], '삭제 뒤 인덱스 객체가 하나도 없어야 한다');
+  assert.ok(
+    livePages(engine) <= livePagesBefore,
+    '삭제가 살아 있는 페이지를 늘리지 않아야 한다(고아 인덱스가 남으면 늘어난다)',
   );
   await engine.close();
 });

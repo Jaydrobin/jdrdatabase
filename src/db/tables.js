@@ -10,6 +10,8 @@ import { newColumnId, newTableId } from '../util/ids.js';
 import { applyCommand } from './command.js';
 import {
   DEFAULT_COLUMN_WIDTH,
+  ftsTableFor,
+  ftsTriggersFor,
   isSystemColumn,
   MAX_COLUMNS,
   nowIso,
@@ -246,6 +248,23 @@ function liveColumnNames(table) {
 }
 
 /**
+ * 검색 인덱스(D-07)를 지우는 문장. 원본 테이블을 지우면 트리거는 함께 사라지지만 FTS5 가상 테이블과
+ * 그림자 테이블은 남는다. 메타 행이 사라진 뒤에는 UI가 손잡이를 잃어 영영 지울 수 없으므로 여기서 지운다.
+ * 인덱스가 없는 테이블에서도 안전하도록 `IF EXISTS`를 쓴다(`search.js`의 삭제는 인덱스가 있음을 확인한 뒤다).
+ * @param {string} tableId
+ * @returns {Statement[]}
+ */
+function dropSearchIndexStatements(tableId) {
+  const triggers = ftsTriggersFor(tableId);
+  return [
+    { sql: `DROP TRIGGER IF EXISTS ${quoteIdent(triggers.insert)}` },
+    { sql: `DROP TRIGGER IF EXISTS ${quoteIdent(triggers.delete)}` },
+    { sql: `DROP TRIGGER IF EXISTS ${quoteIdent(triggers.update)}` },
+    { sql: `DROP TABLE IF EXISTS ${quoteIdent(ftsTableFor(tableId))}` },
+  ];
+}
+
+/**
  * 테이블 삭제에 쓰는 메타 정리 문장.
  * @param {string} tableId
  * @returns {Statement[]}
@@ -332,7 +351,11 @@ export async function drop(engine, tableId) {
   const cmd = {
     type: 'table.drop',
     tableId,
-    do: [...deleteMetaStatements(tableId), { sql: `DROP TABLE ${quoteIdent(tableId)}` }],
+    do: [
+      ...dropSearchIndexStatements(tableId),
+      ...deleteMetaStatements(tableId),
+      { sql: `DROP TABLE ${quoteIdent(tableId)}` },
+    ],
     undo: [],
     summary: `table.drop ${table.name}`,
     irreversible: true,
