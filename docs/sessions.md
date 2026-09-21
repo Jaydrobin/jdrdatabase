@@ -25,7 +25,7 @@ grep -n 미확인 docs/sessions.md
 | D 점검 | 세션 D 산출물 코드 점검과 수정 | 완료 |
 | E | 6 (정렬·필터·검색·뷰) | 완료 |
 | E 점검 | 세션 E 산출물 코드 점검과 수정 | 완료 |
-| F | 7 + 8 (CSV·XLSX 가져오기) | 대기 |
+| F | 7 + 8 (CSV·XLSX 가져오기) | 완료 |
 | G | 9 (내보내기·백업·압축·클라우드 안내) | 대기 |
 | H | 10 (성능·하드닝·접근성) | 대기 |
 | I | 11 (타우리 셸·네이티브 엔진) | 대기 |
@@ -655,3 +655,75 @@ CI: 헤드 커밋 `b85738c`에서 `check-build-e2e` 초록(push·pull_request �
 - 검색 상자의 디바운스 타이머는 `isComposing`일 때 새로 걸지 않지만 **이미 걸린 타이머를 끄지는 않습니다.** 영문·숫자를 친 직후 200 ms 안에 한글 조합을 시작하면 조합 중간 값으로 질의가 한 번 나갈 수 있습니다. 코드로만 짚었고 실제 IME로 재현하지는 못했습니다.
 - 빌드 산출물의 12바이트 차이(같은 소스, 다른 크기)의 원인.
 - 세션 E의 "미확인" 목록(정렬·필터 뷰의 연속 스크롤 지연, 8장 환경의 LIKE 폴백, 실제 한글 IME, 스크린 리더, 100 KB 셀의 인덱싱 청크, 비STRICT 외부 테이블 정렬, Firefox·Safari의 FTS5 trigram)과 세션 D 점검에서 이어진 항목은 그대로 남습니다.
+
+### 세션 F (Step 7 + 8) — 2026-09-21
+
+커밋: `d918393` docs(design) 착수 전 가져오기 파이프라인·op 인자·저널 정지 확정 → `7215faf` feat(import) Step 7 CSV 가져오기 → `e5ef51e` chore(vendor) SheetJS CE 0.18.12 → `9b49ef6` feat(import) Step 8 XLSX 가져오기 → 이 기록.
+
+시작 상태: 원격 `0cbe1a3`를 받아 `npm run check`(244개)가 초록임을 확인한 뒤 시작했습니다. 세션 E 점검의 미확인 항목은 아래 "미확인"에 이어받았습니다.
+
+**설계 변경 (코드보다 먼저 DESIGN.md v0.8에 반영, 리뷰어 확인 필요)**
+
+- **가져오기는 커맨드가 아니다(D-08의 예외, D-04 3층 갱신).** 30만 행 CSV를 커맨드 객체로 만들면 그 객체가 저널 상한(50 MB)과 되돌리기 스냅샷 상한(1만 행)을 모두 넘고, 재생하려면 원본 파일이 다시 필요합니다. 그래서 `import.run`이 트랜잭션 하나로 직접 삽입하고 커맨드를 돌려주지 않습니다. 성공 뒤 메인은 (1) 되돌리기 스택을 비우고(앞선 `column.add`를 되돌리면 `DROP COLUMN`이 가져온 값을 지웁니다), (2) 저널 기록을 멈추고(`autosave.suspend()`. 재생 시 "뒤쪽 변경 일부는 남지 않았다"로 표시), (3) dirty로 두고 "가져오기는 변경 기록에 남지 않아 … 지금 저장하세요" 배너를 띄웁니다. 저장이 성공하면 저널이 비워지며 기록이 다시 시작됩니다. 탭이 죽으면 가져온 데이터와 그 뒤 변경은 복구되지 않으며 배너가 그 사실을 알립니다.
+- **취소·오류는 전체 롤백(청크 커밋 없음).** Step 7 예외 처리의 "기존 테이블이면 지금까지 커밋된 행은 유지되었음을 명시"를 "새 테이블이든 기존 테이블이든 시작 전과 같다"로 바꿨습니다. 절반만 들어간 상태는 사용자가 어디까지 들어갔는지 알 수 없고 커맨드가 아니라 되돌릴 수도 없기 때문입니다. 완료 기준 "취소 후 잔여물 없음"은 두 대상 모두 덤프 동일로 검사합니다.
+- **6장 RPC.** `import.preview` `{ file, options }` → `{ format, encoding, delimiter, hasHeader, sheets?, sheet?, headerRow?, headers, sample(20행), sampleRows, exhausted, inferred, warnings }`, `import.run` `{ file, options, mapping, target, policy }` → `{ report }`. `file`은 Blob(File)을 구조화 복제로 넘기고 메인은 바이트를 읽지 않습니다(Worker가 `stream()`·`arrayBuffer()`). `mapping.columns[i] = { source, name?, type?, columnId?, policy? }`, `target = { kind: 'new', name } | { kind: 'existing', tableId }`. `import.preview`는 읽기 op(언제나 허용), `import.run`은 배타 op입니다.
+- **Step 7 함수 서명 구체화.** `csv.createParser({ delimiter })`(조각 사이 상태 유지, `\r\n`이 경계에서 갈라져도 한 줄), `csv.parse(blob, { encoding, delimiter, onEnd })`(헤더 처리는 `pipeline.openSource`가), `infer.sample` → `{ rows, exhausted }`, `infer.columnName`(빈 헤더 `열N`, 중복 ` (2)`. Step 8의 규칙을 CSV에도), `infer.column`의 `date`는 시각 부분이 없는 값만, `pipeline.run({ engine, file, options, mapping, target, policy, signal, progress })`. 보고서 `{ tableId, inserted, skipped, nulled, errors[], errorCount, demoted[] }`.
+- **Step 8.** `xlsx.listSheets`는 `sheetRows: 1` + `!fullref`, `xlsx.parse`는 dense 모드로 `n/s/b/d/e/z`를 바꾸되 날짜는 SheetJS Date의 로컬 시각 부품으로 문자열을 만들어(`YYYY-MM-DD` 또는 `YYYY-MM-DDTHH:mm:ss`) CSV와 같은 추론·검증을 탑니다. 100 MB 초과는 `E_FILE_TOO_LARGE`(`detail.format = 'xlsx'`)를 재사용합니다(7장 표 갱신, 새 오류 코드 없음). `verify.mjs`는 SheetJS가 문자열로만 쓰는 XML 네임스페이스 URL을 접두사 목록으로 허용합니다.
+- 3.1에 `vendor/xlsx.full.min.d.ts`·`vendor/package.json`(`"type": "commonjs"`: Node가 UMD를 CommonJS로 읽게 한다. esbuild는 구문으로 판정), `test/fixtures/import/`, `scripts/gen-import-fixtures.mjs`.
+
+**Step 7 완료 기준**
+- [x] 단위 픽스처(따옴표 안 개행·쉼표, BOM UTF-8, UTF-16LE, EUC-KR, 빈 줄, CRLF/LF 혼재, 필드 수 불일치, 32 KB 조각 경계): `test/fixtures/import/*.csv`(`scripts/gen-import-fixtures.mjs`가 만듭니다. EUC-KR 바이트는 손으로 적지 않고 `TextDecoder('euc-kr')`로 역표를 만들어 인코딩) + `test/unit/import/csv.test.js` 13개. 경계 픽스처는 32,581바이트에서 시작하는 따옴표 필드(쉼표·개행·`""` 포함)가 32 KB 지점을 지나 닫히며, 조각 크기 32 KB·1 KB·13·1과 통째로 파싱한 결과, 그리고 `Blob.stream()`으로 읽은 결과가 모두 같음을 확인합니다. UTF-16BE(BOM)와 BOM 없는 UTF-16LE(NUL 분포 감지)도 더했습니다.
+- [x] 30만 행 × 20열 CSV 가져오기 60초 이하(Chromium, Worker 모드): `test/perf/import.perf.spec.js`가 `gen-fixture.mjs`로 만든 **209,173,818바이트**(장문 2열 20~60단어. 8장의 "약 150 MB"보다 큼) CSV를 실제 대화상자로 가져와 **미리보기 186 ms, 가져오기 18,005 ms**(예산 60,000 ms). 인라인 모드는 재지 않았습니다.
+- [x] 취소 후 DB에 잔여물 없음: `pipeline.test.js` "취소하면 전체가 롤백되어 새 테이블도 기존 테이블의 행도 남지 않는다"(첫 배치 뒤 취소 → 새 테이블·기존 테이블 모두 `dumpDb` 동일, 행 수 0), "이미 취소된 신호로 시작하면 아무것도 넣지 않는다", `rpc.test.js`(취소 메시지가 디스패처의 AbortController를 거쳐 롤백).
+- Step 7 예외 처리 대응(어디서 확인했는지):
+  - 인코딩 오판 경고와 재선택: 단위(`warnings[0].kind === 'encoding'`) + E2E(EUC-KR 파일을 UTF-8로 바꾸면 "깨진 문자" 경고, 되돌리면 사라짐).
+  - 필드 수 불일치(부족 NULL, 초과 버림·기록), 10% 초과 시 `ragged` 경고: 단위.
+  - 닫히지 않은 따옴표: 단위(`unterminated_quote`).
+  - 정책 `null`/`text`/`abort`: 단위(NULL + 보고서, 강등 후 재시도가 테이블을 두 번 만들지 않음, abort는 행 번호·열을 담은 `E_VALUE_INVALID`와 덤프 동일) + E2E(중단 → 테이블 없음·dirty 아님·대화상자에 사유, NULL로 바꾸면 성공).
+  - 10 MB 셀: 단위(NULL + `too_long`).
+  - 기존 테이블 매핑: 단위(없는·지운·중복 열, 외부 테이블, `text` 정책 거부, select 자동 추가) + E2E(같은 이름 자동 대응, 대응 없는 열 건너뜀, text 정책 없음).
+  - 메모리 경고: `import.memoryWarning`은 `capabilities().warnFileBytes − 현재 파일 크기`로 계산하며 코드 경로만 확인(픽스처가 작아 뜨지 않음).
+  - 가져오기 중 편집 잠금: 모달 + 배타 op(`isExclusiveOp('import.run')` 단위). 실제로 실행 중에 그리드를 누르는 시나리오는 재지 않았습니다.
+  - 읽기 전용: `store.test.js`(다른 탭 점유 → `file.readOnlyBlocked`, null).
+- 저널·히스토리: `autosave.test.js`(suspend → 기록 중단·truncated, clear가 풀어 줌), `store.test.js`(가져오기 뒤 `journalStop = 'import'`, 이후 커맨드 미기록, 저장 뒤 해제, 새 테이블 선택, 기존 테이블 추가는 선택 유지), `history.test.js`(`import:done`이 스택을 비움), E2E(배너 문구, 되돌리기 버튼 잠김, 저장 뒤 배너 사라짐).
+
+**Step 8 완료 기준**
+- [x] 픽스처(날짜·시간·불리언·수식·병합·오류 셀·빈 헤더·1904 체계): `test/fixtures/import/basic.xlsx`(시트 "데이터": 빈·중복 헤더, 날짜·시각·불리언·수식(`f`+계산값)·`#N/A`·`#REF!`·병합 A4:B5·선행 0 우편번호·실수·일련번호 60/61; 시트 "둘째": 헤더가 3행), `date1904.xlsx`, `encrypted.xlsx`(CFB에 `EncryptedPackage`·`EncryptionInfo` 스트림). `xlsx.test.js` 5개 + `pipeline.test.js` 2개 + E2E 2개. **1900 윤년 버그는 SheetJS가 일련번호 60을 `1900-02-28`, 61을 `1900-03-01`로 돌려줍니다**(위임한 대로 두고 검사로 못박음). 1904 통합 문서의 같은 날짜가 같은 문자열로 읽힙니다. 손상은 잘린 zip(`E_XLSX_CORRUPT`)으로 검사했고, **빈 입력과 평문은 SheetJS가 CSV로 읽어 던지지 않습니다**(형식은 확장자로 정하므로 실사용에서는 `.xlsx`로 이름만 바꾼 CSV가 표로 읽힙니다).
+- [x] 5만 행 × 20열 xlsx 가져오기 20초 이하: `test/perf/import-xlsx.perf.spec.js`(SheetJS로 만든 35,546,232바이트) **미리보기 2,907 ms, 가져오기 5,925 ms**(예산 20,000 ms).
+- Step 8 예외 처리 대응: 암호화 `E_XLSX_ENCRYPTED`(단위 + E2E: 미리보기 경고 문구, 가져오기 버튼은 같은 문구로 거부), 100 MB 상한 `E_FILE_TOO_LARGE`(단위. UI 문구 `import.xlsxTooLarge`는 코드 경로만), 병합(`merged` 경고 + 나머지 칸 NULL: 단위·E2E), 오류 셀(NULL + 보고서 `error_cell`: 단위·E2E), 빈·중복 헤더(`열2`, `이름 (2)`: 단위·E2E), 선행 0(`text`: 단위·E2E), 손상 zip(단위).
+
+**검증 결과**
+- [x] `npm run check`: eslint 0건, prettier 통과, tsc 0오류, 단위 테스트 **297개 통과**(세션 E 점검 244 + 53). 새 파일: `test/unit/import/csv.test.js` 13, `infer.test.js` 6, `pipeline.test.js` 15, `xlsx.test.js` 5. 기존 파일에 `rpc.test.js` 2, `store.test.js` 2, `autosave.test.js` 1, `history.test.js` 1, `build.test.js` 1(`'import'` 문자열 리터럴).
+- [x] `npm run build && npm run verify`: `verify OK`, 외부 참조 0건(허용 vendor URL 리터럴 160건: sqlite3 문서 링크 2건과 SheetJS의 XML 네임스페이스 URL), vendor 체크섬 6개 일치, 두 변형 CSP 외 동일.
+- [x] `npm run test:e2e`: Chromium `file://`에서 **52개 통과**(세션 E 점검 45 + `import.spec.js` 7).
+- [x] `npm run test:perf`의 새 spec 2개: 위 완료 기준 항목. 기존 `grid`·`search` spec은 다시 돌리지 않았습니다(아래 미확인).
+- [x] 7.1 grep: `innerHTML` 0건, 모드 문자열 허용 위치 밖 0건, `src/import`의 SQL 템플릿 리터럴은 `INSERT INTO ${quoteIdent(tableId)} (…) VALUES (?, …)` 하나뿐이고 값은 전부 `runBatch` 바인딩. `_jdr_columns.options` 갱신도 바인딩.
+- [x] 새 오류 코드 없음(`E_IMPORT_ENCODING`은 던지지 않고 미리보기 경고 문구에만, `E_IMPORT_CANCELLED`·`E_VALUE_INVALID`·`E_XLSX_ENCRYPTED`·`E_XLSX_CORRUPT`·`E_FILE_TOO_LARGE` 재사용). 새 RPC op 2개는 6장 표, `db/worker.js` OpMap·핸들러·읽기 집합, `rpc.test.js`에 함께 반영. i18n ko/en 키 동일(단위 테스트). 가져오기 문구 76개를 추가했고 코드에 리터럴 문구 없음(Worker의 자동 열 이름도 `t('import.columnDefault')`).
+- [x] `docs/support-matrix.md`: `File.stream()` + `TextDecoderStream(euc-kr 등)`의 Worker 스트리밍, Worker 안의 SheetJS, 가져오기 파일 입력·`<progress>` 행 추가.
+- [x] `build/build.mjs`의 import 검출 정규식이 `state.journalStop === 'import' ? t(…)`의 `'import'`를 import 문으로 오인해 빌드가 깨졌던 것을 고쳤습니다(따옴표 앞의 `import`는 제외. 회귀 테스트 `build.test.js`).
+
+**산출물 크기 (`verify` 출력)**
+- `dist/jdrdatabase.html` 3,706,784 bytes (3.54 MiB / 예산 6 MiB). 세션 E 점검(1,814,939) 대비 +1,891,845 bytes. 거의 전부 SheetJS(압축 후 약 1.8 MB)이고 Step 7 코드는 약 67 KB입니다(Step 7 커밋 시점 1,882,036).
+- `dist/tauri/index.html` 3,706,592 bytes (CSP 메타 줄만 다름을 `verify`가 확인).
+
+**점검했지만 고치지 않은 것 (판단 근거와 함께)**
+- **SheetJS가 0.18.12입니다(0.20.3이 아님).** 이 세션의 실행 환경에서는 공식 배포 CDN(`cdn.sheetjs.com`)과 `git.sheetjs.com`이 프록시에 막혀(CONNECT 403) 받을 수 없었고, npm 레지스트리의 `xlsx`는 0.18.5에서 멈춰 있습니다. SheetJS 조직의 GitHub 미러(`SheetJS/sheetjs`, 커밋 `515d1c6f`)에서 받은 0.18.12가 가장 새 것이라 그것을 vendor에 넣었습니다(출처·SHA-256은 `vendor/CHECKSUMS`). 0.18.12는 프로토타입 오염(CVE-2023-30533, 0.19.3에서 수정)과 ReDoS(CVE-2024-22363, 0.20.2에서 수정) 이전 버전입니다. 둘 다 "악의적으로 만든 xlsx를 사용자가 직접 골라 가져올 때"가 경로이고 파서는 Worker 안에서만 돌아 DOM에 닿지 않지만, 갱신이 맞습니다. 아래 미확인으로 남깁니다(`chore(vendor)` 커밋 하나로 교체 가능하도록 어댑터 경계를 지켰습니다: `denseRows`가 0.18의 배열 시트와 0.20의 `!data`를 둘 다 받습니다).
+- **SheetJS가 메인 번들과 Worker 번들에 한 번씩 들어갑니다.** 메인 번들은 Worker를 만들 수 없는 환경의 인라인 전송 폴백(D-02)을 위해 디스패처(`db/worker.js`) 전체를 품고, 그 디스패처가 `import/pipeline.js` → `import/xlsx.js` → SheetJS를 끌어옵니다. 그래서 부품 크기가 main 400 KB → 1,292 KB, worker 288 KB → 1,179 KB로 늘었고 산출물은 3.54 MiB(예산 6 MiB)입니다. 한 사본을 `<script type="text/plain">` 블록에 두고 양쪽이 같은 소스를 평가하게 바꾸면 약 900 KB를 줄일 수 있지만 빌드 구조(D-01) 변경이라 크기 예산을 맡은 Step 10의 판단으로 남깁니다. 가져오기 대화상자 자체는 파이프라인 모듈을 가져오지 않습니다.
+- **`verify.mjs`가 SheetJS의 XML 네임스페이스 URL을 접두사로 허용합니다.** 정확히 일치하는 리터럴만 허용하던 규칙에 접두사 목록(`schemas.openxmlformats.org`, `schemas.microsoft.com`, `www.w3.org`, `purl.org`, `purl.oclc.org/ooxml`, `docs.oasis-open.org/ns/office`, `openoffice.org`, `macVmlSchemaUri`)을 더했습니다. 모두 SheetJS가 OOXML·ODS 문서를 읽고 쓸 때 문자열로 비교하는 네임스페이스 식별자이며 요청을 만들지 않습니다. 접두사 밖의 URL은 여전히 막힙니다(`build.test.js`).
+- **평문 `.xlsx`는 SheetJS가 CSV로 읽습니다.** 형식은 확장자로 정하므로(`formatOf`) 이름만 바꾼 CSV가 xlsx 경로로 들어가면 오류 대신 표가 나옵니다. 사용자에게 해롭지 않고, 막으려면 zip 매직을 따로 검사해야 해 두었습니다.
+- **미리보기 인코딩 감지의 UTF-16 추정은 라틴 문자 위주 텍스트에만 맞습니다.** BOM 없는 UTF-16 한글 파일은 NUL이 한쪽에 몰리지 않아 UTF-8 `fatal` 실패 → EUC-KR로 추정됩니다. 사용자가 인코딩을 고쳐 고를 수 있고 BOM 없는 UTF-16 CSV는 드물어 두었습니다.
+- **가져오기 대화상자의 열 설정 표는 열이 많으면 깁니다**(30만 행 × 20열 픽스처에서 20행이라 문제없지만 수백 열이면 스크롤). 표 자체가 `max-height: 260px` 스크롤 상자라 동작은 하지만 자동화·접근성은 Step 10에서 봅니다.
+- **`select` 타입은 새 테이블의 타입 선택지에 없습니다.** 항목을 미리 알 수 없어서이며(`addColumn`이 항목 1개 이상을 요구), 기존 select 열에는 4.2대로 자동 추가됩니다. 새 테이블에서 원하면 가져온 뒤 타입 변경(Step 3)을 쓰면 됩니다.
+- **기존 테이블에 추가할 때 `text` 정책이 없습니다.** 강등은 스키마 변경이라 열 타입 변경(Step 3)의 몫입니다(Worker도 거부).
+- 대화상자 옵션 컨트롤은 처음에 요소를 갈아 끼우는 방식이었다가, E2E가 미리보기 재로드와 입력이 겹칠 때 값이 되돌아가는 경주를 잡아내어 요소를 유지하고 값만 맞추는 방식으로 바꿨습니다(포커스도 유지됩니다).
+
+**미확인 (후속 세션에서 이어받음)**
+- SheetJS 0.20.3으로의 갱신(위 CVE 2건). CDN에 닿는 환경에서 `chore(vendor)` 커밋으로 교체하고 `xlsx.test.js`·`import.spec.js`를 다시 돌려야 합니다.
+- 8장 환경(4코어 노트북)에서의 CSV·xlsx 가져오기 시간. 이 환경에서는 209 MB CSV 18.0초, 35,546,232바이트 xlsx 5,925 ms입니다. 150 MB 규격의 CSV(장문이 더 짧은 것)는 따로 만들지 않았습니다.
+- 가져오기 실행 중 실제 취소 버튼 클릭(E2E는 취소 뒤 롤백을 단위·RPC 테스트로만 확인. 픽스처가 작아 실행 중에 누를 틈이 없음)과 그때의 "취소하는 중…" 문구.
+- 100 MB 넘는 xlsx의 UI 문구, 메모리 경고 문구(코드 경로만).
+- 실제 파일 선택기(`accept` 필터)와 인라인 전송 모드에서의 가져오기 시간.
+- 기존 `test/perf/grid.perf.spec.js`·`search.perf.spec.js`는 이번에 다시 돌리지 않았습니다(가져오기는 렌더·창 질의 핫 경로를 바꾸지 않습니다).
+- Firefox·Safari의 `TextDecoderStream('euc-kr')`·`Blob.stream()`(Worker 안), SheetJS 동작.
+- 가져오기 대화상자의 키보드만 조작·스크린 리더(포커스 트랩은 `dialog.js`, 표 안의 컨트롤은 Tab 순서대로).
+- 세션 E 점검의 "미확인" 목록(30만 행에서 인덱스 켜진 테이블 삭제 시간, `COUNT_CACHE_MAX` 근거, IME 조합 중 머리글 클릭·검색 디바운스, 12바이트 산출물 차이, 정렬·필터 뷰의 연속 스크롤 지연, 8장 환경의 LIKE 폴백, 스크린 리더, 100 KB 셀의 인덱싱 청크, 비STRICT 외부 테이블 정렬, Firefox·Safari의 FTS5 trigram)과 세션 D 점검에서 이어진 항목은 그대로 남습니다.

@@ -18,6 +18,9 @@
 | `<a download>` 저장 → 내려받은 파일을 `<input type="file">`로 다시 열기 | ✓ (세션 B, E2E `file.spec.js`: revision·db_id 왕복). Playwright 주의: `setInputFiles`에 비ASCII 경로를 주면 Chromium이 change 없이 무시하고, filechooser 가로채기는 change 대신 cancel을 내는 경우가 있어 둘 다 피했다 | 미확인 | 미확인 | 미확인 |
 | BroadcastChannel (같은 db_id를 연 다른 탭 감지) | ✓ 생성 가능 (세션 B, E2E `file.spec.js`). 두 탭 동시 열기 시나리오는 미확인 | 미확인 | 미확인 | 미확인 |
 | `CompressionStream` (gzip 저장) | 미확인 (세션 G) | 미확인 | 미확인 | 미확인 |
+| 구조화 복제로 Worker에 넘긴 `File`의 `stream()` → `TextDecoderStream('utf-8' \| 'utf-16le' \| 'utf-16be' \| 'euc-kr')`로 209 MB CSV 스트리밍 파싱, `slice().arrayBuffer()`로 머리 64 KB 읽기 | ✓ (세션 F, E2E `import.spec.js`(EUC-KR·UTF-8 BOM)와 `test/perf/import.perf.spec.js`(30만 행 209 MB, Worker 모드 18.0초)) | 미확인 | 미확인 | 미확인 |
+| Worker 안의 SheetJS CE 0.18.12(`XLSX.read`, dense, cellDates)로 xlsx 파싱과 `Blob.arrayBuffer()` | ✓ (세션 F, E2E `import.spec.js`(시트 2개·병합·오류 셀·수식·1904 픽스처)와 `test/perf/import-xlsx.perf.spec.js`) | 미확인 | 미확인 | 미확인 |
+| 가져오기 대화상자: 숨은 `<input type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm">` + `<progress>` + 비동기 검사 중 버튼 잠금·취소 가로채기 | ✓ (세션 F, E2E `import.spec.js`. 실제 파일 선택기와 취소 버튼 클릭 자체는 미확인: 단위 테스트가 `AbortSignal` 경로를 검사) | 미확인 | 미확인 | 미확인 |
 | 그리드가 쓰는 `ResizeObserver`, Pointer Events(`setPointerCapture`로 열 너비 끌기), `performance.mark/measure`(테스트 빌드의 렌더 시간) | ✓ (세션 C, E2E `grid.spec.js`·`test/perf/grid.perf.spec.js`) | 미확인 | 미확인 | 미확인 |
 | 300 MB DB(30만 행)를 `<input type="file">`로 열기 | ✓ (세션 C, `test:perf`: 읽기 → transfer → deserialize → integrity_check까지 약 2~3초) | 미확인 | 미확인 | 미확인 |
 | 클립보드: `navigator.clipboard.writeText`(복사), 포커스된 비편집 요소(`role="grid"` div)에 오는 `paste` 이벤트(Ctrl+V), `window.isSecureContext` | ✓ (세션 D, E2E `edit.spec.js`. `file://`도 secure context이며 Playwright가 `clipboard-read`·`clipboard-write` 권한을 준 컨텍스트에서 실제 Ctrl+C·Ctrl+V로 확인). 권한 프롬프트가 있는 실제 브라우저에서의 동작은 미확인 | 미확인 | 미확인 | 미확인 |

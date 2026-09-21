@@ -325,6 +325,7 @@ src/
 vendor/
   sqlite3.mjs sqlite3.wasm sqlite3.d.mts LICENSE.sqlite-wasm CHECKSUMS
   xlsx.full.min.js xlsx.full.min.d.ts LICENSE.sheetjs
+  package.json                   `"type": "commonjs"`. Node가 UMD인 xlsx.full.min.js를 CommonJS로 읽게 한다(esbuild는 구문으로 판정)
 
 build/
   build.mjs                      단일 HTML 생성(브라우저·타우리·테스트 세 변형)
@@ -352,7 +353,7 @@ test/
   fixtures/                      CSV·XLSX·DB 표본. import/는 Step 7·8 파서 픽스처. generated/는 gen-fixture 산출물(커밋하지 않음)
 scripts/
   gen-fixture.mjs                벤치마크용 대용량 CSV·DB 생성(`--db`는 wasm 엔진으로 표준 SQLite 파일을 만든다)
-  gen-import-fixtures.mjs        test/fixtures/import/의 CSV·XLSX 픽스처를 다시 만든다(바이트가 고정된 생성기)
+  gen-import-fixtures.mjs        test/fixtures/import/의 CSV(바이트 고정)·XLSX(SheetJS로 씀. 내용 고정) 픽스처를 다시 만든다
 ```
 
 ### 3.2 실행 시 구조
