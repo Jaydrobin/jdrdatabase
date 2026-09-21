@@ -24,6 +24,7 @@ import {
   migrate,
   readMeta,
   validateHeader,
+  writeMeta,
 } from './schema.js';
 
 /** @typedef {import('./engine.js').Engine} Engine */
@@ -31,6 +32,7 @@ import {
 /** @typedef {import('./engine.js').EngineCapabilities} EngineCapabilities */
 /** @typedef {import('./engine.js').ExecResult} ExecResult */
 /** @typedef {import('./engine.js').SqlParams} SqlParams */
+/** @typedef {import('./engine.js').NativeOpenInfo} NativeOpenInfo */
 /** @typedef {import('../util/errors.js').SerializedError} SerializedError */
 /** @typedef {import('./command.js').Command} Command */
 /** @typedef {import('./command.js').Direction} Direction */
@@ -62,6 +64,7 @@ import {
  * @property {TableInfo[]} tables
  * @property {boolean} [unmanaged] `_jdr_meta`가 없는 파일을 등록 없이 연 상태
  * @property {boolean} [readOnly] 앱보다 새로운 `schema_version`
+ * @property {NativeOpenInfo} [workcopy] 데스크톱 모드의 작업 사본 정보(복구 판정용, D-15)
  */
 
 /** @typedef {{ phase: string, done: number, total: number }} RpcProgress */
@@ -80,9 +83,10 @@ import {
  * @typedef {{
  *   'engine.init': { args: { mode: EngineMode, wasmBinary?: ArrayBuffer, appVersion?: string }, result: { version: string, compileOptions: string[], capabilities: EngineCapabilities } },
  *   'engine.exec': { args: { sql: string, params?: SqlParams }, result: ExecResult },
- *   'db.open': { args: { bytes?: Uint8Array | ArrayBuffer, dbId?: string, adoptExternal?: boolean }, result: OpenResult },
+ *   'db.open': { args: { bytes?: Uint8Array | ArrayBuffer, dbId?: string, adoptExternal?: boolean, originalPath?: string, discardWorkcopy?: boolean, workcopyKey?: string }, result: OpenResult },
  *   'db.snapshot': { args: { bumpRevision?: boolean, savedBy?: string }, result: { bytes: Uint8Array<ArrayBuffer>, meta: Meta } },
- *   'db.close': { args: undefined, result: null },
+ *   'db.save': { args: { originalPath: string, bumpRevision?: boolean, savedBy?: string, force?: boolean }, result: { meta: Meta, size: number, mtime: number, backupPath: string | null } },
+ *   'db.close': { args: { discardWorkcopy?: boolean } | undefined, result: null },
  *   'schema.adopt': { args: undefined, result: OpenResult },
  *   'schema.list': { args: undefined, result: { tables: TableInfo[] } },
  *   'schema.create': { args: { name: string }, result: { tableId: string, cmd: Command } },
@@ -158,6 +162,7 @@ export const EXCLUSIVE_OPS = new Set([
   'views.save',
   'views.delete',
   'db.snapshot',
+  'db.save',
   'db.close',
   'export.stream',
 ]);
@@ -303,10 +308,21 @@ export function createDispatcher(options) {
       const active = requireEngine();
       const raw = args?.bytes;
       const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw;
+      // 데스크톱 모드는 바이트 대신 원본 경로(또는 남은 사본의 키)를 받는다(D-15). 헤더 검사와
+      // 작업 사본 복사는 러스트가 한다.
+      /** @type {import('./engine.js').NativeOpenSource | undefined} */
+      const nativeSource =
+        typeof args?.originalPath === 'string' || typeof args?.workcopyKey === 'string'
+          ? {
+              ...(typeof args.originalPath === 'string' ? { originalPath: args.originalPath } : {}),
+              ...(typeof args.workcopyKey === 'string' ? { workcopyKey: args.workcopyKey } : {}),
+              ...(args.discardWorkcopy ? { discardWorkcopy: true } : {}),
+            }
+          : undefined;
       // 헤더는 deserialize 전에 본다. 틀린 파일을 엔진에 넣으면 첫 읽기에서야 SQLITE_NOTADB가 나고
       // 그 사이에 이전 DB가 닫힌다.
       if (bytes) validateHeader(bytes);
-      await active.open(bytes);
+      const workcopy = await active.open(bytes ?? nativeSource);
       if (bytes) {
         try {
           integrityCheck(active);
@@ -316,18 +332,22 @@ export function createDispatcher(options) {
           throw err;
         }
       }
-      if (bytes && !hasMeta(active) && !args?.adoptExternal) {
-        return { meta: {}, tables: [], unmanaged: true };
+      // 사본 정보는 원본 파일을 연 경우에만 뜻이 있다. 새 DB의 임시 사본은 저장 뒤 원본이 정해진다.
+      const extra = workcopy ? { workcopy } : {};
+      const isFile = bytes !== undefined || (workcopy?.originalPath ?? null) !== null;
+      if (isFile && !hasMeta(active) && !args?.adoptExternal) {
+        return { meta: {}, tables: [], unmanaged: true, ...extra };
       }
-      if (bytes && !hasMeta(active)) {
+      if (isFile && !hasMeta(active)) {
         const meta = await adoptExternal(active, { appVersion });
-        return { meta, tables: tables.list(active) };
+        return { meta, tables: tables.list(active), ...extra };
       }
       const migrated = await migrate(active, { appVersion, dbId: args?.dbId });
       return {
         meta: migrated.meta,
         tables: tables.list(active),
         ...(migrated.readOnly ? { readOnly: true } : {}),
+        ...extra,
       };
     },
 
@@ -342,6 +362,37 @@ export function createDispatcher(options) {
           : {};
       const bytes = active.snapshot();
       return { result: { bytes, meta }, transfer: [bytes.buffer] };
+    },
+
+    'db.save': async (args) => {
+      const active = requireEngine();
+      if (active.capabilities().persistence === 'snapshot') {
+        throw new AppError('E_UNSUPPORTED', 'db.save is native-only; use db.snapshot in wasm mode');
+      }
+      if (typeof args?.originalPath !== 'string' || !args.originalPath) {
+        throw new AppError('E_FILE_WRITE', 'db.save requires originalPath');
+      }
+      // `db.snapshot`과 같은 순서: 메타를 먼저 기록하고 파일을 만든다. 등록하지 않은 외부 파일은 그때 메타를 만든다.
+      if (!hasMeta(active) && args.bumpRevision) await migrate(active, { appVersion });
+      const meta = args.bumpRevision
+        ? await bumpRevision(active, { savedBy: args.savedBy ?? '' })
+        : hasMeta(active)
+          ? readMeta(active)
+          : {};
+      const saved = await active.saveTo(args.originalPath, undefined, {
+        force: args.force === true,
+      });
+      if (!saved) throw new AppError('E_UNSUPPORTED', 'saveTo returned nothing');
+      // 저장이 끝났으므로 사본의 dirty 표식을 내린다(D-15). 저장된 파일에는 이 값이 남아 있어도 뜻이 없다.
+      if (hasMeta(active)) {
+        await active.transaction(() => writeMeta(active, { dirty: 0 }));
+      }
+      return {
+        meta: hasMeta(active) ? readMeta(active) : meta,
+        size: saved.size,
+        mtime: saved.mtime,
+        backupPath: saved.backupPath ?? null,
+      };
     },
 
     'schema.adopt': async () => {
@@ -495,8 +546,8 @@ export function createDispatcher(options) {
       });
     },
 
-    'db.close': async () => {
-      await requireEngine().close();
+    'db.close': async (args) => {
+      await requireEngine().close({ discard: args?.discardWorkcopy === true });
       return null;
     },
   };
@@ -521,8 +572,28 @@ export function createDispatcher(options) {
     'views.list',
     'import.preview',
     'db.snapshot',
+    'db.save',
     'export.stream',
   ]);
+
+  /** 작업 사본의 dirty 표식을 올리지 않는 op: 읽기와 열기·닫기·저장·초기화. */
+  const NOT_DIRTY_OPS = new Set([...READ_OPS, 'db.open', 'db.close', 'engine.init']);
+
+  /**
+   * 데스크톱 모드(D-15): 쓰기 op가 성공하면 사본에 `_jdr_meta.dirty = 1`을 남겨 비정상 종료 뒤 복구를 제안할 수 있게 한다.
+   * 이 기록의 실패는 방금 성공한 op를 되돌리지 않으므로 경고만 남긴다.
+   * @param {string} op
+   */
+  async function markWorkcopyDirty(op) {
+    if (NOT_DIRTY_OPS.has(op) || !engine) return;
+    const active = engine;
+    if (active.capabilities().persistence === 'snapshot') return;
+    try {
+      if (hasMeta(active)) await active.transaction(() => writeMeta(active, { dirty: 1 }));
+    } catch (err) {
+      console.warn(`dirty mark failed after ${op}: ${serializeError(err).message}`);
+    }
+  }
 
   /**
    * 6장 규칙: db.open 중에는 모든 요청이 E_DB_BUSY, 배타 op끼리는 E_DB_BUSY, query.*는 언제나 허용.
@@ -578,6 +649,7 @@ export function createDispatcher(options) {
       const returned = await handler(request.args, { signal: controller.signal, progress, chunk });
       // 쓰기 op 뒤에는 행 수 캐시가 낡는다. 실패한 쓰기도 롤백 전 상태를 단정할 수 없어 catch에서도 올린다.
       if (!READ_OPS.has(op)) invalidateCounts();
+      await markWorkcopyDirty(op);
       if (hasTransfer(returned)) {
         post({ id, ok: true, result: returned.result }, returned.transfer);
       } else {
@@ -615,8 +687,11 @@ export function attachToPort(port) {
     post: (message, transfer) => port.postMessage(message, transfer),
   });
   port.onmessage = (ev) => {
+    // `callId`가 있는 메시지는 네이티브 엔진의 동기 중계 응답(D-15)이며 `engine-native.js`가 받는다.
+    const data = ev.data;
+    if (data && typeof data === 'object' && 'callId' in data) return;
     // dispatch는 자체적으로 모든 오류를 응답으로 바꾸므로 여기서 기다릴 필요가 없다.
-    void dispatcher.dispatch(/** @type {RpcInbound} */ (ev.data));
+    void dispatcher.dispatch(/** @type {RpcInbound} */ (data));
   };
   port.postMessage(/** @type {RpcReady} */ ({ ready: true }));
   return dispatcher;

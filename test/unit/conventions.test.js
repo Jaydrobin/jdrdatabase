@@ -138,11 +138,9 @@ test('DESIGN.md 6장 표의 RPC op와 worker.js OpMap이 같다', async () => {
     [...opMap.matchAll(/^\s*\*\s+'([a-z]+\.[A-Za-z]+)':/gm)].map((m) => m[1]),
   );
   assert.ok(implemented.size > 20, `OpMap 파싱 실패(${implemented.size})`);
-  // 문서에만 있는 op는 데스크톱 전용(`db.save`, Step 11)뿐이어야 한다.
-  const nativeOnly = new Set(['db.save']);
   assert.deepEqual(
     [...documented].filter((op) => !implemented.has(op)),
-    [...nativeOnly],
+    [],
     '문서에 있으나 구현되지 않은 op',
   );
   assert.deepEqual(

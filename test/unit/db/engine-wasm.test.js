@@ -41,10 +41,13 @@ test('init 결과: sqlite 버전과 compile_options', async () => {
   assert.ok(info.compileOptions.includes('THREADSAFE=0'));
 });
 
-test('selectEngine: native는 Step 11 전까지 E_UNSUPPORTED, 모르는 모드도 거부', () => {
-  assert.throws(
-    () => selectEngine('native'),
-    (err) => err instanceof AppError && err.code === 'E_UNSUPPORTED',
+test('selectEngine: native는 Worker 밖(등록된 호출자 없음)에서 init이 E_NATIVE_IPC, 모르는 모드는 거부', async () => {
+  // 네이티브 엔진은 만들 수 있지만 메인 스레드에는 중계할 Worker 전역이 없다(D-15: 인라인 전송 없음).
+  const native = selectEngine('native');
+  assert.equal(native.capabilities().persistence, 'native');
+  await assert.rejects(
+    native.init({}),
+    (err) => err instanceof AppError && err.code === 'E_NATIVE_IPC',
   );
   assert.throws(
     () => selectEngine(/** @type {never} */ ('other')),

@@ -17,7 +17,8 @@
     "verify": "node build/verify.mjs",
     "test:e2e": "node build/build.mjs --test && playwright test",
     "fixture": "node scripts/gen-fixture.mjs",
-    "test:perf": "playwright test -c playwright.perf.config.js"
+    "test:perf": "playwright test -c playwright.perf.config.js",
+    "test:native": "node scripts/run-native-tests.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

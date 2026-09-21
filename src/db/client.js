@@ -140,9 +140,10 @@ export function createInlineTransport() {
  */
 
 /**
- * Worker 전송을 시도하고 실패하면 인라인 전송으로 폴백한다.
+ * Worker 전송을 시도하고 실패하면 인라인 전송으로 폴백한다. Worker 전송이면 그 `Worker`도 돌려준다
+ * (데스크톱 모드의 `io/ipc-bridge.js`가 `engine:call` 메시지를 받으려면 필요하다).
  * @param {TransportOptions} [options]
- * @returns {Promise<{ transport: Transport, fallbackError: AppError | null }>}
+ * @returns {Promise<{ transport: Transport, fallbackError: AppError | null, worker?: Worker }>}
  */
 export async function createTransport(options = {}) {
   const { workerSource } = options;
@@ -191,7 +192,7 @@ export async function createTransport(options = {}) {
   }
   // 핸드셰이크용 구독을 해제한다. 이후의 치명적 오류는 createClient가 받아 대기 중인 호출을 거부한다.
   created.transport.onFatal(() => {});
-  return { transport: created.transport, fallbackError: null };
+  return { transport: created.transport, fallbackError: null, worker: created.worker };
 }
 
 /**

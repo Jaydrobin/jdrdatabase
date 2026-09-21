@@ -372,8 +372,9 @@ src-tauri/                       워크스페이스 루트이자 타우리 앱 �
     tests/                       cargo test(FTS5 컴파일 옵션, 저장 원자성, run_batch 원자성, interrupt, 한글 경로, 작업 사본 복구)
 
 test/
-  unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드). conventions.test.js는 CLAUDE.md 7.1의 grep 항목(innerHTML, 모드 문자열, SQL 문자열 연결)을 소스 검사로 고정한다
+  unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드). db/engine-contract.js는 두 엔진이 공유하는 적합성 검사 본문. conventions.test.js는 CLAUDE.md 7.1의 grep 항목(innerHTML, 모드 문자열, SQL 문자열 연결)을 소스 검사로 고정한다
   e2e/                           Playwright(브라우저). page-url.js가 산출물 URL을 정한다(기본 file://, `JDR_E2E_HTTP=1`이면 scripts/serve-dist.mjs의 http://localhost). a11y.spec.js는 axe 검사, fault.spec.js는 오류 주입(Step 10)
+  native/                        `npm run test:native`(Step 11). engine-native.test.js가 실제 rusqlite 엔진(core의 jdr-ipc-stdio)에 대해 unit/db/engine-contract.js를 돌린다. bridge-worker.js가 worker_threads 안에서 io/ipc-bridge.js와 하네스 프로세스를 잇는다
   desktop/                       tauri-driver(WebDriver) E2E(Step 11). run.mjs가 tauri-driver를 띄우고 WebDriver 프로토콜을 직접 말한다(런타임 의존 없음). 파일 대화상자는 테스트 훅(`__jdrTest.setPickedPath`)으로 경로를 주입한다
   perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. report.js가 측정값을 test-results/perf/에 모으고 global-teardown.js가 perf-baseline.json(CI 러너 실측)과 비교해 30% 회귀를 실패로 본다. CI의 perf 잡이 푸시마다 돌린다
   fixtures/                      CSV·XLSX·DB 표본. import/는 Step 7·8 파서 픽스처. generated/는 gen-fixture 산출물(커밋하지 않음)
@@ -898,7 +899,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **선행 조건**: Step 10까지 완료된 브라우저 경로. Step 1의 엔진 인터페이스와 적합성 테스트, Step 2의 `capabilities()` 기반 상한 검사가 이미 있어야 한다.
 
-**산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/unit/db/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux tauri-driver E2E), `docs/desktop.md`
+**산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/native/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux tauri-driver E2E), `docs/desktop.md`
 
 **주요 함수 (JS)**
 - `engine-native.js`: 인터페이스 전체 구현. `createNativeEngine({ caller })`. `caller`는 `{ callSync(op, args) → result, call(op, args, onProgress) → Promise }`이며 Worker 전역(`self`)이나 Node `parentPort` 위에 `createPortCaller(port)`로 만든다(D-15의 동기 중계). 메인 컨텍스트(인라인 전송)에서는 만들 수 없어 `E_NATIVE_IPC`. `capabilities()` → `{ mode: 'native', warnFileBytes: Infinity, maxFileBytes: Infinity, persistence: 'native', cancellable: true, fts5 }`. `snapshot()`은 `E_UNSUPPORTED`. `prepareCached(sql)`은 `{ sql }`만 돌려준다

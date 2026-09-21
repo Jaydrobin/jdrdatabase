@@ -7,6 +7,7 @@
  */
 import { estimateCloneBytes, MB } from '../util/bytes.js';
 import { AppError } from '../util/errors.js';
+import { createNativeEngine } from './engine-native.js';
 import { createWasmEngine } from './engine-wasm.js';
 
 /** 읽기 결과 행 수 상한. 넘으면 `E_RESULT_TOO_LARGE`(창 질의만 허용, 전체 SELECT 금지). */
@@ -47,19 +48,53 @@ export const MAX_BATCH_BYTES = 64 * MB;
  */
 
 /**
+ * 네이티브 `open`의 결과(6장 `db.open`의 `workcopy`). 작업 사본 복구 판정에 쓴다(D-15).
+ * @typedef {object} NativeOpenInfo
+ * @property {boolean} dirty 남아 있던 dirty 사본을 그대로 열었다
+ * @property {string | null} originalPath
+ * @property {number | null} originalRevision
+ * @property {number | null} workcopyRevision
+ * @property {number | null} originalMtime
+ * @property {number | null} originalSize
+ * @property {number} size 사본 크기
+ * @property {string} workcopyPath
+ * @property {string} workcopyKey
+ * @property {number} copyMs
+ * @property {number} openMs
+ */
+
+/**
+ * 네이티브 `open`의 인자. 아무것도 없으면 새 DB(임시 사본).
+ * @typedef {object} NativeOpenSource
+ * @property {string} [originalPath]
+ * @property {boolean} [discardWorkcopy] 남은 dirty 사본을 버리고 새로 복사한다
+ * @property {string} [workcopyKey] 남은 사본을 키로 직접 연다(새 DB의 dirty 사본 복구)
+ */
+
+/**
+ * 네이티브 `saveTo`의 결과.
+ * @typedef {object} NativeSaveInfo
+ * @property {string} path
+ * @property {number} size
+ * @property {number} mtime
+ * @property {string | null} backupPath `<원본>.bak`. 새 파일이면 null
+ * @property {number} elapsedMs
+ */
+
+/**
  * 두 모드가 공유하는 엔진 인터페이스(D-15). 구현체는 이 형태의 객체를 돌려준다.
  * @typedef {object} Engine
  * @property {(opts: { wasmBinary?: ArrayBuffer | Uint8Array }) => Promise<EngineInfo>} init 초기화. wasm: `{ wasmBinary }`, native: `{}`
  * @property {() => EngineCapabilities} capabilities
- * @property {(source?: Uint8Array | { originalPath: string }) => Promise<void>} open wasm: 바이트(없으면 빈 DB) / native: 원본 경로
- * @property {() => Promise<void>} close
+ * @property {(source?: Uint8Array | NativeOpenSource) => Promise<NativeOpenInfo | undefined>} open wasm: 바이트(없으면 빈 DB) / native: 원본 경로·사본 키(없으면 새 DB). native만 사본 정보를 돌려준다
+ * @property {(options?: { discard?: boolean }) => Promise<void>} close `discard`는 native에서 dirty 사본까지 지운다(버리기를 확인받은 뒤)
  * @property {(sql: SqlSource, params?: SqlParams) => ExecResult} exec 읽기. 결과 1만 행 초과 거부
  * @property {(sql: SqlSource, params?: SqlParams) => RunResult} run 쓰기 한 문장. `transaction()` 안에서만 허용
  * @property {(sql: SqlSource, paramsList: SqlParams[], options?: BatchOptions) => Promise<BatchResult>} runBatch 같은 문장을 파라미터 목록만큼 반복. 하나의 트랜잭션(중첩 시 SAVEPOINT)
  * @property {<T>(fn: () => Promise<T> | T) => Promise<T>} transaction BEGIN / COMMIT / ROLLBACK. 중첩은 SAVEPOINT
  * @property {(sql: string) => StatementHandle} prepareCached wasm 전용 최적화. native는 no-op 핸들
  * @property {() => Uint8Array<ArrayBuffer>} snapshot wasm: DB 바이트(statement 캐시 무효화·PRAGMA 재적용 포함) / native: `E_UNSUPPORTED`
- * @property {(originalPath: string, expected: { mtime: number, size: number }) => Promise<void>} saveTo native 전용. wasm은 `E_UNSUPPORTED`
+ * @property {(originalPath: string, expected?: { mtime: number, size: number }, options?: { force?: boolean, onProgress?: (progress: unknown) => void }) => Promise<NativeSaveInfo | undefined>} saveTo native 전용. wasm은 `E_UNSUPPORTED`. `expected`가 없으면 러스트가 열 때 본 값과 비교하고, `force`면 비교를 건너뛴다
  * @property {() => void} interrupt 진행 중 문장 중단
  * @property {() => void} applyPragmas 새 PRAGMA는 이곳에만 추가한다(export 후 재적용되는 유일한 장소)
  */
@@ -131,17 +166,13 @@ export function withCommonChecks(impl) {
 }
 
 /**
- * 모드에 맞는 엔진 구현을 만든다. 네이티브 구현은 Step 11에서 추가된다.
+ * 모드에 맞는 엔진 구현을 만든다. 네이티브 구현은 Worker 전역(또는 미리 등록된 호출자) 위에서만 동작한다.
  * @param {EngineMode} mode
  * @returns {Engine}
  */
 export function selectEngine(mode) {
   if (mode === 'wasm')
     return withCommonChecks(createWasmEngine({ maxResultRows: MAX_RESULT_ROWS }));
-  if (mode === 'native') {
-    throw new AppError('E_UNSUPPORTED', 'native engine is not available yet (Step 11)', {
-      detail: { mode },
-    });
-  }
+  if (mode === 'native') return withCommonChecks(createNativeEngine());
   throw new AppError('E_UNSUPPORTED', `unknown engine mode: ${String(mode)}`, { detail: { mode } });
 }

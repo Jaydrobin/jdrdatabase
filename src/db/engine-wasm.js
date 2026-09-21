@@ -363,6 +363,7 @@ export function createWasmEngine(options) {
         db = null;
         throw toQueryError(err, 'open');
       }
+      return undefined;
     },
 
     async close() {

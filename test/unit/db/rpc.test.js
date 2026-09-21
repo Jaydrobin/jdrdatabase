@@ -231,6 +231,7 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
   assert.deepEqual([...EXCLUSIVE_OPS].sort(), [
     'command.apply',
     'db.close',
+    'db.save',
     'db.snapshot',
     'export.stream',
     'import.run',
@@ -986,6 +987,23 @@ test('export.stream: 조각 이벤트(transfer)가 순서대로 오고 결과를
       format: /** @type {never} */ ('pdf'),
     }),
     (err) => err instanceof AppError && err.code === 'E_DB_QUERY',
+  );
+  client.close();
+});
+
+test('db.save·원본 경로 열기는 wasm 엔진에서 E_UNSUPPORTED이고 DB는 그대로다', async () => {
+  const { client } = await readyClient();
+  await client.call('engine.exec', { sql: 'CREATE TABLE t (a INTEGER) STRICT' });
+  await assert.rejects(
+    client.call('db.save', { originalPath: '/tmp/x.db', bumpRevision: true, savedBy: 'PC' }),
+    (err) => err instanceof AppError && err.code === 'E_UNSUPPORTED',
+  );
+  const meta = (await client.call('db.snapshot', {})).meta;
+  assert.equal(meta.revision, '0', '실패한 db.save는 revision을 올리지 않는다');
+  assert.equal('dirty' in meta, false, '브라우저 모드의 파일에는 dirty 키가 생기지 않는다');
+  await assert.rejects(
+    client.call('db.open', { originalPath: '/tmp/x.db' }),
+    (err) => err instanceof AppError && err.code === 'E_UNSUPPORTED',
   );
   client.close();
 });
