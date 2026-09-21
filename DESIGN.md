@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.6 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정) |
+| 문서 버전 | 0.7 (초안) |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -156,11 +156,15 @@
 - 전문 검색이 필요한 테이블에 대해 사용자가 "검색 인덱스 만들기"를 켜면 FTS5 external-content 가상 테이블과 동기화 트리거를 만든다. 토크나이저는 `trigram`(SQLite 3.34+)을 사용해 한글 부분 일치를 지원한다.
 - trigram은 3자 미만 질의를 처리하지 못하므로 그 경우와 인덱스가 없는 경우는 `LIKE '%q%'`로 폴백한다.
 - 인덱스는 파일 크기와 가져오기 시간을 늘리므로 기본값은 꺼짐이다.
+- 검색 대상 열은 물리 타입이 TEXT인 살아 있는 열(`text`·`longtext`·`date`·`datetime`·`select`)이다. FTS 인덱스와 LIKE 폴백이 같은 열 집합을 본다. 인덱스에 담기는 열 집합은 만드는 시점에 고정되며, 그 뒤 추가된 열은 인덱스를 지웠다 다시 만들어야 검색된다(v1은 자동으로 다시 만들지 않는다). 다른 도구가 만든 비STRICT 테이블(R7)에는 인덱스를 만들지 않고 LIKE만 쓴다.
+- 물리 이름: FTS 테이블 `_jdr_fts_<테이블 id>`, 트리거 `_jdr_fts_<테이블 id>_ai`·`_ad`·`_au`. 갱신 트리거는 `AFTER UPDATE OF <인덱스 열>`이라 `_updated_at`만 바뀌는 갱신은 인덱스를 건드리지 않는다. 이 이름은 `db/schema.js`에만 문자열로 둔다. 메타 접두사 `_jdr_`를 쓰므로 사용자 테이블 목록에서 자동으로 빠진다.
+- 질의는 사용자 입력 전체를 `"..."` 구절 하나로 감싸고 안의 `"`는 `""`로 이스케이프한다. trigram 토크나이저에서 구절 일치는 부분 문자열 일치이므로 LIKE 폴백과 결과 의미가 같다(ASCII 대소문자 무시도 같다).
+- 인덱스 생성·삭제는 D-08 커맨드다(생성은 `{ index }` 단계를 포함). 저널에 기록되고 되돌릴 수 있으며, 되돌리기·다시 실행은 진행률 없이 실행된다.
 
 ### D-08. 모든 변경은 커맨드 객체이며, 되돌리기·저널·붙여넣기가 이 위에서 동작한다
 
 - 커맨드 = `{ type, tableId, do: Statement[], undo: Statement[], summary, irreversible? }`. Worker의 `applyCommand(cmd, direction)`가 `do` 또는 `undo` 목록을 하나의 트랜잭션으로 실행한다. 커맨드는 구조화 복제 가능한 값이어야 한다(저널에 그대로 기록하고 Worker 경계를 넘는다).
-- `Statement`는 세 가지다. `{ sql, params? }`는 파라미터 바인딩된 문장 하나이고, `{ batch: { sql, paramsList } }`는 같은 문장을 파라미터 목록만큼 반복하는 단계(Worker가 `engine.runBatch()`로 실행. 붙여넣기·다중 편집·행 다중 삭제와 그 되돌리기가 쓴다. 목록 하나는 `runBatch` 상한(1만 건·64 MB) 안이어야 하며 커맨드 생성기가 그 단위로 나눈다), `{ convert: { table, from, to, type, policy } }`는 열 타입 변경(Step 3)의 "변환 복사" 단계다. 변환 복사는 값 검증(`values.coerce`)이 JS에 있고 10만 행 이상에서 진행률·취소가 필요하므로 SQL 한 문장으로 쓰지 않고 Worker가 5,000행씩 읽어 `runBatch`로 갱신한다. 그 밖의 단계는 모두 `{ sql, params }`다. 사유: 커맨드를 순수 SQL 목록으로 두면 되돌리기·저널 재생·붙여넣기가 실행기 하나로 끝나고, 변환 단계만 예외로 두면 진행률·취소 요구를 충족하면서 형식은 하나로 유지된다.
+- `Statement`는 네 가지다. `{ sql, params? }`는 파라미터 바인딩된 문장 하나이고, `{ batch: { sql, paramsList } }`는 같은 문장을 파라미터 목록만큼 반복하는 단계(Worker가 `engine.runBatch()`로 실행. 붙여넣기·다중 편집·행 다중 삭제와 그 되돌리기가 쓴다. 목록 하나는 `runBatch` 상한(1만 건·64 MB) 안이어야 하며 커맨드 생성기가 그 단위로 나눈다), `{ convert: { table, from, to, type, policy } }`는 열 타입 변경(Step 3)의 "변환 복사" 단계다. 변환 복사는 값 검증(`values.coerce`)이 JS에 있고 10만 행 이상에서 진행률·취소가 필요하므로 SQL 한 문장으로 쓰지 않고 Worker가 5,000행씩 읽어 `runBatch`로 갱신한다. `{ index: { table, fts, columns } }`는 검색 인덱스(Step 6, D-07)의 초기 인덱싱 단계다. Worker가 원본 테이블을 id 순으로 5,000행씩(직렬화 크기가 16 MB를 넘으면 더 잘게) 읽어 FTS 테이블에 `runBatch`로 넣으며 진행률·취소는 변환 단계와 같다. 그 밖의 단계는 모두 `{ sql, params }`다. 사유: 커맨드를 순수 SQL 목록으로 두면 되돌리기·저널 재생·붙여넣기가 실행기 하나로 끝나고, 변환·인덱싱 단계만 예외로 두면 진행률·취소 요구를 충족하면서 형식은 하나로 유지된다.
 - 스키마 커맨드(테이블·열 생성·이름 변경·순서·소프트 삭제·타입 변경)는 Worker의 `db/tables.js`가 만들고 즉시 적용한 뒤 커맨드 객체를 메인에 돌려준다(`schema.*` op). 메인은 그 객체를 히스토리와 저널에 그대로 넣는다. 데이터 커맨드(Step 5)는 메인의 `app/commands.js`가 만들어 `command.apply`로 보낸다. 데이터 커맨드는 물리 이름(테이블 `id`, 열 `id`)으로 SQL을 만들고 값은 모두 바인딩한다. 되돌리기에 필요한 옛 값(셀 값, `_updated_at`, 삭제할 행 전체)은 커맨드를 만들기 전에 `query.rows`·`query.row`로 읽어 커맨드 안에 넣는다. 그래야 되돌리기가 DB를 다시 읽지 않고도 "적용 → 되돌리기 → 덤프 동일"을 만족하고, 저널에 기록된 커맨드만으로 재생이 끝난다.
 - 되돌리기·다시 실행도 저널에 기록한다. 저널 재생은 항상 `do` 방향이므로, 되돌리기는 `do`와 `undo`를 맞바꾼 역커맨드(`commands.invert`)를 기록하고 다시 실행은 원래 커맨드를 다시 기록한다. 재생 결과는 사용자가 마지막으로 본 상태와 같다.
 - 새 행의 `id`는 커맨드를 만들 때 정한다(`query.stats`의 `maxId + 1`부터 연속). SQLite가 배정하게 두면 되돌리기가 지울 행과 다시 실행이 만들 행의 `id`를 알 수 없다. 행은 언제나 `id` 순서의 끝에 붙는다. 그리드가 `id` 순으로 그리므로 "중간에 삽입"은 다른 행의 `id`를 바꿔야 하는데, 그러면 앞선 커맨드의 되돌리기가 가리키는 행이 달라진다.
@@ -276,7 +280,7 @@ src/
       longtext.js                사이드 패널 장문 편집기
     dialogs/
       dialog.js                  모달 기반(포커스 트랩, Esc, 버튼 행). 다른 대화상자가 이 위에 만들어진다
-      table.js column.js import.js export.js settings.js conflict.js
+      table.js column.js filter.js import.js export.js settings.js conflict.js
     toolbar.js sidebar.js statusbar.js toast.js
   io/
     filesystem.js                File System Access + 폴백 다운로드 + 타우리 dialog/fs 추상화
@@ -293,7 +297,8 @@ src/
     schema.js                    메타 테이블 DDL, 마이그레이션, 헤더·무결성 검사, 외부 파일 등록, 식별자 인용
     command.js                   커맨드 실행기(D-08): 문장 목록을 하나의 트랜잭션으로, 변환 단계는 청크·진행률·취소
     tables.js                    테이블·열 CRUD(메타 + DDL)를 커맨드로 만들어 적용
-    query.js                     창 질의 빌더(정렬·필터·검색), count
+    query.js                     창 질의 빌더(정렬·필터·검색), count, 뷰 스펙 정규화·정리
+    views.js                     뷰(_jdr_views) 저장·삭제를 커맨드로, 목록·불러오기
     values.js                    논리 타입 ↔ 저장값 변환·검증
     search.js                    FTS5 인덱스 생성·삭제·질의
   import/
@@ -429,7 +434,7 @@ CREATE TABLE IF NOT EXISTS _jdr_views (
   id TEXT PRIMARY KEY,
   table_id TEXT NOT NULL REFERENCES _jdr_tables(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  spec TEXT NOT NULL              -- JSON: sort[], filter[], hidden[], row_height
+  spec TEXT NOT NULL              -- JSON: sort[], filter, hidden[], search, widths, frozen (Step 6)
 ) STRICT;
 ```
 
@@ -650,7 +655,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `longtext.open(rowId, colId)`(전문 로드), `longtext.save()`, 자동 저장 없음(명시적 확정). 그리드 오른쪽의 사이드 패널
 - `selection.setActive()`, `selection.extendTo()`, `selection.getRange()`, `selection.selectRows()`. DOM 없는 순수 상태이며 그리드가 렌더 때 읽는다
 - `clipboard.copy(range)` → TSV(`serializeTsv`), `clipboard.paste(text, anchor)` → `parseTsv` 후 복합 커맨드. 복사는 `navigator.clipboard.writeText`(범위의 전문은 `query.rows`로 읽는다), 붙여넣기는 그리드가 받는 `paste` 이벤트의 `clipboardData`다. Worker는 이를 `runBatch`로 실행한다
-- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.deleteRowRange({ tableId, offset, count })`(스냅샷 상한을 넘는 삭제. `undo`가 비고 `irreversible`), `commands.clearRowRange({ tableId, colIds, offset, count, now })`(스냅샷 상한을 넘는 범위 지우기. 같은 이유로 문장 하나이며 이미 모두 NULL인 행은 건드리지 않는다), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08). 배치 목록은 `commands.chunkParams`가 `runBatch` 상한 단위로 나눈다
+- `commands.editCell({ tableId, rowId, colId, oldValue, newValue, oldUpdatedAt, now })`, `commands.insertRows({ tableId, count, firstId, now })`, `commands.deleteRows({ tableId, rows })`(`rows`는 `query.rows`가 돌려준 스냅샷), `commands.deleteRowRange({ tableId, offset, count, clauses })`(스냅샷 상한을 넘는 삭제. `undo`가 비고 `irreversible`. `clauses`는 `query.buildViewClauses`의 결과로, 정렬·필터·검색이 있는 뷰에서 `offset`이 뷰 순서를 가리키게 한다 — Step 6), `commands.clearRowRange({ tableId, colIds, offset, count, now, clauses })`(스냅샷 상한을 넘는 범위 지우기. 같은 이유로 문장 하나이며 이미 모두 NULL인 행은 건드리지 않는다), `commands.bulkEdit({ tableId, edits, inserts, now })`(`edits[i] = { rowId, oldUpdatedAt, cells: [{ colId, oldValue, newValue }] }`, `inserts[i] = { id, cells }`), `commands.invert(cmd)`. 모두 순수 함수이며 옛 값은 호출자가 읽어 넘긴다(D-08). 배치 목록은 `commands.chunkParams`가 `runBatch` 상한 단위로 나눈다
 - `history.push(cmd)`, `history.undo()`, `history.redo()`, `history.clear(reason)`. `history.apply(cmd)`는 `command.apply` → 스토어 기록 → `push`를 한 번에 한다. 스키마 op가 만든 커맨드는 스토어의 `onCommand` 알림으로 히스토리에 들어온다
 - Worker: `applyCommand(cmd)`(`BEGIN` ... `COMMIT`, 실패 시 `ROLLBACK`), `_updated_at` 갱신 트리거 대신 커맨드가 명시적으로 갱신
 
@@ -676,25 +681,36 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **목표**: 열 정렬(다중), 조건 필터(AND/OR 1단계), 전체 텍스트 검색, 뷰(정렬·필터·숨김 열·너비) 저장.
 
-**산출물**: `db/query.js`(필터 빌더), `db/search.js`, `ui/dialogs/filter.js`, `ui/toolbar.js`(검색 상자), `_jdr_views` 활용
+**산출물**: `db/query.js`(뷰 스펙·필터·정렬 빌더), `db/search.js`, `db/views.js`, `ui/dialogs/filter.js`(정렬·필터 대화상자), `ui/toolbar.js`(검색 상자·정렬·필터·뷰·검색 인덱스), `ui/sidebar.js`(열 숨김·표시), `app/store.js`(테이블별 뷰 상태), `_jdr_views` 활용
+
+**뷰 스펙**
+- `viewSpec = { hidden?: string[], sort?: SortSpec[], filter?: FilterSpec | null, search?: string }`. `SortSpec = { colId, dir: 'asc' | 'desc' }`, `FilterSpec = { logic: 'and' | 'or', conditions: FilterCondition[] }`, `FilterCondition = { colId, op, value?, values? }`. 값은 UI에서 온 문자열이며 빌더가 열 타입으로 검증·변환한다. Worker의 `query.window`·`query.count`·`query.rows`가 같은 형식을 받아 같은 WHERE·ORDER BY를 붙이므로 그리드의 행 순번과 편집이 읽는 행이 어긋나지 않는다.
+- 메인의 뷰 상태(`app/store.js`의 `TableViewState`)는 Step 4의 `{ widths, frozenColumns }`에 `{ hidden, sort, filter, search, viewId }`를 더한 것이고, 그리드에 넘기는 `viewSpec`은 이 중 `hidden`·`sort`·`filter`·`search`다. 정렬·필터·검색·숨김이 바뀌면 그리드는 다시 마운트되고(스크롤·선택 초기화), 너비·고정 열만 바뀌면 `applyView`로 배치만 고친다.
+- 저장된 뷰(`_jdr_views.spec`)는 `{ sort, filter, hidden, search, widths, frozen }` JSON이다. 뷰 저장·삭제는 스키마 op처럼 Worker가 커맨드를 만들어 적용하고(`views.save`·`views.delete`) 메인이 히스토리·저널에 넣는다. 뷰 불러오기는 `views.list`가 돌려준 스펙을 메인의 뷰 상태에 적용하는 것이며 DB를 바꾸지 않는다.
 
 **주요 함수**
-- `query.buildWhere(filterSpec, columns)` → `{ sql, params }`(연산자: `=`, `!=`, `<`, `>`, `<=`, `>=`, `contains`, `starts`, `empty`, `not_empty`, `in`)
-- `query.buildOrderBy(sortSpec)`; 타입에 맞는 정렬(숫자는 수치, 텍스트는 NOCASE)
-- `search.enable(tableId)`(FTS5 테이블 + 트리거 생성, 초기 인덱싱 진행률), `search.disable(tableId)`, `search.query(tableId, q)` → `WHERE id IN (SELECT rowid FROM fts WHERE fts MATCH ?)` 조각, `search.fallbackLike(columns, q)`
-- `views.save()`, `views.load()`, `views.list()`
+- `query.buildWhere(filterSpec, columns)` → `{ sql, params }`(연산자: `=`, `!=`, `<`, `>`, `<=`, `>=`, `contains`, `starts`, `empty`, `not_empty`, `in`). 값은 항상 바인딩한다. 텍스트 계열 열(`text`·`longtext`·`select`)의 비교는 `COLLATE NOCASE`, `contains`·`starts`는 `LIKE ... ESCAPE '\'`(텍스트가 아닌 열은 `CAST(... AS TEXT)`), `!=`는 빈 값도 포함(`IS NOT`), `empty`는 `IS NULL OR = ''`, `in`은 `IN (?, ...)`. 살아 있지 않은 열을 가리키는 조건은 무시한다(스토어가 곧 뷰에서 지운다). 값이 열 타입에 맞지 않으면 `E_VALUE_INVALID`.
+- `query.buildOrderBy(sortSpec, columns)` → SQL 조각. 타입에 맞는 정렬(숫자·불리언은 수치, 텍스트 계열은 `COLLATE NOCASE`, 날짜는 그대로), 빈 값은 항상 `NULLS LAST`, 마지막에 언제나 `"id"`. 살아 있지 않은 열은 무시한다.
+- `query.buildSearchWhere(table, q)`: 인덱스가 있고 3자 이상이면 `search.query`, 아니면 `search.fallbackLike`. `query.buildViewClauses(table, viewSpec)` → `{ where, params, orderBy, sorted, filtered }`가 필터·검색·정렬을 합친다. 창 질의·행 수·`query.rows`·되돌릴 수 없는 범위 커맨드(`deleteRowRange`·`clearRowRange`의 `clauses`)가 이것을 쓴다. 정렬·필터·검색이 하나라도 있으면 D-06의 id 탐색 빠른 경로는 쓰지 않는다.
+- `query.normalizeViewSpec(raw)`(Worker 경계를 넘어온 값의 형태 정리), `query.toggleSort(sort, colId, append)`(머리글 클릭: 없음 → 오름차순 → 내림차순 → 없음. `append`(Shift+클릭)면 다른 항목을 유지한다), `query.pruneViewSpec(spec, table)`(살아 있지 않은 열의 정렬·필터·숨김 항목 제거. 지운 것이 있으면 `changed: true`).
+- `search.enable(engine, tableId, ctx)`(FTS5 external-content 테이블 + 트리거 생성 + 초기 인덱싱 진행률·취소), `search.disable(engine, tableId)`, `search.query(tableId, q)` → `"id" IN (SELECT rowid FROM fts WHERE fts MATCH ?)` 조각, `search.fallbackLike(columns, q)`, `search.searchableColumns(table)`. 생성·삭제는 커맨드를 돌려준다(RPC `search.enable`·`search.disable`).
+- `views.save(engine, tableId, { name, spec, viewId? })` → `{ viewId, cmd }`, `views.remove(engine, viewId)` → `{ cmd }`, `views.list(engine, tableId)`, `views.load(engine, viewId)`.
+- 스토어: `setSort`·`toggleSort`·`setFilter`·`setSearch`·`toggleHidden`·`clearFilters`·`applyView`·`saveView`·`deleteView`·`listViews`·`enableSearch`·`disableSearch`, `viewSpecOf(tableId)`. 테이블 목록을 다시 읽을 때와 뷰를 불러올 때 `pruneViewSpec`을 거친다.
+- UI: 머리글 클릭이 정렬을 바꾸고(Shift+클릭은 보조 정렬 추가) `aria-sort`와 순번을 표시한다. 도구 모음의 표 도구 줄에 검색 상자(입력 300 ms 디바운스, 조합 중에는 반영하지 않음), 정렬·필터 대화상자(키보드로 다중 정렬·조건 편집), 뷰 선택·저장·삭제, 검색 인덱스 만들기·삭제(진행률·취소)가 있다. 열 숨김·표시는 사이드바의 열 항목에서 한다.
 
 **예외 처리**
-- 필터 값이 열 타입과 맞지 않으면(숫자 열에 문자) 필터 UI에서 거부.
+- 필터 값이 열 타입과 맞지 않으면(숫자 열에 문자) 필터 UI에서 거부(`values.validate`의 사유 문구). Worker의 빌더도 같은 검증을 하며 `E_VALUE_INVALID`.
 - FTS 질의 문법 오류(따옴표 불균형 등): 사용자 입력을 항상 `"..."`로 감싸고 내부 따옴표를 이스케이프하여 구문 오류를 원천 차단.
-- 3자 미만 검색어 또는 인덱스 없음 → LIKE 폴백. LIKE의 `%`, `_`는 `ESCAPE '\'`로 이스케이프.
-- FTS 인덱스 생성 중 취소: 트랜잭션 롤백, `fts_enabled = 0`.
-- 필터 결과 0건이면 빈 상태와 "필터 지우기" 버튼.
-- 정렬 대상 열이 소프트 삭제되면 뷰에서 그 정렬 항목을 제거하고 안내.
+- 3자 미만 검색어 또는 인덱스 없음 → LIKE 폴백. LIKE의 `%`, `_`, `\`는 `ESCAPE '\'`로 이스케이프.
+- FTS 인덱스 생성 중 취소: 트랜잭션 롤백, `fts_enabled = 0`(커맨드 하나라 롤백이 트리거·FTS 테이블까지 되돌린다). 검색할 열이 없는 테이블, 이미 켜진 테이블, 비STRICT 테이블은 거부.
+- 필터 결과 0건이면 빈 상태와 "필터 지우기" 버튼(필터와 검색을 함께 지운다).
+- 정렬·필터·숨김 대상 열이 소프트 삭제되면 뷰에서 그 항목을 제거하고 안내. 저장된 뷰를 불러올 때도 같다.
+- 정렬·필터·검색이 있는 뷰에서 행을 추가하면 새 행이 필터에 걸려 보이지 않을 수 있음을 안내한다(정렬만 있으면 빈 행은 `NULLS LAST`라 끝에 붙는다).
+- 검색 인덱스가 있는 테이블의 되돌리기·다시 실행·저널 재생은 트리거가 인덱스를 따라 갱신하므로 별도 처리가 없다. 인덱스 생성 커맨드의 되돌리기(인덱스 삭제)와 다시 실행(재인덱싱)은 진행률 없이 실행된다.
 
 **완료 기준**
 - 단위: `buildWhere`가 항상 파라미터 바인딩을 쓰고 문자열 연결로 값을 넣지 않음(테스트가 `'` 포함 값을 넣어 확인).
-- 30만 행에서 trigram 검색 200 ms 이하, 인덱스 없이 LIKE 1초 이하.
+- 30만 행에서 trigram 검색 200 ms 이하, 인덱스 없이 LIKE 1초 이하(`query.count`의 `elapsedMs`, `npm run test:perf`).
 - E2E: 정렬·필터·검색 조합 후 뷰 저장 → 재열기 시 복원.
 
 ### Step 7. CSV 가져오기
@@ -869,19 +885,23 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `schema.adopt` | | `{ meta, tables }`. `unmanaged`로 열린 파일에 메타를 만들고 기존 테이블을 등록 | 불가 |
 | `schema.create` / `schema.rename` / `schema.drop` / `schema.addColumn` / `schema.renameColumn` / `schema.reorderColumns` / `schema.softDeleteColumn` / `schema.restoreColumn` / `schema.changeColumnType` | 3장 `tables` 함수와 1:1 | `{ cmd, ... }`. 적용된 D-08 커맨드를 돌려주어 메인이 히스토리·저널에 넣는다 | 타입 변경만 가능 |
 | `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, columnIds, seq, elapsedMs }`. `rows[i] = { id, cells, lengths }`이고 `cells[j]`는 `columnIds[j]` 열의 값(text·longtext는 `substr(1, 256)` 미리보기), `lengths[j]`는 미리보기가 잘렸을 때만 전체 문자 수, 아니면 null. `columnIds`는 소프트 삭제·숨김을 뺀 살아 있는 열의 표시 순서. `limit`은 1만 이하. `elapsedMs`는 Worker 측 질의 시간(8장 측정용) | 불가(짧음) |
-| `query.count` | `{ tableId, viewSpec }` | `{ count }` | |
+| `query.count` | `{ tableId, viewSpec }` | `{ count, elapsedMs }`. 뷰 조건(필터·검색)을 포함한 행 수. Worker가 쓰기 일련번호와 뷰 조건을 키로 캐시한다 | |
 | `query.row` | `{ tableId, rowId, colIds }` | `{ row }`. `row = { id, cells, createdAt, updatedAt }`(`cells`는 열 id → 전문 값, `createdAt`·`updatedAt`은 시스템 열)이고 없는 행이면 `row: null`. `colIds`를 비우면 살아 있는 열 전부 | |
 | `query.rows` | `{ tableId, viewSpec, offset, limit, colIds? }` | `{ rows }`. 뷰 순서로 `offset`부터 `limit`개(1만 이하)의 전문 행(`query.row`와 같은 형태). `colIds`를 비우면 소프트 삭제된 열까지 물리 열 전부(행 삭제의 되돌리기 스냅샷용). 붙여넣기·다중 편집·행 삭제가 커맨드를 만들기 전에 옛 값을 읽는 데 쓴다 | 불가(짧음) |
 | `query.stats` | `{ tableId }` | `{ count, minId, maxId }`. 빈 테이블이면 `minId`·`maxId`는 null. 행 추가 커맨드가 새 `id`를 정하는 데 쓴다 | |
 | `command.apply` | `{ cmd, direction? }` | `{ affected, nulled? }`. `direction`은 `'do'`(기본) 또는 `'undo'`. `nulled`는 변환 단계가 NULL로 만든 값의 수. 저널 재생과 되돌리기가 쓴다 | 변환 단계가 있을 때만 |
-| `search.enable` | `{ tableId }` | | 가능 |
+| `search.enable` | `{ tableId }` | `{ cmd }`. FTS5 테이블·트리거 생성과 초기 인덱싱(`{ index }` 단계, `progress.phase = 'index'`)을 커맨드 하나로 적용하고 돌려준다. 검색할 열이 없거나 이미 켜져 있거나 비STRICT 테이블이면 `E_DB_QUERY` | 가능 |
+| `search.disable` | `{ tableId }` | `{ cmd }`. 트리거·FTS 테이블 삭제. `undo`가 인덱스를 다시 만든다 | 불가 |
+| `views.list` | `{ tableId }` | `{ views }`. `views[i] = { id, tableId, name, spec }`(`spec`은 파싱된 JSON) | |
+| `views.save` | `{ tableId, name, spec, viewId? }` | `{ viewId, cmd }`. `viewId`가 있으면 그 뷰를 덮어쓰고(되돌리면 옛 이름·스펙), 없으면 새 뷰 | 불가 |
+| `views.delete` | `{ viewId }` | `{ cmd }` | 불가 |
 | `import.preview` | `{ file, options }` | `{ columns, sample, inferred, warnings }` | 가능 |
 | `import.run` | `{ file, mapping, target, policy }` | `{ report }` | 가능 |
 | `export.stream` | `{ tableId, viewSpec, format, options }` | 조각 이벤트 `{ chunk }` 후 완료 | 가능 |
 
 데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다.
 
-규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `import.run`, `search.enable`)와 `db.snapshot`·`db.close`는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`와 `schema.list`는 언제나 허용된다(읽기).
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`)와 `db.snapshot`·`db.close`는 서로 배타적이며 동시에 오면 `E_DB_BUSY`. `query.*`, `schema.list`, `views.list`는 언제나 허용된다(읽기).
 
 `db.snapshot`·`db.close`가 배타인 이유: 둘 다 트랜잭션 상태를 전제로 한다(스냅샷은 트랜잭션 밖에서만 뜰 수 있고, 닫기는 연결을 없앤다). 쓰기 op는 청크 사이에서 이벤트 루프로 돌아오므로 그 틈에 저장 요청이 끼어들 수 있고, 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨진다. 파일에는 아무것도 쓰이지 않았는데 `revision`·`saved_by`만 올라간 DB가 남는 것이 최악이다. 긴 작업 중의 저장은 큐에 넣지 않고 거절하며, UI가 "작업이 끝난 뒤 다시 저장하세요"로 안내한다.
 
