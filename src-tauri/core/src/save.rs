@@ -66,6 +66,20 @@ pub fn backup_path_for(original: &Path) -> PathBuf {
     with_suffix(original, ".bak")
 }
 
+/// 부모 폴더의 디렉터리 항목을 디스크에 내린다. rename은 파일 내용이 아니라 디렉터리 항목을 바꾸므로,
+/// 임시 파일을 `sync_all`한 것만으로는 전원이 끊겼을 때 새 이름이 살아남는다는 보장이 없다(POSIX).
+/// Windows는 폴더를 이렇게 열 수 없어 아무것도 하지 않는다.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) {
+    // 여기까지 왔으면 파일은 이미 제자리다. 동기화 실패는 "덜 단단할 뿐"이므로 저장을 되돌리지 않는다.
+    if let Ok(handle) = fs::File::open(dir) {
+        let _ = handle.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) {}
+
 fn rename(from: &Path, to: &Path, phase: &str) -> Result<()> {
     fs::rename(from, to).map_err(|e| {
         let code = match e.kind() {
@@ -191,6 +205,7 @@ impl Backend {
                 "original": { "restored": restored, "backupPath": backup.as_ref().map(|p| path_string(p)) },
             })));
         }
+        sync_dir(&parent);
         let (mtime, size) = workcopy::file_stamp(&target)?;
         session.original = Some(OriginalRef {
             path: target.clone(),
