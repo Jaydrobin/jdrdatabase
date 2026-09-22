@@ -355,3 +355,15 @@ fn dirty_workcopy_with_hot_wal_is_kept() {
         "미저장 변경이 든 사본을 기동 정리가 지우면 안 된다"
     );
 }
+
+/// 엔진 프로토콜 토큰은 시각·pid에서 유도하지 않는다(같은 밀리초·같은 프로세스에서도 달라야 한다).
+#[test]
+fn random_token_is_not_derived_from_time_and_pid() {
+    let a = jdr_core::workcopy::random_token();
+    let b = jdr_core::workcopy::random_token();
+    assert_eq!(a.len(), 32);
+    assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_ne!(a, b);
+    // 시각·pid만으로 만들면 같은 밀리초 안에서 접미사 두 개가 같은 값으로 겹칠 수 있다.
+    assert_ne!(a[..16], a[16..], "두 조각이 같은 seed에서 나오면 안 된다");
+}

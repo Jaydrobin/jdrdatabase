@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 /// Worker가 `jdr://localhost/call` 요청에 실어 보내는 토큰(프로세스마다 새로 만든다). 같은 앱의 문서만 알 수 있다.
+/// 이 프로토콜은 `Backend::call` 전부(임의 경로 열기·쓰기 포함)로 이어지므로 토큰은 추측할 수 없어야 한다.
 pub struct IpcToken(pub String);
 
 /// 패닉을 앱 데이터 폴더의 `panic.log`에 남긴다(DESIGN.md Step 11 예외 처리). 창에는 다음 IPC 실패가 `E_NATIVE_IPC`로 드러난다.
@@ -47,11 +48,7 @@ pub fn run() {
             // 지난 실행이 남긴 깨끗한 사본은 지운다. dirty 사본은 복구 흐름(D-15)을 위해 남긴다.
             let _ = jdr_core::workcopy::purge_clean(&app_data, None);
             app.manage(backend);
-            app.manage(IpcToken(format!(
-                "{}{}",
-                jdr_core::workcopy::random_suffix(),
-                jdr_core::workcopy::random_suffix()
-            )));
+            app.manage(IpcToken(jdr_core::workcopy::random_token()));
             Ok(())
         })
         // Worker 안의 네이티브 엔진이 동기 XHR로 부르는 엔진 프로토콜(D-15). 긴 명령은 별도 스레드에서 돈다.

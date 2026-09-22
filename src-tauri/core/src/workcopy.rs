@@ -96,6 +96,22 @@ pub fn random_suffix() -> String {
     )
 }
 
+/// 밖에서 추측할 수 없어야 하는 값(엔진 프로토콜 토큰). `RandomState`의 키는 프로세스마다 OS 난수로 seed되므로
+/// 시각·pid로 만드는 `random_suffix`와 달리 시작 시각을 알아도 맞힐 수 없다. 크레이트를 늘리지 않으려고
+/// std만 쓴다(D-12).
+pub fn random_token() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut out = String::with_capacity(32);
+    for round in 0..2u64 {
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u64(round);
+        hasher.write_u64(now_ms());
+        hasher.write_u64(u64::from(std::process::id()));
+        out.push_str(&format!("{:016x}", hasher.finish()));
+    }
+    out
+}
+
 /// 파일의 mtime(ms)과 크기.
 pub fn file_stamp(path: &Path) -> Result<(u64, u64)> {
     let meta = fs::metadata(path).map_err(|e| AppError::from_io(e, "stat", Some(path)))?;
