@@ -9,6 +9,8 @@ export const ko = Object.freeze({
   'app.version': '버전 {version}',
   'status.booting': '시작 중…',
   'status.ready': '준비됨',
+  'status.copying': '파일 여는 중… {done} / {total}',
+  'status.savingProgress': '저장하는 중…',
   'status.mode.worker': 'Worker 모드',
   'status.mode.inline': '단일 스레드 모드',
   'status.engine': 'SQLite {version}',

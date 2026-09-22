@@ -72,6 +72,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {() => Promise<WorkcopyEntry[]>} [listWorkcopies] 데스크톱 모드: 남은 작업 사본
  * @property {(key: string) => Promise<void>} [removeWorkcopy] 데스크톱 모드: 작업 사본 버리기
  * @property {(path: string) => string} [baseName] 데스크톱 모드: 경로의 파일 이름 부분
+ * @property {() => Promise<{ phase: string, done: number, total: number } | null>} [pollProgress] 데스크톱 모드: 러스트가 마지막으로 보고한 진행률
  */
 
 /**
@@ -154,6 +155,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {JournalStop} journalStop
  * @property {BackupNote} backupNote 마지막 저장의 백업 결과. 다음 저장이 성공하면 `none`
  * @property {boolean} saving 저장(사용자·자동)이 진행 중(저장 뮤텍스)
+ * @property {{ phase: string, done: number, total: number } | null} progress 데스크톱 모드의 긴 작업(열기·저장) 진행률. 없으면 null
  */
 
 /** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done'} StoreEvent */
@@ -277,6 +279,7 @@ export function createStore(deps) {
     journalStop: 'none',
     backupNote: 'none',
     saving: false,
+    progress: null,
   };
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
@@ -591,6 +594,43 @@ export function createStore(deps) {
     }
   }
 
+  /** 데스크톱 모드의 긴 작업 진행률 폴링 간격(ms). */
+  const PROGRESS_POLL_MS = 500;
+
+  /**
+   * 데스크톱 모드의 긴 작업(5 GB 열기·저장)을 돌리며 진행률을 상태에 싣는다. 엔진 프로토콜(동기 XHR)에는
+   * 진행률 채널이 없어 보고가 Worker까지 오지 못하므로, 메인이 러스트에 직접 물어 본다(D-15).
+   * @template T
+   * @param {() => Promise<T>} run
+   * @returns {Promise<T>}
+   */
+  async function withNativeProgress(run) {
+    const poll = nativeMode ? fs.pollProgress : undefined;
+    if (!poll) return run();
+    const timer = setInterval(() => {
+      void poll()
+        .then((progress) => {
+          // 작업이 끝난 뒤 도착한 응답이 끝난 숫자를 화면에 남기지 않게 한다.
+          if (state.progress === null && progress === null) return;
+          state.progress = progress;
+          emit('state:changed');
+        })
+        .catch(() => {
+          // 진행률을 못 읽는 것은 작업의 실패가 아니다. 표시만 빠진다.
+        });
+    }, PROGRESS_POLL_MS);
+    state.progress = null;
+    try {
+      return await run();
+    } finally {
+      clearInterval(timer);
+      if (state.progress !== null) {
+        state.progress = null;
+        emit('state:changed');
+      }
+    }
+  }
+
   /**
    * 데스크톱 모드에서 필요한 파일 함수. 없으면 주입이 잘못된 것이다.
    * @template {keyof FileSystemLike} K
@@ -635,12 +675,14 @@ export function createStore(deps) {
     emit('state:changed');
     const name = nativeFs('baseName')(originalPath);
     try {
-      const saved = await client.call('db.save', {
-        originalPath,
-        bumpRevision: true,
-        savedBy: deviceName,
-        force: options.force === true,
-      });
+      const saved = await withNativeProgress(() =>
+        client.call('db.save', {
+          originalPath,
+          bumpRevision: true,
+          savedBy: deviceName,
+          force: options.force === true,
+        }),
+      );
       // `.bak`은 러스트가 저장마다 회전시키므로 브라우저 모드의 백업 생략 표시는 여기서 뜻이 없다.
       state.backupNote = 'none';
       await setSaved({
@@ -978,11 +1020,13 @@ export function createStore(deps) {
       /** @type {import('../db/worker.js').OpenResult} */
       let opened;
       try {
-        opened = await client.call('db.open', { originalPath });
+        opened = await withNativeProgress(() => client.call('db.open', { originalPath }));
         if (opened.workcopy?.dirty) {
           const verdict = await judgeWorkcopy(opened.workcopy, name);
           if (verdict === 'discard') {
-            opened = await client.call('db.open', { originalPath, discardWorkcopy: true });
+            opened = await withNativeProgress(() =>
+              client.call('db.open', { originalPath, discardWorkcopy: true }),
+            );
           }
         }
       } catch (err) {

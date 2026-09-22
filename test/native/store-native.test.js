@@ -158,14 +158,19 @@ function nativeFs() {
       await engineCall('remove_workcopy', { key });
     },
     baseName: (p) => path.basename(p),
+    pollProgress: async () =>
+      /** @type {{ phase: string, done: number, total: number } | null} */ (
+        await engineCall('progress_peek', {})
+      ),
   };
   return { fs, queue };
 }
 
 /**
  * @param {Partial<{ discard: boolean, originalChanged: 'overwrite' | 'saveAs' | 'cancel', workcopy: 'recover' | 'discard' }>} [answers]
+ * @param {(fs: import('../../src/app/store.js').FileSystemLike) => import('../../src/app/store.js').FileSystemLike} [patchFs] 파일 함수 일부를 바꾼다
  */
-async function setup(answers = {}) {
+async function setup(answers = {}, patchFs) {
   const client = createClient({ transport: createInlineTransport() });
   const init = await client.call('engine.init', { mode: 'native', appVersion: 'test' });
   assert.equal(init.capabilities.persistence, 'native');
@@ -195,7 +200,7 @@ async function setup(answers = {}) {
   const store = createStore({
     client,
     caps: init.capabilities,
-    fs: fsx.fs,
+    fs: patchFs ? patchFs(fsx.fs) : fsx.fs,
     idb,
     autosave: createAutosave({ idb: null }),
     tablock,
@@ -548,4 +553,28 @@ test('desktop: 저장한 적 없는 dirty 사본이 둘 이상이면 설정 목�
   const after = await second.store.listWorkcopies();
   assert.ok(!after.some((e) => e.key === target.key), '버린 사본은 목록에 없다');
   second.client.close();
+});
+
+test('desktop: 진행률을 읽지 못해도 열기·저장은 그대로 된다', async () => {
+  // 엔진 프로토콜(동기 XHR)에는 진행률 채널이 없어 러스트의 보고가 Worker까지 오지 못한다. 메인이
+  // `progress_peek`으로 직접 물어 상태에 싣는데(D-15), 그 폴링은 작업의 성패에 영향을 주면 안 된다.
+  const ok = await setup();
+  await apply(ok.store, ok.client, CREATE_T);
+  const file = path.join(scratch, 'progress.db');
+  ok.fsx.queue.push(file);
+  assert.equal(await ok.store.saveAs(), true);
+  assert.equal(ok.store.getState().progress, null, '작업 밖에서는 진행률이 없다');
+  await ok.client.call('db.close', { discardWorkcopy: true });
+  ok.client.close();
+
+  const broken = await setup({}, (fs) => ({
+    ...fs,
+    pollProgress: async () => {
+      throw new Error('폴링 실패');
+    },
+  }));
+  assert.equal(await broken.store.openPath(file), true, '진행률을 못 읽어도 열기는 된다');
+  assert.equal(broken.store.getState().progress, null);
+  await broken.client.call('db.close', { discardWorkcopy: true });
+  broken.client.close();
 });

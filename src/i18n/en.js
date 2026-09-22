@@ -9,6 +9,8 @@ export const en = Object.freeze({
   'app.version': 'Version {version}',
   'status.booting': 'Starting…',
   'status.ready': 'Ready',
+  'status.copying': 'Opening file… {done} / {total}',
+  'status.savingProgress': 'Saving…',
   'status.mode.worker': 'Worker mode',
   'status.mode.inline': 'Single-thread mode',
   'status.engine': 'SQLite {version}',

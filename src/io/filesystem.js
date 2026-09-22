@@ -179,6 +179,22 @@ export async function restoreBackup(originalPath, targetPath) {
   );
 }
 
+/** @typedef {{ phase: string, done: number, total: number }} NativeProgress */
+
+/**
+ * 러스트가 마지막으로 보고한 진행률. 긴 명령(5 GB 열기·저장)이 도는 동안 메인 스레드가 폴링한다.
+ * 엔진 프로토콜(동기 XHR)에는 진행률 채널이 없어 보고가 Worker까지 가지 못하기 때문이다(D-15).
+ * 커넥션 뮤텍스를 잡지 않는 명령이라 도는 명령을 막지 않는다.
+ * @returns {Promise<NativeProgress | null>}
+ */
+export async function pollProgress() {
+  const raw = await engineCall('progress_peek', {});
+  if (!raw || typeof raw !== 'object') return null;
+  const v = /** @type {Record<string, unknown>} */ (raw);
+  if (typeof v.done !== 'number' || typeof v.total !== 'number') return null;
+  return { phase: String(v.phase ?? ''), done: v.done, total: v.total };
+}
+
 /**
  * 남아 있는 작업 사본 목록(최근 연 순).
  * @returns {Promise<WorkcopyEntry[]>}

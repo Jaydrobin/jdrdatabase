@@ -6,7 +6,7 @@ use jdr_core::db::{MAX_BATCH_PARAMS, MAX_RESULT_ROWS};
 use jdr_core::error::Code;
 use jdr_core::value::{Params, SqlValue};
 use jdr_core::Backend;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -314,4 +314,64 @@ fn call_dispatch_round_trips_json() {
     assert_eq!(err.code, Code::DbQuery);
     assert!(err.message.contains("invalid arguments"));
     ok(&b, "close", json!({ "discardWorkcopy": true }));
+}
+
+/// 진행률은 긴 명령이 도는 중에 다른 스레드가 읽을 수 있어야 한다. 엔진 프로토콜(동기 XHR)에는
+/// 진행률 채널이 없어 보고가 Worker까지 가지 못하므로, 메인 스레드가 이 명령으로 폴링한다(D-15).
+#[test]
+fn progress_peek_reads_the_latest_report_while_a_command_runs() {
+    let tmp = TempDir::new("진행률");
+    let b = Arc::new(Backend::new(tmp.join("app")));
+    ok(&b, "open", json!({}));
+    ok(&b, "begin", json!({}));
+    ok(
+        &b,
+        "run",
+        json!({ "sql": "CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT)" }),
+    );
+    ok(&b, "commit", json!({}));
+
+    // 명령을 부르지 않은 동안에는 남아 있는 보고가 없다.
+    assert_eq!(call(&b, "progress_peek", json!({})).unwrap(), Value::Null);
+
+    // `run_batch`가 도는 사이에 다른 스레드가 읽는다. 커넥션 뮤텍스를 잡지 않으므로 막히지 않는다.
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let watcher = {
+        let b = Arc::clone(&b);
+        let seen = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            for _ in 0..200 {
+                let v = b.call("progress_peek", json!({}), &|_| {}).unwrap();
+                if !v.is_null() {
+                    seen.lock().unwrap().push(v);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        })
+    };
+
+    ok(&b, "begin", json!({}));
+    let params: Vec<Value> = (0..4000)
+        .map(|i| json!([Value::Null, format!("행 {i}")]))
+        .collect();
+    ok(
+        &b,
+        "run_batch",
+        json!({ "sql": "INSERT INTO t (id, s) VALUES (?, ?)", "paramsList": params }),
+    );
+    ok(&b, "commit", json!({}));
+    watcher.join().unwrap();
+
+    let reports = seen.lock().unwrap();
+    assert!(
+        !reports.is_empty(),
+        "도는 동안 진행률을 읽을 수 있어야 한다"
+    );
+    let last = reports.last().unwrap();
+    assert!(last["done"].as_u64().is_some(), "{last}");
+    assert!(last["total"].as_u64().is_some(), "{last}");
+
+    // 명령이 끝나면 다시 비어 있다(끝난 작업의 숫자가 화면에 남지 않는다).
+    assert_eq!(call(&b, "progress_peek", json!({})).unwrap(), Value::Null);
+    b.close(true).unwrap();
 }

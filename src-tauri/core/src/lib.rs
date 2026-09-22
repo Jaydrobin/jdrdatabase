@@ -31,6 +31,9 @@ pub struct Backend {
     pub fail_point: Mutex<Option<save::FailPoint>>,
     /// 열려 있는 경로 싱크(`sink.rs`).
     pub(crate) sinks: Mutex<sink::Sinks>,
+    /// 마지막 진행률 보고. 긴 명령(5 GB 열기·저장)이 도는 동안 메인 스레드가 `progress_peek`으로 읽는다.
+    /// 엔진 프로토콜(동기 XHR)에는 진행률 채널이 없어 보고가 Worker까지 가지 못하기 때문이다(D-15).
+    pub(crate) last_progress: Mutex<Option<Value>>,
 }
 
 #[derive(Deserialize)]
@@ -104,11 +107,47 @@ impl Backend {
             interrupt: Mutex::new(None),
             fail_point: Mutex::new(None),
             sinks: Mutex::new(sink::Sinks::default()),
+            last_progress: Mutex::new(None),
         }
     }
 
     /// 명령 이름으로 함수를 고른다(6장·D-15). 모르는 명령은 `E_NATIVE_IPC`.
     pub fn call(&self, cmd: &str, args: Value, progress: &Progress) -> Result<Value> {
+        // 진행률 읽기는 커넥션 뮤텍스를 잡지 않는다. 긴 명령이 도는 중에 다른 스레드가 부르기 때문이다.
+        if cmd == "progress_peek" {
+            return Ok(self.read_progress());
+        }
+        // 진행률을 내는 명령은 시작할 때 비우고 보고마다 최신 값을 남긴다.
+        let reports = matches!(cmd, "open" | "save_to" | "run_batch");
+        if reports {
+            self.set_progress(None);
+        }
+        let tracked = |value: Value| {
+            if reports {
+                self.set_progress(Some(value.clone()));
+            }
+            progress(value);
+        };
+        let result = self.dispatch(cmd, args, &tracked);
+        if reports {
+            self.set_progress(None);
+        }
+        result
+    }
+
+    fn set_progress(&self, value: Option<Value>) {
+        *self.last_progress.lock().unwrap_or_else(|p| p.into_inner()) = value;
+    }
+
+    fn read_progress(&self) -> Value {
+        self.last_progress
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .unwrap_or(Value::Null)
+    }
+
+    fn dispatch(&self, cmd: &str, args: Value, progress: &Progress) -> Result<Value> {
         match cmd {
             "open" => Ok(serde_json::to_value(self.open(parse(args)?, progress)?)?),
             "close" => {

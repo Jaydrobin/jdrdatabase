@@ -33,7 +33,7 @@ import { mountSidebar } from './ui/sidebar.js';
 import { mountStatusbar } from './ui/statusbar.js';
 import { mountToasts } from './ui/toast.js';
 import { mountToolbar } from './ui/toolbar.js';
-import { base64ToBytes } from './util/bytes.js';
+import { base64ToBytes, formatBytes } from './util/bytes.js';
 import { AppError, toAppError } from './util/errors.js';
 import { formatInteger } from './util/format.js';
 
@@ -556,6 +556,20 @@ async function start(shell) {
   };
   active.on('state:changed', () => {
     const s = active.getState();
+    // 데스크톱 모드의 긴 작업(5 GB 열기·저장)은 수십 초가 걸린다. 진행률이 없으면 멈춘 것처럼 보인다.
+    if (s.progress) {
+      // 사본 복사만 바이트 수를 낸다. 저장 단계(checkpoint·vacuum·replace)는 셀 수가 없어 이름만 보인다.
+      if (s.progress.phase === 'copy' && s.progress.total > 0) {
+        shell.statusbar.setStatus('status.copying', {
+          done: formatBytes(s.progress.done),
+          total: formatBytes(s.progress.total),
+        });
+      } else {
+        shell.statusbar.setStatus('status.savingProgress');
+      }
+    } else {
+      shell.statusbar.setStatus('status.ready');
+    }
     shell.statusbar.setNote(
       s.readOnly !== 'none'
         ? 'status.readOnly'
