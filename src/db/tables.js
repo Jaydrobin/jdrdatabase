@@ -10,6 +10,7 @@ import { newColumnId, newTableId } from '../util/ids.js';
 import { applyCommand } from './command.js';
 import {
   DEFAULT_COLUMN_WIDTH,
+  ftsIndexStale,
   ftsTableFor,
   ftsTriggersFor,
   isSystemColumn,
@@ -50,6 +51,7 @@ import { isLogicalType } from './values.js';
  * @property {string} createdAt
  * @property {boolean} ftsEnabled
  * @property {boolean} strict false면 다른 도구가 만든 테이블(읽기 전용)
+ * @property {boolean} ftsStale 인덱스를 만든 뒤 열 구성이 바뀌었다(D-07. 다시 만들어야 맞는다)
  * @property {ColumnInfo[]} columns 소프트 삭제된 열도 포함(`deletedAt`으로 구분)
  */
 
@@ -165,15 +167,19 @@ export function list(engine) {
   );
   return r.rows.map((row) => {
     const id = String(row[0]);
-    return {
+    /** @type {TableInfo} */
+    const table = {
       id,
       name: String(row[1]),
       position: Number(row[2]),
       createdAt: String(row[3]),
       ftsEnabled: Number(row[4]) === 1,
       strict: Number(row[5]) === 1,
+      ftsStale: false,
       columns: listColumns(engine, id),
     };
+    table.ftsStale = ftsIndexStale(engine, table);
+    return table;
   });
 }
 
@@ -193,15 +199,19 @@ export function get(engine, tableId) {
   const row = r.rows[0];
   if (!row) return null;
   const id = String(row[0]);
-  return {
+  /** @type {TableInfo} */
+  const table = {
     id,
     name: String(row[1]),
     position: Number(row[2]),
     createdAt: String(row[3]),
     ftsEnabled: Number(row[4]) === 1,
     strict: Number(row[5]) === 1,
+    ftsStale: false,
     columns: listColumns(engine, id),
   };
+  table.ftsStale = ftsIndexStale(engine, table);
+  return table;
 }
 
 /**

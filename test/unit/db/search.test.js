@@ -260,3 +260,25 @@ test('table.drop: 검색 인덱스를 함께 지워 파일에 고아 FTS 테이�
   );
   await engine.close();
 });
+
+test('ftsStale: 인덱스를 만든 뒤 열 구성이 바뀌면 오래된 것으로 표시한다', async () => {
+  // D-07대로 인덱스는 만든 시점의 열 집합에 고정된다. 자동 재생성은 열 추가를 30만 행에서
+  // 수십 초짜리로 만들므로 하지 않고, 사용자가 모르고 지나가지만 않게 알린다.
+  const { engine, tableId } = await setup();
+  await search.enable(engine, tableId);
+  assert.equal(tables.get(engine, tableId)?.ftsStale, false, '만든 직후에는 최신이다');
+
+  // 텍스트 열을 더하면 그 열은 인덱스에 없다.
+  const added = await tables.addColumn(engine, tableId, { name: '메모', type: 'text' });
+  assert.equal(tables.get(engine, tableId)?.ftsStale, true, '추가된 열은 검색되지 않는다');
+
+  // 그 열을 지우면 다시 맞는다.
+  await tables.softDeleteColumn(engine, tableId, added.columnId);
+  assert.equal(tables.get(engine, tableId)?.ftsStale, false);
+
+  // 인덱스가 없는 테이블은 언제나 false다.
+  await search.disable(engine, tableId);
+  await tables.addColumn(engine, tableId, { name: '또', type: 'text' });
+  assert.equal(tables.get(engine, tableId)?.ftsStale, false);
+  await engine.close();
+});

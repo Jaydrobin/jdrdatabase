@@ -194,6 +194,9 @@ export const en = Object.freeze({
   'toolbar.viewDelete': 'Delete view',
   'toolbar.searchIndexEnable': 'Build search index',
   'toolbar.searchIndexDisable': 'Drop search index',
+  'toolbar.searchIndexStale': 'Search index (outdated)',
+  'toolbar.searchIndexStaleHint':
+    'Columns changed after the index was built. New columns are not searched and removed ones are still indexed. Turn the index off and on to rebuild it.',
   'toolbar.searchIndexProgress': 'Building search index… {done}/{total}',
   'search.enabled': 'Search index built. Queries of 3+ characters use it.',
   'search.disabled': 'Search index dropped. Search continues with LIKE.',

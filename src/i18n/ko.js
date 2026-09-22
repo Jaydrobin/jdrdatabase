@@ -196,6 +196,9 @@ export const ko = Object.freeze({
   'toolbar.viewDelete': '뷰 삭제',
   'toolbar.searchIndexEnable': '검색 인덱스 만들기',
   'toolbar.searchIndexDisable': '검색 인덱스 삭제',
+  'toolbar.searchIndexStale': '검색 인덱스 (오래됨)',
+  'toolbar.searchIndexStaleHint':
+    '인덱스를 만든 뒤 열 구성이 바뀌었습니다. 새 열은 검색되지 않고 지운 열은 아직 인덱스에 남아 있습니다. 인덱스를 껐다가 다시 만들면 맞춰집니다.',
   'toolbar.searchIndexProgress': '검색 인덱스 만드는 중… {done}/{total}',
   'search.enabled': '검색 인덱스를 만들었습니다. 3자 이상 검색어는 인덱스를 씁니다.',
   'search.disabled': '검색 인덱스를 삭제했습니다. 검색은 LIKE로 계속됩니다.',

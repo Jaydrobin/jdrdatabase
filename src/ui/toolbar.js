@@ -233,9 +233,14 @@ export function mountToolbar(parent, store, history, deps) {
     clearButton.hidden = sortCount === 0 && filterCount === 0 && view.search === '';
     viewSaveButton.disabled = !writable || busy;
     viewDeleteButton.disabled = !writable || busy || view.viewId === null;
+    // 인덱스는 만든 시점의 열 집합에 고정된다(D-07). 그 뒤 열이 바뀌면 새 열은 검색되지 않고
+    // 지운 열은 인덱스에 남으므로, 다시 만들어야 한다는 것을 버튼과 툴팁으로 알린다.
     indexButton.textContent = table.ftsEnabled
-      ? t('toolbar.searchIndexDisable')
+      ? table.ftsStale
+        ? t('toolbar.searchIndexStale')
+        : t('toolbar.searchIndexDisable')
       : t('toolbar.searchIndexEnable');
+    indexButton.title = table.ftsStale ? t('toolbar.searchIndexStaleHint') : '';
     // 외부(비STRICT) 테이블에는 인덱스를 만들지 않는다(D-07). LIKE 검색은 된다.
     indexButton.hidden = !table.strict;
     indexButton.disabled = !writable || busy;

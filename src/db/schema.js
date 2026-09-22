@@ -28,6 +28,7 @@ export const MAX_COLUMNS = 2000;
 export const WARN_COLUMNS = 1000;
 
 /** @typedef {import('./values.js').LogicalType} LogicalType */
+/** @typedef {import('./tables.js').ColumnInfo} ColumnInfo */
 
 /**
  * 논리 타입 → STRICT 물리 타입(4.2).
@@ -78,6 +79,36 @@ export function userTableDdl(tableId) {
  */
 export function ftsTableFor(tableId) {
   return `${META_PREFIX}fts_${tableId}`;
+}
+
+/**
+ * 검색 인덱스가 만들어진 뒤에 열 구성이 바뀌었는가(D-07). FTS 테이블은 만든 시점의 열 집합에
+ * 고정되므로, 그 뒤 추가된 텍스트 열은 검색되지 않고 타입이 바뀌어 소프트 삭제된 열은 인덱스에
+ * 남아 "결과에 행은 나오는데 화면에 일치하는 칸이 없는" 상태가 된다. 다시 만들면 맞춰지지만
+ * 30만 행에서 수십 초가 걸리므로 자동으로 하지 않고 알리기만 한다.
+ * @param {Engine} engine
+ * @param {{ id: string, ftsEnabled: boolean, columns: ColumnInfo[] }} table
+ * @returns {boolean}
+ */
+export function ftsIndexStale(engine, table) {
+  if (!table.ftsEnabled) return false;
+  /** @type {Set<string>} */
+  let indexed;
+  try {
+    indexed = new Set(
+      engine
+        .exec('SELECT name FROM pragma_table_info(?)', [ftsTableFor(table.id)])
+        .rows.map((row) => String(row[0])),
+    );
+  } catch {
+    // 인덱스 테이블을 읽을 수 없으면 "오래되었다"고 단정하지 않는다(검색은 폴백으로 동작한다).
+    return false;
+  }
+  const current = table.columns.filter(
+    (c) => c.deletedAt === null && physicalType(c.type) === 'TEXT',
+  );
+  if (current.length !== indexed.size) return true;
+  return current.some((c) => !indexed.has(c.id));
 }
 
 /**
