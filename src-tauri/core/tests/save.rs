@@ -196,3 +196,30 @@ fn save_as_new_path_creates_file_and_switches_original() {
     let missing = tmp.join("없는 폴더/x.db");
     assert_eq!(save(&b, &missing, false).unwrap_err().code, Code::FileWrite);
 }
+
+/// 파일을 다 바꾼 뒤의 뒷정리가 실패해도 저장은 성공이다. 실패를 돌려주면 `db.save`가 "파일이 그대로다"로 읽고
+/// 올려 둔 revision을 되돌려, 사본의 revision이 방금 쓴 파일보다 뒤처진다(D-15의 복구 판정이 어긋난다).
+#[test]
+fn post_rename_bookkeeping_failure_is_not_a_save_failure() {
+    let tmp = TempDir::new("뒷정리 실패");
+    let original = tmp.join("원본.db");
+    make_original(&original, "db-post", 1, 2);
+    let b = Backend::new(tmp.join("app"));
+    open_original(&b, &original);
+    run_tx(&b, "INSERT INTO t (s) VALUES ('새 행')", None);
+    *b.fail_point.lock().unwrap() = Some(FailPoint::PostRename);
+    let info = save(&b, &original, false).expect("파일이 바뀌었으면 저장은 성공이다");
+    *b.fail_point.lock().unwrap() = None;
+    assert_eq!(info.path, original.to_string_lossy());
+    assert_eq!(count_rows(&original), 3, "새 내용이 원본 자리에 있다");
+    assert!(backup_path_for(&original).is_file(), "이전 원본은 .bak");
+    // 뒷정리가 빠졌으니 다음 저장은 원본이 바뀐 것으로 보고 묻는다(조용히 덮어쓰지 않는다).
+    run_tx(&b, "INSERT INTO t (s) VALUES ('또 한 행')", None);
+    assert_eq!(
+        save(&b, &original, false).unwrap_err().code,
+        Code::OriginalChanged
+    );
+    assert_eq!(count_rows(&original), 3, "묻기 전에는 원본 그대로");
+    save(&b, &original, true).expect("덮어쓰기를 고르면 저장된다");
+    assert_eq!(count_rows(&original), 4);
+}

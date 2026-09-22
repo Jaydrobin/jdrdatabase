@@ -53,6 +53,8 @@ pub enum FailPoint {
     Vacuum,
     /// 원본을 `.bak`으로 옮긴 뒤, 임시 파일을 원본 자리에 놓는 rename이 실패한 것으로 본다.
     RenameToOriginal,
+    /// 파일을 다 바꾼 뒤의 뒷정리(사본 `meta.json` 기록)가 실패한 것으로 본다.
+    PostRename,
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -206,13 +208,25 @@ impl Backend {
             })));
         }
         sync_dir(&parent);
-        let (mtime, size) = workcopy::file_stamp(&target)?;
+        // 여기서부터 파일은 이미 바뀌었다. 뒷정리가 실패해도 오류를 돌려주면 안 된다:
+        // 호출자(`db.save`)는 실패를 "파일이 그대로다"로 읽고 올려 둔 revision을 되돌리므로,
+        // 사본의 revision이 방금 쓴 파일보다 뒤처져 다음 복구 판정(D-15)이 어긋난다.
+        let stamp = if fail_point == Some(FailPoint::PostRename) {
+            Err(AppError::new(
+                Code::FileWrite,
+                "injected post-rename failure",
+            ))
+        } else {
+            workcopy::file_stamp(&target)
+        };
+        // 상태를 읽지 못했으면 다음 저장이 원본 변경으로 보고 사용자에게 묻는다(조용히 덮어쓰지 않는다).
+        let (mtime, size) = stamp.unwrap_or((0, 0));
         session.original = Some(OriginalRef {
             path: target.clone(),
             mtime,
             size,
         });
-        workcopy::update_meta_original(&session.dir, &target, mtime, size)?;
+        let _ = workcopy::update_meta_original(&session.dir, &target, mtime, size);
         Ok(SaveInfo {
             path: path_string(&target),
             size,
