@@ -310,3 +310,48 @@ fn reused_dirty_copy_compares_against_the_original_it_was_copied_from() {
     );
     assert_eq!(count_rows(&original), 5);
 }
+
+/// 비정상 종료로 체크포인트되지 않은 WAL이 남은 dirty 사본은 "깨끗한 사본"이 아니다.
+/// 읽기 전용으로는 WAL 복구를 할 수 없어 `_jdr_meta.dirty`를 읽지 못하는데, 그때 깨끗하다고 보면
+/// 기동 때의 `purge_clean`이 미저장 변경이 든 사본을 지운다.
+#[test]
+fn dirty_workcopy_with_hot_wal_is_kept() {
+    let tmp = TempDir::new("핫 WAL");
+    let original = tmp.join("원본.db");
+    make_original(&original, "db-hot", 4, 1);
+    let app = tmp.join("app");
+    let b = Backend::new(&app);
+    let opened = open_original(&b, &original);
+    run_tx(&b, "INSERT INTO t (s) VALUES ('미저장')", None);
+    mark_dirty(&b);
+
+    // 크래시 흉내: 커넥션을 닫지 않은 채(= 체크포인트 없이) 사본 폴더를 통째로 복사한다.
+    let live = std::path::PathBuf::from(&opened.workcopy_path);
+    let live_dir = live.parent().expect("workcopy dir").to_path_buf();
+    let crashed_dir = jdr_core::workcopy::workcopy_dir(&app, "db-hot-crashed");
+    std::fs::create_dir_all(&crashed_dir).expect("crashed dir");
+    for name in ["current.db", "current.db-wal", "meta.json"] {
+        let from = live_dir.join(name);
+        if from.is_file() {
+            std::fs::copy(&from, crashed_dir.join(name)).expect("copy crash snapshot");
+        }
+    }
+    assert!(
+        crashed_dir.join("current.db-wal").is_file(),
+        "이 검사는 체크포인트되지 않은 WAL이 있어야 뜻이 있다"
+    );
+    b.close(true).unwrap();
+
+    let entries = jdr_core::workcopy::list(&app);
+    let crashed = entries
+        .iter()
+        .find(|e| e.key == "db-hot-crashed")
+        .expect("크래시 사본이 목록에 있다");
+    assert!(crashed.dirty, "핫 WAL이 남은 사본도 dirty로 본다");
+
+    jdr_core::workcopy::purge_clean(&app, None);
+    assert!(
+        crashed_dir.join("current.db").is_file(),
+        "미저장 변경이 든 사본을 기동 정리가 지우면 안 된다"
+    );
+}
