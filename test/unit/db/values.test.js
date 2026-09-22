@@ -58,6 +58,21 @@ test('real: 유한 수만, 지수 표기 허용, NaN·Infinity 거부', () => {
   assert.deepEqual(validate('real', 'x1'), { ok: false, reason: 'not_number' });
 });
 
+test('숫자: 천 단위 쉼표만 지우고, 그 밖의 쉼표는 거부한다', () => {
+  // 모든 쉼표를 지우면 "1,2"가 12로 조용히 저장된다(세션 B 점검이 남기고 세션 J가 고친 항목).
+  for (const type of /** @type {const} */ (['integer', 'real'])) {
+    assert.deepEqual(validate(type, '1,2'), { ok: false, reason: type === 'integer' ? 'not_integer' : 'not_number' }, type);
+    assert.deepEqual(validate(type, '12,34'), { ok: false, reason: type === 'integer' ? 'not_integer' : 'not_number' }, type);
+    assert.deepEqual(validate(type, '1,2345'), { ok: false, reason: type === 'integer' ? 'not_integer' : 'not_number' }, type);
+    assert.deepEqual(validate(type, '1,,234'), { ok: false, reason: type === 'integer' ? 'not_integer' : 'not_number' }, type);
+  }
+  // 천 단위 구분은 그대로 받는다.
+  assert.deepEqual(validate('integer', '1,234'), { ok: true, value: 1234 });
+  assert.deepEqual(validate('integer', '-1,234,567'), { ok: true, value: -1234567 });
+  assert.deepEqual(validate('real', '1,234.5'), { ok: true, value: 1234.5 });
+  assert.deepEqual(validate('real', '-12,345.25'), { ok: true, value: -12345.25 });
+});
+
 test('boolean: 0/1, true/false, 예/아니오 → 0/1', () => {
   for (const t of [true, 1, 1n, 'true', 'TRUE', 'y', 'yes', '참', '예', ' on ']) {
     assert.deepEqual(validate('boolean', t), { ok: true, value: 1 }, String(t));

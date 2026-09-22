@@ -173,6 +173,16 @@ function toText(raw) {
 }
 
 /**
+ * 천 단위 구분 쉼표만 지운다. `1,234` → `1234`이고 `1,2`·`12,34`·`1,2345`는 그대로 두어 아래 검증에서
+ * 걸린다. 쉼표를 모두 지우면 `1,2`가 12로 조용히 저장된다(가져오기도 이 경로를 탄다).
+ * @param {string} s 이미 trim된 문자열
+ * @returns {string}
+ */
+function stripThousandsSeparators(s) {
+  return /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s) ? s.replace(/,/g, '') : s;
+}
+
+/**
  * @param {Exclude<RawValue, null | undefined | Uint8Array>} raw
  * @returns {ValidationResult}
  */
@@ -190,7 +200,7 @@ function validateInteger(raw) {
   } else if (typeof raw === 'boolean') {
     return { ok: true, value: raw ? 1 : 0 };
   } else if (typeof raw === 'string') {
-    const s = raw.trim().replace(/,/g, '');
+    const s = stripThousandsSeparators(raw.trim());
     if (!/^[+-]?\d+(?:\.0+)?$/.test(s)) return { ok: false, reason: 'not_integer' };
     n = Number(s);
   } else {
@@ -212,7 +222,7 @@ function validateReal(raw) {
   else if (typeof raw === 'bigint') n = Number(raw);
   else if (typeof raw === 'boolean') n = raw ? 1 : 0;
   else if (typeof raw === 'string') {
-    const s = raw.trim().replace(/,/g, '');
+    const s = stripThousandsSeparators(raw.trim());
     if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(s)) {
       return { ok: false, reason: 'not_number' };
     }
