@@ -47,6 +47,14 @@ jobs:
       - name: Install
         run: npm ci
 
+      # 러스트 검사보다 먼저 돈다: 앱 크레이트의 `tauri::generate_context!()`가 컴파일 시점에
+      # `frontendDist`(../dist/tauri)를 읽으므로, 없으면 clippy·test가 프로크 매크로 패닉으로 죽는다.
+      - name: Build browser artifacts
+        run: npm run build
+
+      - name: Verify artifact
+        run: npm run verify
+
       - name: Rust format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
 
@@ -58,12 +66,6 @@ jobs:
 
       - name: Native engine contract (JS ↔ rusqlite)
         run: npm run test:native
-
-      - name: Build browser artifacts
-        run: npm run build
-
-      - name: Verify artifact
-        run: npm run verify
 
       - name: Tauri build (debug, no bundle)
         run: npx tauri build --debug --no-bundle
