@@ -173,8 +173,11 @@ async function setup(answers = {}) {
   const fsx = nativeFs();
   /** @type {string[]} */
   const asked = [];
-  /** @type {Array<{ kind: 'error' | 'info', value: string, params?: unknown }>} */
+  /** @type {Array<{ kind: 'error' | 'info', value: string, params?: unknown, saving?: boolean }>} */
   const notices = [];
+  // 알림이 뜬 시점의 저장 뮤텍스를 함께 남긴다(저장 성공 알림은 뮤텍스를 놓기 전에 뜬다).
+  /** @type {import('../../src/app/store.js').Store | null} */
+  let made = null;
   /** @type {Prompts} */
   const prompts = {
     discardUnsaved: async () => (asked.push('discard'), answers.discard ?? true),
@@ -198,12 +201,15 @@ async function setup(answers = {}) {
     tablock,
     prompts,
     notify: {
-      error: (err) => notices.push({ kind: 'error', value: err.code }),
-      info: (key, params) => notices.push({ kind: 'info', value: key, params }),
+      error: (err) =>
+        notices.push({ kind: 'error', value: err.code, saving: made?.getState().saving }),
+      info: (key, params) =>
+        notices.push({ kind: 'info', value: key, params, saving: made?.getState().saving }),
     },
     deviceName: '데스크톱',
     defaultFileName: 'database.db',
   });
+  made = store;
   await store.newDatabase({ force: true });
   return { client, store, idb, fsx, asked, notices };
 }
@@ -355,6 +361,13 @@ test('desktop: 연 뒤 원본이 바뀌면 E_ORIGINAL_CHANGED → 취소·다른
   await apply(overwrite.store, overwrite.client, INSERT_TWO);
   await changeOnDisk(file, 0);
   assert.equal(await overwrite.store.save(), true);
+  // 저장 성공 알림은 뮤텍스를 놓기 전에 뜬다. 되묻기와 다시 저장이 한 try/finally 안에 있으면 finally가
+  // 다시 저장이 끝나기 전에 돌아, 저장이 도는 동안 뮤텍스가 풀린 채로 여기까지 온다.
+  assert.equal(
+    overwrite.notices.at(-1)?.saving,
+    true,
+    '되물은 뒤 다시 저장하는 동안에도 저장 뮤텍스는 잡혀 있다',
+  );
   assert.deepEqual(overwrite.asked, ['originalChanged']);
   assert.deepEqual(await queryFile(file, 'SELECT count(*) FROM t'), [[4]], '덮어썼다');
   assert.deepEqual(

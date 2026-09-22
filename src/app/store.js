@@ -599,20 +599,20 @@ export function createStore(deps) {
   }
 
   /**
-   * 데스크톱 모드 저장(D-15): `db.save`가 메타를 기록하고 러스트가 `VACUUM INTO` → `.bak` → rename으로 원본을 바꾼다.
-   * 원본이 연 뒤 디스크에서 바뀌었으면(`E_ORIGINAL_CHANGED`) 덮어쓰기 / 다른 이름으로 저장 / 취소를 묻는다.
+   * 데스크톱 모드 저장 한 번(D-15): `db.save`가 메타를 기록하고 러스트가 `VACUUM INTO` → `.bak` → rename으로
+   * 원본을 바꾼다. 저장 뮤텍스(`state.saving`)는 이 함수가 잡았다가 반드시 놓는다.
    * @param {string} originalPath
-   * @param {{ auto?: boolean, force?: boolean }} [options]
-   * @returns {Promise<boolean>}
+   * @param {{ auto?: boolean, force?: boolean }} options
+   * @returns {Promise<'saved' | 'failed' | 'changed'>} `changed`는 연 뒤 원본이 디스크에서 바뀐 것이다
    */
-  async function saveNative(originalPath, options = {}) {
+  async function saveNativeOnce(originalPath, options) {
     if (state.readOnly !== 'none') {
       if (!options.auto) notify.info('file.readOnlyBlocked');
-      return false;
+      return 'failed';
     }
     if (state.saving) {
       if (!options.auto) notify.info('file.saveBusy');
-      return false;
+      return 'failed';
     }
     state.saving = true;
     emit('state:changed');
@@ -644,17 +644,11 @@ export function createStore(deps) {
           notify.info('file.saved', { name });
         }
       }
-      return true;
+      return 'saved';
     } catch (err) {
       const appErr = toStoreError(err);
-      if (appErr.code === 'E_ORIGINAL_CHANGED' && !options.auto) {
-        state.saving = false;
-        emit('state:changed');
-        const choice = await prompts.originalChanged({ name });
-        if (choice === 'overwrite') return saveNative(originalPath, { force: true });
-        if (choice === 'saveAs') return store.saveAs();
-        return false;
-      }
+      // 연 뒤 바뀐 원본은 오류가 아니라 물어볼 일이다. 묻기는 뮤텍스를 놓은 뒤 `saveNative`가 한다.
+      if (appErr.code === 'E_ORIGINAL_CHANGED' && !options.auto) return 'changed';
       // 자동 저장이 배타 op와 겹친 것과 원본 변경은 오류가 아니라 미룸이다.
       if (!(
         options.auto &&
@@ -662,11 +656,29 @@ export function createStore(deps) {
       )) {
         notify.error(appErr);
       }
-      return false;
+      return 'failed';
     } finally {
       state.saving = false;
       emit('state:changed');
     }
+  }
+
+  /**
+   * 데스크톱 모드 저장. 원본이 연 뒤 디스크에서 바뀌었으면 덮어쓰기 / 다른 이름으로 저장 / 취소를 묻고 고른 대로
+   * 다시 저장한다. 되물을 때는 뮤텍스를 놓고(대화상자가 오래 열려 있을 수 있다) 다시 저장할 때 `saveNativeOnce`가
+   * 새로 잡는다. 되묻기와 다시 저장이 한 `try`/`finally` 안에 있으면 `finally`가 다시 저장이 끝나기 전에 돌아
+   * 저장 중인데도 뮤텍스가 풀린 상태가 된다.
+   * @param {string} originalPath
+   * @param {{ auto?: boolean, force?: boolean }} [options]
+   * @returns {Promise<boolean>}
+   */
+  async function saveNative(originalPath, options = {}) {
+    const outcome = await saveNativeOnce(originalPath, options);
+    if (outcome !== 'changed') return outcome === 'saved';
+    const choice = await prompts.originalChanged({ name: nativeFs('baseName')(originalPath) });
+    if (choice === 'overwrite') return saveNative(originalPath, { ...options, force: true });
+    if (choice === 'saveAs') return store.saveAs();
+    return false;
   }
 
   /**
