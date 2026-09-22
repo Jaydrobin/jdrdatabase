@@ -316,12 +316,15 @@ fn call_dispatch_round_trips_json() {
     ok(&b, "close", json!({ "discardWorkcopy": true }));
 }
 
-/// 진행률은 긴 명령이 도는 중에 다른 스레드가 읽을 수 있어야 한다. 엔진 프로토콜(동기 XHR)에는
-/// 진행률 채널이 없어 보고가 Worker까지 가지 못하므로, 메인 스레드가 이 명령으로 폴링한다(D-15).
+/// 진행률은 명령이 도는 중에 읽을 수 있어야 한다. 엔진 프로토콜(동기 XHR)에는 진행률 채널이 없어
+/// 보고가 Worker까지 가지 못하므로, 메인 스레드가 이 명령으로 폴링한다(D-15).
+///
+/// 보고가 일어나는 바로 그 시점에 읽어 타이밍에 기대지 않는다. 배경 스레드로 샘플링하면 빠른 기계에서
+/// 배치가 폴링보다 먼저 끝나 간헐 실패가 된다(macOS 러너에서 실제로 그랬다).
 #[test]
 fn progress_peek_reads_the_latest_report_while_a_command_runs() {
     let tmp = TempDir::new("진행률");
-    let b = Arc::new(Backend::new(tmp.join("app")));
+    let b = Backend::new(tmp.join("app"));
     ok(&b, "open", json!({}));
     ok(&b, "begin", json!({}));
     ok(
@@ -334,42 +337,35 @@ fn progress_peek_reads_the_latest_report_while_a_command_runs() {
     // 명령을 부르지 않은 동안에는 남아 있는 보고가 없다.
     assert_eq!(call(&b, "progress_peek", json!({})).unwrap(), Value::Null);
 
-    // `run_batch`가 도는 사이에 다른 스레드가 읽는다. 커넥션 뮤텍스를 잡지 않으므로 막히지 않는다.
-    let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
-    let watcher = {
-        let b = Arc::clone(&b);
-        let seen = Arc::clone(&seen);
-        std::thread::spawn(move || {
-            for _ in 0..200 {
-                let v = b.call("progress_peek", json!({}), &|_| {}).unwrap();
-                if !v.is_null() {
-                    seen.lock().unwrap().push(v);
-                }
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        })
+    // `run_batch`는 500행마다 보고한다. 그 콜백 안에서 읽는다 — `progress_peek`은 커넥션 뮤텍스를
+    // 잡지 않으므로 도는 명령 안에서도(그리고 다른 스레드에서도) 막히지 않는다.
+    let pairs = std::sync::Mutex::new(Vec::<(Value, Value)>::new());
+    let watcher = |reported: Value| {
+        let peeked = b.call("progress_peek", json!({}), &|_| {}).unwrap();
+        pairs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((reported, peeked));
     };
-
-    ok(&b, "begin", json!({}));
-    let params: Vec<Value> = (0..4000)
+    let params: Vec<Value> = (0..2000)
         .map(|i| json!([Value::Null, format!("행 {i}")]))
         .collect();
-    ok(
-        &b,
+    ok(&b, "begin", json!({}));
+    b.call(
         "run_batch",
         json!({ "sql": "INSERT INTO t (id, s) VALUES (?, ?)", "paramsList": params }),
-    );
+        &watcher,
+    )
+    .expect("run_batch");
     ok(&b, "commit", json!({}));
-    watcher.join().unwrap();
 
-    let reports = seen.lock().unwrap();
-    assert!(
-        !reports.is_empty(),
-        "도는 동안 진행률을 읽을 수 있어야 한다"
-    );
-    let last = reports.last().unwrap();
-    assert!(last["done"].as_u64().is_some(), "{last}");
-    assert!(last["total"].as_u64().is_some(), "{last}");
+    let reports = pairs.into_inner().unwrap_or_else(|e| e.into_inner());
+    assert_eq!(reports.len(), 4, "2,000행이면 500행마다 네 번 보고한다");
+    for (reported, peeked) in &reports {
+        assert_eq!(reported, peeked, "보고된 값이 그대로 읽혀야 한다");
+        assert!(peeked["done"].as_u64().is_some(), "{peeked}");
+        assert_eq!(peeked["total"], json!(2000));
+    }
 
     // 명령이 끝나면 다시 비어 있다(끝난 작업의 숫자가 화면에 남지 않는다).
     assert_eq!(call(&b, "progress_peek", json!({})).unwrap(), Value::Null);
