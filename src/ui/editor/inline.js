@@ -213,6 +213,9 @@ export function createInlineEditor() {
         return false;
       }
       committing = true;
+      // 확정을 기다리는 동안 다른 셀의 편집기가 열릴 수 있다. 그때 닫아야 할 것은 방금 확정한
+      // 편집기이지 새로 열린 편집기가 아니다(옛 코드는 무조건 닫아 새 편집기를 없앴다).
+      const editing = current;
       /** @type {boolean} */
       let ok;
       try {
@@ -220,7 +223,7 @@ export function createInlineEditor() {
       } finally {
         committing = false;
       }
-      if (ok) teardown();
+      if (ok && current === editing) teardown();
       return ok;
     },
 

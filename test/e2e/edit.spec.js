@@ -556,3 +556,46 @@ test('낡은 블록의 셀은 전문을 읽고 연다(되돌린 값이 다시 �
   expect(await cellValue()).toBe('이름1');
   expect(await hook(page).history()).toEqual(before);
 });
+
+test('확정을 기다리는 사이에 연 편집기는 그 확정이 끝나도 닫히지 않는다', async ({ page }) => {
+  const { table, name } = await seed(page);
+
+  // 확정(`command.apply`)을 늦춰 "앞 셀의 확정이 아직 도는 중"인 구간을 만든다.
+  await page.evaluate(() => {
+    /** @type {import('./delay-transport.js').DelayWindow} */ (
+      /** @type {unknown} */ (window)
+    ).__jdrDelayOp = { op: 'command.apply', ms: 2000 };
+  });
+
+  await cell(page, 0, 0).click();
+  await page.keyboard.press('Enter');
+  await page.locator('.jdr-editor input').fill('첫째확정');
+  await page.keyboard.press('Enter');
+
+  // 확정이 끝나기 전에 다른 셀의 편집기를 연다.
+  await cell(page, 1, 0).click();
+  await page.keyboard.press('Enter');
+  const input = page.locator('.jdr-editor input');
+  await expect(input).toBeVisible();
+  await expect(input).toHaveValue('이름2');
+
+  // 앞 확정이 돌아온다. 그때 닫아야 할 것은 방금 확정한 편집기이지 새로 연 편집기가 아니다.
+  await expect
+    .poll(
+      async () =>
+        (await hook(page).query(`SELECT "${name}" FROM "${table.id}" WHERE "id" = 1`)).rows[0][0],
+    )
+    .toBe('첫째확정');
+  await expect(input).toBeVisible();
+  await expect(input).toHaveValue('이름2');
+
+  // 새 편집기는 그대로 쓸 수 있다.
+  await input.fill('둘째확정');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(
+      async () =>
+        (await hook(page).query(`SELECT "${name}" FROM "${table.id}" WHERE "id" = 2`)).rows[0][0],
+    )
+    .toBe('둘째확정');
+});
