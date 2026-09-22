@@ -168,7 +168,14 @@ impl Backend {
             let _ = fs::remove_file(&tmp);
             return Err(err.add_detail("original", serde_json::json!({ "untouched": true })));
         }
-        if let Err(err) = fs::File::open(&tmp).and_then(|f| f.sync_all()) {
+        // 쓰기 권한으로 연다. Windows의 `FlushFileBuffers`는 핸들에 쓰기 권한을 요구해서, 읽기 전용으로
+        // 열면 `sync_all`이 ERROR_ACCESS_DENIED(5)로 실패한다(Unix의 `fsync`는 읽기 전용 fd도 받는다).
+        // `truncate`·`create`를 켜지 않으므로 `VACUUM INTO`가 쓴 내용은 그대로다.
+        if let Err(err) = fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp)
+            .and_then(|f| f.sync_all())
+        {
             let _ = fs::remove_file(&tmp);
             return Err(AppError::from_io(err, "sync", Some(&tmp)));
         }
