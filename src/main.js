@@ -25,7 +25,7 @@ import {
 } from './io/ipc-bridge.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
-import { confirmDialog } from './ui/dialogs/dialog.js';
+import { confirmDialog, openDialog } from './ui/dialogs/dialog.js';
 import { openSettingsDialog } from './ui/dialogs/settings.js';
 import { mountLongtextPanel } from './ui/editor/longtext.js';
 import { mountGridHost } from './ui/grid/grid.js';
@@ -271,6 +271,18 @@ async function start(shell) {
         version: __JDR_VERSION__,
         mode,
         ready: readyInfo,
+        /**
+         * 대화상자 하나를 연다. 두 개가 겹칠 때 앞의 것이 취소로 끝나는지 검사하는 데만 쓴다(세션 J).
+         * @param {string} title
+         * @param {string} cancelValue
+         * @returns {Promise<string>}
+         */
+        openDialog: (title, cancelValue) =>
+          openDialog({
+            title,
+            buttons: [{ label: title, value: `${cancelValue}-ok` }],
+            cancelValue,
+          }),
         /**
          * 지정한 전송 계층으로 별도 세션을 띄워 SQL을 실행하고 마지막 문장의 결과를 돌려준다.
          * 문장 목록을 주면 같은 세션에서 차례로 실행한다(E2E의 FTS5 준비처럼 DDL → INSERT → SELECT).

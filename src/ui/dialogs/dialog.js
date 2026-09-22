@@ -27,6 +27,12 @@ import { t } from '../../i18n/index.js';
 
 /** @type {HTMLElement | null} */
 let openBackdrop = null;
+/**
+ * 열려 있는 대화상자를 취소와 같은 결과로 닫는 함수. 새 대화상자가 앞의 것을 밀어낼 때 쓴다.
+ * DOM에서 지우기만 하면 앞 호출자의 Promise가 끝나지 않고 `document` keydown 리스너도 남는다.
+ * @type {(() => void) | null}
+ */
+let closeOpen = null;
 
 /**
  * 모달이 떠 있는가. 전역 단축키가 모달 뒤의 앱을 움직이지 않도록 확인한다.
@@ -47,8 +53,13 @@ const FOCUSABLE =
 export function openDialog(options) {
   return new Promise((resolve) => {
     if (openBackdrop) {
-      openBackdrop.remove();
+      // 밀려나는 대화상자는 취소로 끝낸다. `beforeCancel`(진행 중 작업 확인)은 건너뛴다 —
+      // 이미 화면에서 밀려난 대화상자가 새 대화상자를 막을 수는 없기 때문이다.
+      const closePrevious = closeOpen;
       openBackdrop = null;
+      closeOpen = null;
+      if (closePrevious) closePrevious();
+      else document.querySelector('.jdr-dialog__backdrop')?.remove();
     }
     const previouslyFocused = /** @type {HTMLElement | null} */ (document.activeElement);
 
@@ -136,7 +147,10 @@ export function openDialog(options) {
       backdrop.removeEventListener('mousedown', onBackdropClick);
       for (const b of row.querySelectorAll('button')) b.removeEventListener('click', onButtonClick);
       backdrop.remove();
-      if (openBackdrop === backdrop) openBackdrop = null;
+      if (openBackdrop === backdrop) {
+        openBackdrop = null;
+        closeOpen = null;
+      }
       previouslyFocused?.focus?.();
       resolve(value);
     }
@@ -229,6 +243,7 @@ export function openDialog(options) {
     backdrop.addEventListener('mousedown', onBackdropClick);
     document.body.append(backdrop);
     openBackdrop = backdrop;
+    closeOpen = () => close(options.cancelValue);
 
     const firstInput = /** @type {HTMLElement | null} */ (
       body.querySelector('input, select, textarea')

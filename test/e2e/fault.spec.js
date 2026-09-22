@@ -288,3 +288,43 @@ test('파일 쓰기 중 예외: E_FILE_WRITE로 알리고 원본·dirty·저널�
   ).toBeNull();
   await expect(page.locator('.jdr-toast--error')).toHaveCount(1);
 });
+
+test('대화상자가 겹치면 앞의 것이 취소로 끝난다(호출자가 매달리지 않는다)', async ({ page }) => {
+  await page.goto(PAGE_URL);
+  await page.waitForFunction(() =>
+    Boolean(/** @type {{ __jdrTest?: unknown }} */ (/** @type {unknown} */ (window)).__jdrTest),
+  );
+
+  // 두 번째 대화상자가 첫 번째를 밀어낸다. 고치기 전에는 첫 번째를 DOM에서 지우기만 해서
+  // 그 Promise가 끝나지 않았고(호출자 영구 대기) `document` keydown 리스너도 남았다.
+  const shown = await page.evaluate(() => {
+    const w =
+      /** @type {{ __jdrTest: { openDialog: (t: string, c: string) => Promise<string> }, __jdrFirst?: Promise<string>, __jdrSecond?: Promise<string> }} */ (
+        /** @type {unknown} */ (window)
+      );
+    w.__jdrFirst = w.__jdrTest.openDialog('첫째', 'first-cancelled');
+    w.__jdrSecond = w.__jdrTest.openDialog('둘째', 'second-cancelled');
+    return {
+      backdrops: document.querySelectorAll('.jdr-dialog__backdrop').length,
+      titles: [...document.querySelectorAll('.jdr-dialog__title')].map((el) => el.textContent),
+    };
+  });
+  expect(shown.backdrops).toBe(1);
+  expect(shown.titles).toEqual(['둘째']);
+
+  const firstValue = await page.evaluate(
+    () =>
+      /** @type {{ __jdrFirst: Promise<string> }} */ (/** @type {unknown} */ (window)).__jdrFirst,
+  );
+  // 밀려난 대화상자는 취소 값으로 끝난다.
+  expect(firstValue).toBe('first-cancelled');
+
+  // 남은 대화상자의 Esc가 그대로 듣는다(앞의 것이 리스너를 걷어 갔더라도).
+  await page.keyboard.press('Escape');
+  const secondValue = await page.evaluate(
+    () =>
+      /** @type {{ __jdrSecond: Promise<string> }} */ (/** @type {unknown} */ (window)).__jdrSecond,
+  );
+  expect(secondValue).toBe('second-cancelled');
+  expect(await page.locator('.jdr-dialog__backdrop').count()).toBe(0);
+});
