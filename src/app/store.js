@@ -206,6 +206,9 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(handler: (cmd: Command) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
  * @property {() => void} refreshData 그리드가 블록 캐시를 버리고 다시 읽게 한다(`data:changed`)
  * @property {() => Promise<boolean>} recoverPending 시작 시 저널에 남은 새 DB 기록을 복구 제안한다
+ * @property {() => Promise<WorkcopyEntry[]>} listWorkcopies 데스크톱 모드: 복구를 기다리는 dirty 작업 사본. 브라우저 모드는 빈 배열
+ * @property {(key: string) => Promise<boolean>} openWorkcopy 데스크톱 모드: 남은 작업 사본을 키로 연다
+ * @property {(key: string) => Promise<boolean>} discardWorkcopy 데스크톱 모드: 남은 작업 사본을 버린다
  * @property {() => Promise<RecentFile | null>} recentFile IDB에 남은 최근 파일(핸들 또는 데스크톱 경로. 권한은 아직 묻지 않음)
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
  * @property {(tableId: string | null) => void} selectTable
@@ -1634,6 +1637,49 @@ export function createStore(deps) {
       if (view.frozenColumns === next) return;
       view.frozenColumns = next;
       emit('view:changed');
+    },
+
+    async listWorkcopies() {
+      if (!nativeMode) return [];
+      try {
+        return (await nativeFs('listWorkcopies')()).filter((e) => e.dirty);
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return [];
+      }
+    },
+
+    async openWorkcopy(key) {
+      if (!nativeMode) return false;
+      if (!canOpenNow()) return false;
+      if (!(await confirmDiscard())) return false;
+      await discardDirtyWorkcopy();
+      /** @type {import('../db/worker.js').OpenResult} */
+      let opened;
+      try {
+        opened = await client.call('db.open', { workcopyKey: key });
+      } catch (err) {
+        notify.error(toStoreError(err));
+        await store.newDatabase({ force: true });
+        return false;
+      }
+      const originalPath = opened.workcopy?.originalPath ?? null;
+      return finishNativeOpen(opened, {
+        name: originalPath === null ? null : nativeFs('baseName')(originalPath),
+        path: originalPath,
+        dirty: true,
+      });
+    },
+
+    async discardWorkcopy(key) {
+      if (!nativeMode) return false;
+      try {
+        await nativeFs('removeWorkcopy')(key);
+        return true;
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return false;
+      }
     },
 
     async openRecent() {

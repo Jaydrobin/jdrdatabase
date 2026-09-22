@@ -517,3 +517,35 @@ test('desktop: 내보내기는 경로 싱크로 쓰고, .bak 복원은 새 파�
   await client.call('db.close', { discardWorkcopy: true });
   client.close();
 });
+
+test('desktop: 저장한 적 없는 dirty 사본이 둘 이상이면 설정 목록으로 모두 닿는다', async () => {
+  // 시작 복구는 가장 최근 것 하나만 제안한다. 나머지는 dirty라 자동 정리 대상도 아니어서,
+  // 목록이 없으면 앱 데이터 폴더에 영영 쌓이고 사용자가 꺼낼 길이 없다.
+  const first = await setup();
+  await apply(first.store, first.client, CREATE_T);
+  await apply(first.store, first.client, INSERT_TWO);
+  await first.client.call('db.close', {});
+  first.client.close();
+
+  const second = await setup();
+  await apply(second.store, second.client, CREATE_T);
+  await second.client.call('db.close', {});
+
+  const entries = await second.store.listWorkcopies();
+  const fresh = entries.filter((e) => (e.meta?.originalPath ?? null) === null);
+  assert.ok(fresh.length >= 2, `저장한 적 없는 dirty 사본이 둘 이상이어야 한다(${fresh.length})`);
+
+  // 시작 복구가 제안하지 않는 쪽(가장 최근이 아닌 것)도 키로 열 수 있다.
+  const older = fresh[fresh.length - 1];
+  assert.ok(older);
+  assert.equal(await second.store.openWorkcopy(older.key), true);
+  assert.equal(second.store.getState().dirty, true, '복구한 사본의 변경은 아직 파일에 없다');
+
+  // 버리면 목록에서 사라진다.
+  const target = fresh.find((e) => e.key !== older.key);
+  assert.ok(target);
+  assert.equal(await second.store.discardWorkcopy(target.key), true);
+  const after = await second.store.listWorkcopies();
+  assert.ok(!after.some((e) => e.key === target.key), '버린 사본은 목록에 없다');
+  second.client.close();
+});

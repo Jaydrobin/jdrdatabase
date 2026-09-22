@@ -380,6 +380,11 @@ export const en = Object.freeze({
   'settings.backupNone':
     'There is no previous save. Save the same file twice and the earlier copy is kept.',
   'settings.backupRestore': 'Export under a new name',
+  'settings.workcopyTitle': 'Work copies waiting for recovery',
+  'settings.workcopyItem': '{name} · {size} · {at}',
+  'settings.workcopyNew': 'Never-saved new database',
+  'settings.workcopyOpen': 'Open',
+  'settings.workcopyDiscard': 'Discard',
   'settings.backupHint':
     'Writes the file as it was just before the last save. The open database is unchanged.',
   'settings.save': 'Save',

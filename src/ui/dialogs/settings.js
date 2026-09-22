@@ -9,6 +9,7 @@ import { DEVICE_NAME_MAX, normalizeDeviceName } from '../../app/settings.js';
 import { t } from '../../i18n/index.js';
 import { AUTOSAVE_INTERVALS_SECONDS } from '../../io/autosave.js';
 import { formatBytes } from '../../util/bytes.js';
+import { baseName } from '../../io/filesystem.js';
 import { toAppError } from '../../util/errors.js';
 import { openDialog } from './dialog.js';
 
@@ -137,6 +138,53 @@ export async function openSettingsDialog(deps) {
         restoreButton.disabled = false;
       });
 
+      // 데스크톱 모드: 복구를 기다리는 작업 사본. 시작 복구는 저장한 적 없는 사본 하나만 제안하므로
+      // 둘 이상 남으면 나머지는 여기서만 닿을 수 있다(그대로 두면 앱 데이터 폴더에 계속 쌓인다).
+      const workcopyTitle = document.createElement('h3');
+      workcopyTitle.className = 'jdr-import__section';
+      workcopyTitle.textContent = t('settings.workcopyTitle');
+      workcopyTitle.hidden = true;
+      const workcopyList = document.createElement('div');
+      workcopyList.dataset.role = 'workcopy-list';
+      workcopyList.hidden = true;
+      void store.listWorkcopies().then((entries) => {
+        if (entries.length === 0) return;
+        workcopyTitle.hidden = false;
+        workcopyList.hidden = false;
+        for (const entry of entries) {
+          const row = document.createElement('p');
+          row.className = 'jdr-import__muted';
+          const label = document.createElement('span');
+          // 원본 경로는 사용자 데이터다. textContent로만 넣는다(CLAUDE.md 5.5).
+          const originalPath = entry.meta?.originalPath ?? null;
+          label.textContent = t('settings.workcopyItem', {
+            name: originalPath === null ? t('settings.workcopyNew') : baseName(originalPath),
+            size: formatBytes(entry.size),
+            at: formatBackupTime(entry.meta?.openedAt ?? 0),
+          });
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.className = 'jdr-dialog__button jdr-dialog__button--small';
+          open.textContent = t('settings.workcopyOpen');
+          open.addEventListener('click', () => {
+            void store.openWorkcopy(entry.key);
+          });
+          const drop = document.createElement('button');
+          drop.type = 'button';
+          drop.className = 'jdr-dialog__button jdr-dialog__button--small';
+          drop.textContent = t('settings.workcopyDiscard');
+          drop.addEventListener('click', () => {
+            drop.disabled = true;
+            void store.discardWorkcopy(entry.key).then((ok) => {
+              if (ok) row.remove();
+              else drop.disabled = false;
+            });
+          });
+          row.append(label, ' ', open, ' ', drop);
+          workcopyList.append(row);
+        }
+      });
+
       body.append(
         nameLabel,
         intervalLabel,
@@ -146,6 +194,8 @@ export async function openSettingsDialog(deps) {
         backupInfo,
         backupHint,
         restoreButton,
+        workcopyTitle,
+        workcopyList,
       );
     },
     buttons: [

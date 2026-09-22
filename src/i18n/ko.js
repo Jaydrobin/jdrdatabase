@@ -379,6 +379,11 @@ export const ko = Object.freeze({
   'settings.backupNone':
     '직전 저장본이 없습니다. 같은 파일에 두 번 이상 저장하면 그 전 저장본이 남습니다.',
   'settings.backupRestore': '새 이름으로 내보내기',
+  'settings.workcopyTitle': '복구를 기다리는 작업 사본',
+  'settings.workcopyItem': '{name} · {size} · {at}',
+  'settings.workcopyNew': '저장한 적 없는 새 데이터베이스',
+  'settings.workcopyOpen': '열기',
+  'settings.workcopyDiscard': '버리기',
   'settings.backupHint':
     '저장 직전의 파일을 그대로 새 파일로 씁니다. 열린 데이터베이스는 바뀌지 않습니다.',
   'settings.save': '저장',
