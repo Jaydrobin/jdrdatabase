@@ -27,7 +27,7 @@ npm run build        # dist/jdrdatabase.html 생성
 npm run verify       # 산출물 검증: 외부 참조 0건, 크기 예산, CSP
 npm run test:e2e     # playwright (dist를 file://로 열어 검사)
 npm run fixture -- --rows 300000   # 벤치마크용 CSV 생성 (--db를 주면 SQLite DB 생성)
-npm run test:perf    # 성능 측정: 30만 행 DB 픽스처를 만들고 Playwright로 렌더·질의 시간 측정 (CI 밖에서 실행)
+npm run test:perf    # 성능 측정: 30만 행 DB 픽스처를 만들고 Playwright로 렌더·질의 시간 측정 (CI의 perf 잡에서도 돈다. 6장)
 npm run test:native  # 실제 rusqlite 엔진(core의 jdr-ipc-stdio)에 대해 엔진 적합성 테스트 (Step 11 이후, Rust 필요)
 npm run test:desktop # tauri-driver E2E (Step 11 이후. Linux: WebKitWebDriver + Xvfb, Windows: Edge Driver)
 npm run tauri:dev    # 데스크톱 개발 실행 (Step 11 이후)
@@ -193,7 +193,8 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 ## 9. Claude Code 작업 지침
 
 - 작업 범위는 요청된 세션 묶음(`DESIGN.md` 5.0) 또는 이슈로 한정한다. 다음 세션의 Step을 앞당겨 구현하지 않는다.
-- 세션 시작 시 작업 브랜치를 원격 최신으로 맞추고 그 상태에서 `npm run check`가 초록인지 확인한다. 초록이 아니면 직전 세션의 문제이므로 새 Step을 시작하기 전에 먼저 고친다. `docs/sessions.md`의 마지막 절에서 "미확인" 항목을 이어받는다. 세션 종료 시 그 파일에 세션 이름의 절을 추가해 검증 결과와 미확인 항목을 분리해 적는다.
+- 세션 시작 시 작업 브랜치를 원격 최신으로 맞추고 그 상태에서 `npm run check`가 초록인지 확인한다. 초록이 아니면 직전 세션의 문제이므로 새 Step을 시작하기 전에 먼저 고친다. `docs/sessions.md`에 쌓인 "미확인" 항목을 이어받는다. 세션 종료 시 그 파일에 세션 이름의 절을 추가해 검증 결과와 미확인 항목을 분리해 적는다.
+- `docs/sessions.md`는 통독하지 않는다. 미확인 항목은 세션 D부터 누적으로 이월되어 직전 절만 읽으면 인계가 빠지므로, `grep -n 미확인 docs/sessions.md`로 이월된 항목의 줄 번호를 모은 뒤 필요한 줄의 앞뒤 맥락만 읽는다.
 - 코드를 쓰기 전에 `DESIGN.md`의 해당 Step "주요 함수" 이름을 그대로 쓴다. 이름을 바꿔야 하면 문서를 먼저 고친다.
 - 구현 후 반드시 `npm run check && npm run build && npm run verify`를 실행하고 결과를 그대로 보고한다. 실패를 "무관한 실패"로 넘기지 않는다.
 - 테스트를 건너뛰거나 `skip`으로 바꿔 초록을 만드는 행위는 금지다.
