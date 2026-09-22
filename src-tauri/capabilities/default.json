@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "메인 창의 권한. 앱 명령(engine_call, pick_open, pick_save, sink_write, app_info)은 앱이 정의한 것이라 별도 권한 없이 허용되고, 대화상자는 러스트 명령이 열므로 dialog 플러그인의 JS 권한은 주지 않는다(D-15).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

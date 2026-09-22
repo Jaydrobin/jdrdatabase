@@ -84,7 +84,7 @@ export const MAX_BATCH_BYTES = 64 * MB;
 /**
  * 두 모드가 공유하는 엔진 인터페이스(D-15). 구현체는 이 형태의 객체를 돌려준다.
  * @typedef {object} Engine
- * @property {(opts: { wasmBinary?: ArrayBuffer | Uint8Array }) => Promise<EngineInfo>} init 초기화. wasm: `{ wasmBinary }`, native: `{}`
+ * @property {(opts: { wasmBinary?: ArrayBuffer | Uint8Array, native?: import('./engine-native.js').NativeEndpoint }) => Promise<EngineInfo>} init 초기화. wasm: `{ wasmBinary }`, native: `{ native: { url, token } }`(엔진 프로토콜 주소. 없으면 공유 버퍼 중계)
  * @property {() => EngineCapabilities} capabilities
  * @property {(source?: Uint8Array | NativeOpenSource) => Promise<NativeOpenInfo | undefined>} open wasm: 바이트(없으면 빈 DB) / native: 원본 경로·사본 키(없으면 새 DB). native만 사본 정보를 돌려준다
  * @property {(options?: { discard?: boolean }) => Promise<void>} close `discard`는 native에서 dirty 사본까지 지운다(버리기를 확인받은 뒤)

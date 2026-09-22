@@ -16,7 +16,13 @@ import { t } from './i18n/index.js';
 import { createAutosave, createSaveTimer } from './io/autosave.js';
 import * as filesystem from './io/filesystem.js';
 import { openIdb } from './io/idb.js';
-import { createBridge, tauriEngineInvoke, workerPort } from './io/ipc-bridge.js';
+import {
+  createBridge,
+  tauriEngineInvoke,
+  tauriInternals,
+  tauriInvoke,
+  workerPort,
+} from './io/ipc-bridge.js';
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
 import { confirmDialog } from './ui/dialogs/dialog.js';
@@ -195,7 +201,16 @@ async function startEngine(opts) {
     /** @type {import('./db/worker.js').OpMap['engine.init']['result']} */
     let info;
     if (native) {
-      info = await client.call('engine.init', { mode: opts.mode, appVersion: __JDR_VERSION__ });
+      // Worker의 엔진은 앱의 엔진 프로토콜(`jdr://localhost/call`)을 직접 부른다. 주소 형태는 플랫폼마다 달라
+      // 타우리가 정하고(`convertFileSrc`), 토큰은 러스트가 프로세스마다 만든다(D-15).
+      const internals = tauriInternals();
+      const appInfo = /** @type {{ ipcToken: string }} */ (await tauriInvoke('app_info'));
+      const url = internals ? internals.convertFileSrc('call', 'jdr') : '';
+      info = await client.call('engine.init', {
+        mode: opts.mode,
+        appVersion: __JDR_VERSION__,
+        native: { url, token: appInfo.ipcToken },
+      });
     } else {
       const wasmBinary = base64ToBytes(opts.wasmB64).buffer;
       info = await client.call(

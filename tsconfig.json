@@ -22,6 +22,7 @@
     "build/**/*.mjs",
     "scripts/**/*.mjs",
     "test/**/*.js",
+    "test/**/*.mjs",
     "playwright.config.js",
     "playwright.perf.config.js",
     "eslint.config.js"

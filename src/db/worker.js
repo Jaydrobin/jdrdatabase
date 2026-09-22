@@ -81,7 +81,7 @@ import {
 /**
  * RPC op 표(DESIGN.md 6장). 새 op는 여기와 `handlers`, 6장 표, 단위 테스트를 함께 갱신한다.
  * @typedef {{
- *   'engine.init': { args: { mode: EngineMode, wasmBinary?: ArrayBuffer, appVersion?: string }, result: { version: string, compileOptions: string[], capabilities: EngineCapabilities } },
+ *   'engine.init': { args: { mode: EngineMode, wasmBinary?: ArrayBuffer, appVersion?: string, native?: { url: string, token: string } }, result: { version: string, compileOptions: string[], capabilities: EngineCapabilities } },
  *   'engine.exec': { args: { sql: string, params?: SqlParams }, result: ExecResult },
  *   'db.open': { args: { bytes?: Uint8Array | ArrayBuffer, dbId?: string, adoptExternal?: boolean, originalPath?: string, discardWorkcopy?: boolean, workcopyKey?: string }, result: OpenResult },
  *   'db.snapshot': { args: { bumpRevision?: boolean, savedBy?: string }, result: { bytes: Uint8Array<ArrayBuffer>, meta: Meta } },
@@ -285,7 +285,7 @@ export function createDispatcher(options) {
   const handlers = {
     'engine.init': async (args) => {
       const next = select(args.mode);
-      const info = await next.init({ wasmBinary: args.wasmBinary });
+      const info = await next.init({ wasmBinary: args.wasmBinary, native: args.native });
       engine = next;
       if (typeof args.appVersion === 'string' && args.appVersion) appVersion = args.appVersion;
       return {

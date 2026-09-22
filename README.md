@@ -17,7 +17,7 @@ A standalone, single-file HTML database web app inspired by local/desktop NocoDB
 
 ### 지원 브라우저
 
-Chrome·Edge 최신 2개 버전(권장. 파일에 바로 저장, 자동 저장 가능), Firefox·Safari 최신 버전(다운로드로 저장). 실측한 API 가용성은 [docs/support-matrix.md](docs/support-matrix.md)에 있다. 브라우저 모드의 파일 크기 상한은 1.5 GB(700 MB부터 경고)이며, 그 이상은 데스크톱 앱(개발 중, DESIGN.md D-15)에서 다룬다.
+Chrome·Edge 최신 2개 버전(권장. 파일에 바로 저장, 자동 저장 가능), Firefox·Safari 최신 버전(다운로드로 저장). 실측한 API 가용성은 [docs/support-matrix.md](docs/support-matrix.md)에 있다. 브라우저 모드의 파일 크기 상한은 1.5 GB(700 MB부터 경고)이며, 그 이상은 같은 소스로 빌드하는 타우리 데스크톱 앱이 네이티브 SQLite로 다룬다(상한 없음. [docs/desktop.md](docs/desktop.md), DESIGN.md D-15).
 
 ## Documents
 
@@ -39,7 +39,14 @@ npm run verify       # 산출물 검증: 외부 참조 0건, 크기 예산, CSP,
 npm run test:e2e     # 테스트 빌드(dist/test/jdrdatabase.html)를 file://로 열어 Playwright 실행
 JDR_E2E_HTTP=1 npm run test:e2e   # 같은 검사를 http://localhost(정적 서버)에서
 npm run test:perf    # 30만 행 픽스처를 만들어 DESIGN.md 8장의 성능 예산을 잰다(분 단위)
+npm run test:native  # 러스트 코어(jdr-ipc-stdio)를 빌드해 실제 rusqlite 엔진에 대한 엔진 적합성 테스트(Rust 필요)
+npm run test:desktop # tauri-driver E2E(Linux: WebKitWebDriver + Xvfb, Windows: Edge Driver)
+npm run tauri:dev    # 데스크톱 앱 개발 실행
+npm run tauri:build  # 데스크톱 설치본(src-tauri/target/release/bundle)
+cargo test --manifest-path src-tauri/Cargo.toml --workspace   # 러스트 테스트(WebKitGTK 없는 환경은 -p jdr-core)
 ```
+
+데스크톱 앱은 Rust stable과 Tauri 2 CLI(`devDependencies`)로 빌드한다. Linux는 `libwebkit2gtk-4.1-dev`·`libgtk-3-dev`가 필요하다. 작업 사본·`.bak`·저장 절차·클라우드 폴더 사용은 [docs/desktop.md](docs/desktop.md)에 있다.
 
 성능 측정은 로컬에서는 8장의 절대 예산으로 판정하고, CI의 `perf` 잡은 같은 러너에서 잰 기준선(`test/perf/perf-baseline.json`) 대비 30% 이상 회귀를 실패로 본다. 측정값 요약은 `test-results/perf/summary.json`에 남는다.
 

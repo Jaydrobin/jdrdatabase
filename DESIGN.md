@@ -242,8 +242,8 @@ interrupt()                    // 진행 중 문장 중단
 - 모드 선택은 시작 시 타우리 전역 객체(`window.__TAURI_INTERNALS__`)의 존재로 판정한다. 판정은 `main.js` 한 곳에서만 하고 결과를 스토어에 둔다. 다른 모듈은 `capabilities()`를 읽고 모드 문자열을 비교하지 않는다.
 - 상한은 엔진이 보고한다. wasm은 `warnFileBytes` 700 MB, `maxFileBytes` 1.5 GB이고 native는 둘 다 `Infinity`다. 파일 열기·가져오기·붙여넣기의 크기 검사는 모두 이 값을 기준으로 하며 UI 코드에 숫자를 두지 않는다.
 - Worker 안에서는 타우리 invoke를 직접 쓸 수 없다. `engine-native.js`는 Worker에서 실행되면 메인 스레드에 `engine:call` 메시지로 호출을 위임하고, 메인의 `io/ipc-bridge.js`가 invoke로 러스트 명령을 부른 뒤 `engine:result`로 되돌린다. 왕복이 한 번 늘어나므로 가져오기·붙여넣기는 `runBatch`로 1,000행을 한 번에 보낸다. 창 질의(200행)는 왕복 1회라 영향이 없다.
-- 인터페이스의 `exec`·`run`은 동기 함수이고 `query.js`·`tables.js`·`schema.js`·`command.js`는 그 반환값을 바로 쓴다. 네이티브 구현은 이 두 호출을 **동기 중계**로 만족한다: Worker가 요청과 함께 `SharedArrayBuffer`를 메인에 보내고 `Atomics.wait`로 응답을 기다리며, 메인의 브리지가 invoke 결과를 그 버퍼에 써 넣고 `Atomics.notify`로 깨운다. 버퍼가 모자라면 브리지가 필요한 크기를 알려 Worker가 더 큰 버퍼로 다시 받는다. `open`·`close`·`runBatch`·`transaction`의 BEGIN/COMMIT/ROLLBACK·`saveTo`는 비동기이므로 `postMessage` 왕복(`{ callId, op, args }` / `{ callId, ok, result | error }`, 진행률 `{ callId, progress }`)을 쓴다. Worker가 블록되는 동안 메인은 자유롭고, 취소는 wasm 모드와 같이 배치 사이에서만 받는다.
-- 동기 중계의 전제는 WebView가 `SharedArrayBuffer`를 주는 것(`crossOriginIsolated`)이다. `tauri.conf.json`의 `app.security.headers`로 `Cross-Origin-Opener-Policy: same-origin`·`Cross-Origin-Embedder-Policy: require-corp`를 낸다. `SharedArrayBuffer`가 없거나 Worker를 만들 수 없어 인라인 전송으로 내려가는 경우 데스크톱 모드는 계속하지 않고 `E_NATIVE_IPC`로 앱을 잠근다. 메인 스레드는 `Atomics.wait`를 할 수 없으므로 네이티브 엔진에 인라인 전송은 없다.
+- 인터페이스의 `exec`·`run`은 동기 함수이고 `query.js`·`tables.js`·`schema.js`·`command.js`는 그 반환값을 바로 쓴다. 네이티브 구현은 이 두 호출을 **앱의 엔진 프로토콜에 대한 동기 XHR**로 만족한다: 앱 크레이트가 `jdr` 커스텀 프로토콜(`register_asynchronous_uri_scheme_protocol`. 문서에서는 `convertFileSrc('call', 'jdr')`, 즉 `jdr://localhost/call` 또는 Windows의 `http://jdr.localhost/call`)을 등록하고, Worker의 `engine-native.js`가 `POST` 본문 `{ cmd, args }`(text/plain이라 CORS 사전 요청이 없다)와 질의 문자열 토큰(`app_info`가 프로세스마다 새로 준다)으로 부른다. 응답은 `{ ok, result | error }`이고 `Access-Control-Allow-Origin: *`를 단다(타우리 자체 IPC의 `ipc://` 프로토콜과 같은 방식). `open`·`close`·`runBatch`·`transaction`의 BEGIN/COMMIT/ROLLBACK·`saveTo`는 같은 주소에 fetch로 부른다. 러스트는 요청마다 스레드를 써서 긴 명령(수 GB 저장)이 WebView 스레드를 막지 않게 한다. Worker가 동기 XHR로 멈춰 있는 동안 메인은 자유롭고, 취소는 wasm 모드와 같이 배치 사이에서만 받는다.
+- 폴백이자 Node 테스트 경로로 **공유 버퍼 중계**가 있다: Worker가 요청과 함께 `SharedArrayBuffer`를 메인에 보내고(`engine:call`) `Atomics.wait`로 기다리며, 메인의 `io/ipc-bridge.js`가 invoke 결과를 그 버퍼에 써 넣고 `Atomics.notify`로 깨운다. 버퍼가 모자라면 필요한 크기를 알려 더 큰 버퍼로 다시 받고, 비동기 호출은 `postMessage` 왕복(`{ callId, op, args }` / `{ callId, ok, result | error }`, 진행률 `{ callId, progress }`)이다. 엔진은 프로토콜 주소가 있으면 `info`로 닿는지 확인한 뒤 그것을 쓰고, 안 닿으면 `crossOriginIsolated`일 때만 중계로 내려간다. 세션 I 실측: Linux WebKitGTK는 `app.security.headers`로 COOP/COEP를 내도 `tauri://localhost` 문서가 `crossOriginIsolated`가 아니고 `SharedArrayBuffer`가 없다. 그래서 프로토콜 경로가 기본이다. 어느 경로도 없거나 Worker를 만들 수 없어 인라인 전송으로 내려가면 데스크톱 모드는 계속하지 않고 `E_NATIVE_IPC`로 앱을 잠근다. 메인 스레드는 동기 XHR도 `Atomics.wait`도 할 수 없으므로 네이티브 엔진에 인라인 전송은 없다.
 - 전송 형식: 값은 JSON이다. 정수·실수·문자열·null은 그대로, BLOB은 `{ "$blob": "<base64>" }`, 파라미터는 위치 배열 또는 이름 객체(`:name`·`name` 모두 허용, 러스트가 접두사를 맞춘다). 결과 행은 같은 규칙의 배열이다. 2^53을 넘는 정수는 wasm 모드와 같이 정밀도를 잃는다.
 - 러스트 크레이트는 둘이다(D-12). `src-tauri/core`(`jdr-core`)는 `db.rs`·`save.rs`·`workcopy.rs`·`error.rs`를 가지며 타우리에 의존하지 않아 WebView·GTK 없이 `cargo test`가 돈다. 같은 크레이트의 `jdr-ipc-stdio` 바이너리는 표준 입출력으로 JSON 줄 프로토콜(`{ id, cmd, args }` → `{ id, ok, result | error }`, 진행률 `{ id, progress }`)을 말하며, Node의 `worker_threads`에서 `engine-native.js`와 브리지를 그대로 돌려 Step 1의 적합성 테스트를 실제 rusqlite 엔진에 대해 실행한다(`npm run test:native`). `src-tauri`(앱 크레이트)의 `#[tauri::command]` 함수는 코어의 같은 이름 함수를 감쌀 뿐이다.
 - 작업 사본의 키. 작업 사본 폴더 이름은 원본의 `_jdr_meta.db_id`이고, 메타가 없는 파일(다른 도구가 만든 SQLite)은 원본 경로의 FNV-1a 64비트 해시(16자리 16진수)다. 폴더에는 `current.db`와 `meta.json`(`{ originalPath, originalMtime, originalSize, openedAt }`)이 있다. 러스트 `open`은 같은 키의 사본이 남아 있고 그 `_jdr_meta.dirty = 1`이면 복사하지 않고 그 사본을 열어 `dirtyWorkcopy: true`와 원본·사본의 revision을 함께 돌려주고, 아니면 사본을 지우고 새로 복사한다. 새 사본은 복사 직후 `dirty`를 0으로 둔다(저장된 파일에 `dirty = 1`이 남아 있어도 원본 파일의 그 값은 뜻이 없다).
@@ -348,6 +348,7 @@ build/
 
 docs/
   cloud-sync.md                  클라우드 왕복 사용 안내(PC A 저장·동기화 확인 → PC B 열기, 경고 메시지의 의미, 백업 복원)
+  desktop.md                     데스크톱 앱 안내(작업 사본 위치, .bak, 저장 절차, 클라우드 폴더, 복구, 빌드·검사, 브라우저 모드와의 차이)
   sessions.md                    세션별 검증 기록(5.0의 A~I와 점검 세션). 세션마다 절 하나, 미확인 항목은 "미확인"으로 남긴다
   support-matrix.md              브라우저·WebView API 가용성 실측표(R1, R8). 미확인 항목은 "미확인"으로 남긴다
 
@@ -358,13 +359,15 @@ src-tauri/                       워크스페이스 루트이자 타우리 앱 �
   src/
     main.rs                      타우리 진입점(`lib.rs`의 run 호출)
     lib.rs                       빌더: 플러그인(dialog, single-instance), 관리 상태(Backend), 패닉 훅, 명령 등록
-    commands.rs                  `#[tauri::command]` 래퍼: 코어의 같은 이름 함수를 spawn_blocking에서 부르고 진행률은 Channel로
+    commands.rs                  `#[tauri::command]`: engine_call(코어 Backend::call + 진행률 Channel), pick_open·pick_save(dialog), sink_write(raw 본문), app_info
+    protocol.rs                  `jdr://localhost/call` 커스텀 프로토콜(Worker의 엔진이 동기 XHR·fetch로 부른다. 토큰 검사, 별도 스레드, CORS)
   core/                          jdr-core 크레이트(타우리 의존 없음. WebView·GTK 없이 cargo test)
     Cargo.toml
     src/
       lib.rs                     Backend(Mutex<Option<Connection>> + 원본·사본 상태), 명령 디스패치 `call(cmd, args)`
       db.rs                      open(작업 사본 준비·dirty 판정)/close/exec/run/run_batch/begin/commit/rollback/interrupt/capabilities
       save.rs                    save_to(mtime·크기 검사 → checkpoint → VACUUM INTO 임시 → .bak → rename), restore_backup, backup_info
+      sink.rs                    경로 싱크(내보내기 조각: 임시 파일에 쓰고 닫을 때 원자적 교체)
       workcopy.rs                앱 데이터 폴더 경로, 작업 사본 키(db_id 또는 경로 해시), 복사·meta.json·목록·정리
       error.rs                   AppError { code, message, detail } 직렬화(JS 오류 코드와 1:1), rusqlite 오류 매핑
       value.rs                   SqlValue JSON 형식({ "$blob": base64 }), 파라미터(위치·이름) 바인딩
@@ -375,7 +378,7 @@ test/
   unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드). db/engine-contract.js는 두 엔진이 공유하는 적합성 검사 본문. conventions.test.js는 CLAUDE.md 7.1의 grep 항목(innerHTML, 모드 문자열, SQL 문자열 연결)을 소스 검사로 고정한다
   e2e/                           Playwright(브라우저). page-url.js가 산출물 URL을 정한다(기본 file://, `JDR_E2E_HTTP=1`이면 scripts/serve-dist.mjs의 http://localhost). a11y.spec.js는 axe 검사, fault.spec.js는 오류 주입(Step 10)
   native/                        `npm run test:native`(Step 11). engine-native.test.js가 실제 rusqlite 엔진(core의 jdr-ipc-stdio)에 대해 unit/db/engine-contract.js를 돌린다. bridge-worker.js가 worker_threads 안에서 io/ipc-bridge.js와 하네스 프로세스를 잇는다
-  desktop/                       tauri-driver(WebDriver) E2E(Step 11). run.mjs가 tauri-driver를 띄우고 WebDriver 프로토콜을 직접 말한다(런타임 의존 없음). 파일 대화상자는 테스트 훅(`__jdrTest.setPickedPath`)으로 경로를 주입한다
+  desktop/                       tauri-driver(WebDriver) E2E(Step 11). run.mjs가 테스트 변형(dist/test/tauri)을 담은 디버그 바이너리를 만들고 tauri-driver를 띄워 WebDriver 프로토콜을 직접 말한다(런타임 의존 없음). 파일 대화상자는 테스트 훅(`__jdrTest.setPickedPath`)으로 경로를 주입한다
   perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. report.js가 측정값을 test-results/perf/에 모으고 global-teardown.js가 perf-baseline.json(CI 러너 실측)과 비교해 30% 회귀를 실패로 본다. CI의 perf 잡이 푸시마다 돌린다
   fixtures/                      CSV·XLSX·DB 표본. import/는 Step 7·8 파서 픽스처. generated/는 gen-fixture 산출물(커밋하지 않음)
 scripts/
@@ -384,6 +387,7 @@ scripts/
   serve-dist.mjs                 dist/를 http://localhost로 서빙하는 정적 서버(지원 매트릭스의 http 열 실측용. 런타임 코드 아님)
 .github/workflows/
   ci.yml                         푸시·PR마다 check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정)
+  desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux는 tauri-driver E2E까지(Step 11)
   release.yml                    `v*` 태그에서 build·verify 뒤 dist/jdrdatabase.html을 GitHub 릴리스에 첨부(CLAUDE.md 7.1: dist/는 릴리스 태그에서만 배포)
 ```
 
@@ -408,20 +412,19 @@ scripts/
         └──── io/filesystem ◀────────────┘
 ```
 
-데스크톱 모드는 Worker와 RPC가 같고 엔진 구현만 바뀐다. Worker의 `engine-native`는 SQL 호출을 메인에 위임하고, 메인의 `ipc-bridge`가 러스트로 보낸다.
+데스크톱 모드는 Worker와 RPC가 같고 엔진 구현만 바뀐다. Worker의 `engine-native`는 앱의 엔진 프로토콜(`jdr://localhost/call`)에 동기 XHR·fetch로 직접 요청하고, 메인의 `ipc-bridge`·`filesystem`은 대화상자·백업·내보내기 싱크 같은 파일 명령을 invoke로 부른다.
 
 ```
 ┌──────── Main thread ────────┐      ┌──────────── Worker ────────────┐
 │ db/client ── RPC ───────────┼─────▶│ db/worker ─▶ db/engine         │
-│ io/ipc-bridge ◀─engine:call─┼──────│           ─▶ engine-native     │
-│      │        ─engine:result┼─────▶│           ─▶ query, import/*   │
-└──────┼──────────────────────┘      └────────────────────────────────┘
-       │ invoke / Channel(진행률)
-       ▼
-┌──────────────── Rust (src-tauri) ────────────────┐
-│ db.rs ─▶ rusqlite ─▶ 작업 사본 current.db (WAL)   │
-│ save.rs: VACUUM INTO tmp → 원본→.bak → tmp→원본    │
-└──────────────────────────────────────────────────┘
+│ io/filesystem, io/ipc-bridge│      │           ─▶ engine-native ────┼──┐
+│      │ invoke(pick_*, sink_*,      │           ─▶ query, import/*   │  │ 동기 XHR / fetch
+│      │        engine_call)         └────────────────────────────────┘  │ jdr://localhost/call
+       ▼                                                                 ▼
+┌──────────────── Rust (src-tauri + core) ─────────────────────────────────┐
+│ protocol.rs ─▶ Backend::call ─▶ db.rs ─▶ rusqlite ─▶ 작업 사본 current.db │
+│ save.rs: VACUUM INTO tmp → 원본→.bak → tmp→원본   sink.rs: 내보내기 조각    │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.3 대표 흐름
@@ -902,11 +905,11 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 **산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/native/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux tauri-driver E2E), `docs/desktop.md`
 
 **주요 함수 (JS)**
-- `engine-native.js`: 인터페이스 전체 구현. `createNativeEngine({ caller })`. `caller`는 `{ callSync(op, args) → result, call(op, args, onProgress) → Promise }`이며 Worker 전역(`self`)이나 Node `parentPort` 위에 `createPortCaller(port)`로 만든다(D-15의 동기 중계). 메인 컨텍스트(인라인 전송)에서는 만들 수 없어 `E_NATIVE_IPC`. `capabilities()` → `{ mode: 'native', warnFileBytes: Infinity, maxFileBytes: Infinity, persistence: 'native', cancellable: true, fts5 }`. `snapshot()`은 `E_UNSUPPORTED`. `prepareCached(sql)`은 `{ sql }`만 돌려준다
+- `engine-native.js`: 인터페이스 전체 구현. `createNativeEngine({ caller })`. `caller`는 `{ callSync(op, args) → result, call(op, args, onProgress) → Promise }`이며 `createHttpCaller({ url, token })`(엔진 프로토콜, 기본)이나 Worker 전역(`self`)·Node `parentPort` 위의 `createPortCaller(port)`(공유 버퍼 중계, 폴백·테스트)로 만든다. `init({ native })`가 주소를 받는다. 메인 컨텍스트(인라인 전송)에서는 만들 수 없어 `E_NATIVE_IPC`. `capabilities()` → `{ mode: 'native', warnFileBytes: Infinity, maxFileBytes: Infinity, persistence: 'native', cancellable: true, fts5 }`. `snapshot()`은 `E_UNSUPPORTED`. `prepareCached(sql)`은 `{ sql }`만 돌려준다
 - `ipc-bridge.js`: `createBridge({ invoke })`, `bridge.attach(worker)`(Worker의 `engine:call`·`fetch` 수신 → `invoke` → 버퍼 또는 `engine:result` 회신), `bridge.detach()`, `invokeWithChannel(cmd, args, onProgress)`(타우리 `Channel` 직렬화 `__CHANNEL__:<id>`와 `transformCallback`을 `window.__TAURI_INTERNALS__`로 직접 만든다. `@tauri-apps/api`는 런타임 의존이므로 쓰지 않는다), `tauriInvoke()`(`window.__TAURI_INTERNALS__.invoke`. 없거나 실패하면 `E_NATIVE_IPC`)
 - `filesystem.js`: `capabilities().native`, `pickOpenPath()`·`pickSavePath(suggestedName, kind)`(러스트 `pick_open`·`pick_save`. 취소는 null), `backupInfo(originalPath)`, `restoreBackup(originalPath, targetPath)`
 - `store.js`: `openPath(originalPath)`(`db.open { originalPath }` → 사본 dirty면 복구 판정 → revision 판정), `save()`·`saveAs()`의 `persistence === 'native'` 분기(`db.save`. `E_ORIGINAL_CHANGED`면 덮어쓰기 / 다른 이름으로 저장 / 취소를 `prompts.originalChanged()`로 묻는다), `restoreBackup()`의 `.bak` 분기, `newDatabase()`는 두 모드에서 같다
-- `main.js`: `detectMode()` → `'wasm' | 'native'`, 네이티브면 브리지를 Worker에 붙이고 인라인 폴백·`SharedArrayBuffer` 부재는 `E_NATIVE_IPC` 잠금
+- `main.js`: `detectMode()` → `'wasm' | 'native'`, 네이티브면 `app_info`로 토큰을 받아 `engine.init { native: { url, token } }`으로 넘기고 브리지도 Worker에 붙인다(폴백). 인라인 폴백·두 경로 모두 불가는 `E_NATIVE_IPC` 잠금
 
 **주요 함수 (Rust, `core/`)**
 - `lib.rs`: `Backend::new(app_data_dir)`, `Backend::call(cmd, args, progress) -> Result<Value, AppError>`(명령 이름으로 아래 함수를 고른다. 타우리 명령과 stdio 하네스가 같은 진입점을 쓴다)
@@ -914,7 +917,8 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `save.rs`: `save_to(original_path, expected, force) -> SaveInfo`(원본이 열 때 경로와 같으면 mtime·크기 검사 → `wal_checkpoint(TRUNCATE)` → `VACUUM INTO` 임시 → 원본을 `.bak`으로 → 임시를 원본으로 rename → 임시 정리. 다른 경로면 새 파일 생성), `restore_backup(original_path, target_path)`, `backup_info(original_path)`
 - `workcopy.rs`: `workcopy_key(original_path) -> String`(db_id 또는 경로 해시), `workcopy_dir(app_data, key)`, `prepare(original_path, discard) -> Prepared`(복사, 남은 사본이 dirty면 그대로 두고 알림), `new_temp(app_data)`, `list(app_data)`, `purge(app_data, older_than)`
 - `error.rs`: `AppError { code, message, detail }` + `serde::Serialize`. rusqlite 오류 매핑: `SQLITE_FULL` → `E_DISK_FULL`, `SQLITE_BUSY`·`SQLITE_LOCKED` → `E_FILE_LOCKED`, `SQLITE_INTERRUPT` → `E_IMPORT_CANCELLED`, `SQLITE_NOTADB` → `E_FILE_NOT_SQLITE`, `SQLITE_NOMEM` → `E_MEM`, 그 외 → `E_DB_QUERY`. `std::io` 오류: `ENOSPC` → `E_DISK_FULL`, `PermissionDenied` → `E_FILE_PERMISSION`, `NotFound` → `E_FILE_WRITE`
-- 앱 크레이트 `commands.rs`: 위 함수를 감싸는 `#[tauri::command]`(`spawn_blocking`, 진행률 `tauri::ipc::Channel`)와 `pick_open`·`pick_save`(dialog 플러그인), `app_info()`(앱 데이터 폴더·버전)
+- 앱 크레이트 `protocol.rs`: `jdr` 커스텀 프로토콜 핸들러(`POST …/call?t=<토큰>`, 본문 `{ cmd, args }` → 별도 스레드에서 `Backend::call` → `{ ok, result | error }` + CORS 헤더). `commands.rs`: `engine_call(cmd, args, progress: Channel)`(메인 스레드의 파일 명령용. 코어 `Backend::call`을 `spawn_blocking`에서 부르고 진행률은 채널로), `pick_open`·`pick_save(suggestedName, kind)`(dialog 플러그인을 감싸 경로 문자열만), `sink_write`(요청 본문 raw + `jdr-sink` 헤더로 내보내기 조각), `app_info()`(앱 데이터 폴더·버전·프로토콜 토큰). `lib.rs`는 플러그인(single-instance, dialog) 등록, 앱 데이터 폴더의 `Backend` 관리 상태, 토큰, 패닉 훅(`panic.log`), 시작 때 깨끗한 사본 정리
+- 코어 `sink.rs`: `sink_open(path) -> id` → `sink_write(id, bytes)` → `sink_close(id)`(fsync 뒤 원자적 교체) / `sink_abort(id)`. 내보내기 조각 스트림의 데스크톱 판(브라우저 모드의 `createWritable()`에 해당)
 
 **예외 처리**
 - 타우리 전역 객체는 있으나 `invoke`가 실패(명령 미등록, 권한 설정 누락): `E_NATIVE_IPC`. 앱을 잠그고 원인을 표시한다. wasm으로 폴백하지 않는다(D-15).

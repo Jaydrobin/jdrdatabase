@@ -45,7 +45,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 |---|---|
 | `src/db/*` | Worker에서 실행되는 코드. DOM, `window`, `document`에 접근하지 않는다. `engine-wasm.js`·`engine-native.js` 외의 모듈은 `engine.js` 인터페이스만 호출하고 `sqlite3` 객체나 타우리 invoke를 직접 부르지 않는다 |
 | `src/import/*`, `src/export/*` | Worker에서 실행. `DOMParser` 등 메인 스레드 전용 API 금지 |
-| `src/ui/*`, `src/app/*`, `src/io/*` | 메인 스레드. `sqlite3` 객체를 직접 호출하지 않고 `db/client.js`만 사용한다. 타우리 invoke는 `io/ipc-bridge.js`와 `io/filesystem.js`에서만 부른다 |
+| `src/ui/*`, `src/app/*`, `src/io/*` | 메인 스레드. `sqlite3` 객체를 직접 호출하지 않고 `db/client.js`만 사용한다. 타우리 invoke는 `io/ipc-bridge.js`와 `io/filesystem.js`에서만 부른다. Worker 쪽에서 러스트를 부르는 곳은 `db/engine-native.js`(앱의 엔진 프로토콜 `jdr://localhost/call`)뿐이다 |
 | `src-tauri/` | 러스트 데스크톱 셸. 엔진·저장·작업 사본 로직은 타우리에 의존하지 않는 `core/`(`jdr-core`)의 `db.rs`·`save.rs`·`workcopy.rs`에 두고, 앱 크레이트의 `commands.rs`는 그 함수를 `#[tauri::command]`로 감쌀 뿐이다. 오류는 `error.rs`의 `AppError`로만 돌려준다. 타우리 API(`tauri::`, 플러그인)는 앱 크레이트에서만 쓴다 |
 | `src/util/*` | 양쪽에서 쓰는 순수 함수만. 부수효과 금지 |
 | `vendor/` | 서드파티 고정 버전. 수정 금지. 파일마다 LICENSE와 `CHECKSUMS`의 SHA-256 동반 |

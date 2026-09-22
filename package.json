@@ -18,12 +18,16 @@
     "test:e2e": "node build/build.mjs --test && playwright test",
     "fixture": "node scripts/gen-fixture.mjs",
     "test:perf": "playwright test -c playwright.perf.config.js",
-    "test:native": "node scripts/run-native-tests.mjs"
+    "test:native": "node scripts/run-native-tests.mjs",
+    "test:desktop": "node test/desktop/run.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@eslint/js": "^9.39.5",
     "@playwright/test": "1.56.0",
+    "@tauri-apps/cli": "2.11.5",
     "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",

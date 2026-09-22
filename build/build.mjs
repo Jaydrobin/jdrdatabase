@@ -8,6 +8,7 @@
  *   dist/jdrdatabase.html        브라우저용(메타 CSP 포함)
  *   dist/tauri/index.html        타우리용(메타 CSP 없음, 나머지 바이트 동일)
  *   dist/test/jdrdatabase.html   --test: E2E용. window.__jdrTest 훅이 켜진 브라우저용 변형
+ *   dist/test/tauri/index.html   --test: 데스크톱 E2E(tauri-driver)용. 훅이 켜진 타우리 변형
  *
  * 번들링 전에 자체 모듈 그래프 검사(readModuleGraph)를 돌려 import 순환과
  * src/·vendor/ 밖으로 나가는 상대 경로, bare specifier를 빌드 실패로 만든다.
@@ -311,6 +312,11 @@ export async function writeDist(options = {}) {
       'test',
       path.join(outDir, 'test', 'jdrdatabase.html'),
       renderTemplate({ ...base, withCsp: true }),
+    );
+    await emit(
+      'test-tauri',
+      path.join(outDir, 'test', 'tauri', 'index.html'),
+      renderTemplate({ ...base, withCsp: false }),
     );
   } else {
     await emit('browser', path.join(outDir, 'jdrdatabase.html'), renderTemplate(base));

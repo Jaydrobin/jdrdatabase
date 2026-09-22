@@ -1,14 +1,17 @@
 // @ts-check
 /**
- * 데스크톱 모드 엔진(D-15): 러스트 rusqlite 명령을 메인 스레드의 `io/ipc-bridge.js`를 거쳐 부르는 `Engine` 구현.
+ * 데스크톱 모드 엔진(D-15): 러스트 rusqlite 명령을 부르는 `Engine` 구현. 호출 경로는 둘이다.
  *
- * - 동기 호출(`exec`·`run`)은 `SharedArrayBuffer`를 요청에 실어 보내고 `Atomics.wait`로 브리지의 응답을 기다린다.
- *   버퍼가 모자라면 브리지가 필요한 크기를 알려 주고, 더 큰 버퍼로 `fetch`해 보관된 응답을 다시 받는다.
- * - 비동기 호출(`open`·`close`·`runBatch`·`begin`/`commit`/`rollback`·`saveTo`)은 `postMessage` 왕복이며 진행률은
- *   `{ callId, progress }`로 온다.
+ * 1. 엔진 프로토콜(기본): 앱이 등록한 `jdr://localhost/call`(Windows는 `http://jdr.localhost/call`)에 동기 XHR(`exec`·`run`)과
+ *    fetch(`open`·`close`·`runBatch`·`begin`/`commit`/`rollback`·`saveTo`)로 직접 요청한다. 메인 스레드를 거치지 않는다.
+ * 2. 공유 버퍼 중계(폴백·Node 테스트): 동기 호출은 `SharedArrayBuffer`를 요청에 실어 메인의 `io/ipc-bridge.js`에 보내고
+ *    `Atomics.wait`로 응답을 기다린다. 버퍼가 모자라면 브리지가 필요한 크기를 알려 주고 더 큰 버퍼로 다시 받는다.
+ *    비동기 호출은 `postMessage` 왕복이며 진행률은 `{ callId, progress }`로 온다. `crossOriginIsolated`가 아니면 쓸 수 없다
+ *    (세션 I 실측: WebKitGTK는 COOP/COEP 헤더를 내도 `tauri://` 문서에 SharedArrayBuffer를 주지 않는다).
+ *
  * - 값은 JSON으로 오가고 BLOB은 `{ "$blob": base64 }`다(`util/bytes.js`의 base64를 쓴다).
- * - Worker 전역(`self`)이나 Node의 `parentPort`처럼 `{ postMessage, subscribe }` 형태의 포트 위에서 동작한다.
- *   메인 스레드는 `Atomics.wait`를 할 수 없으므로 인라인 전송에서는 만들 수 없다(`E_NATIVE_IPC`).
+ * - `runBatch`는 500행씩 나눠 보내 wasm 엔진과 같은 시점에 진행률·취소 표식을 본다.
+ * - 메인 스레드에서는 동기 XHR도 `Atomics.wait`도 쓸 수 없으므로 인라인 전송에서는 만들 수 없다(`E_NATIVE_IPC`).
  * - 타우리 invoke는 이 파일에 없다. 이 파일은 DOM·`window`에 접근하지 않는다(CLAUDE.md 4장).
  */
 import { base64ToBytes, bytesToBase64 } from '../util/bytes.js';
@@ -56,6 +59,13 @@ export const NATIVE_BATCH_CHUNK = 500;
  * @property {(op: string, args: unknown) => unknown} callSync
  * @property {(op: string, args: unknown, onProgress?: (progress: unknown) => void) => Promise<unknown>} call
  * @property {() => void} dispose
+ */
+
+/**
+ * 앱의 엔진 프로토콜(`jdr://localhost/call`, Windows는 `http://jdr.localhost/call`) 주소와 토큰. `engine.init`의 `native`로 온다.
+ * @typedef {object} NativeEndpoint
+ * @property {string} url
+ * @property {string} token
  */
 
 /**
@@ -200,6 +210,80 @@ export function createPortCaller(port, options = {}) {
 }
 
 /**
+ * 응답 JSON `{ ok, result | error }`를 값으로 바꾸거나 던진다.
+ * @param {string} text
+ * @param {number} status HTTP 상태
+ * @returns {unknown}
+ */
+function unwrapEnvelope(text, status) {
+  /** @type {{ ok?: boolean, result?: unknown, error?: unknown }} */
+  let envelope;
+  try {
+    envelope = JSON.parse(text);
+  } catch (err) {
+    throw new AppError(
+      'E_NATIVE_IPC',
+      `engine protocol returned status ${status} with a non-JSON body`,
+      {
+        cause: err,
+        detail: { status, head: text.slice(0, 80) },
+      },
+    );
+  }
+  if (envelope.ok === true) return fromWire(envelope.result ?? null);
+  if (envelope.ok === false) throw deserializeError(envelope.error);
+  throw new AppError('E_NATIVE_IPC', `engine protocol returned status ${status}`, {
+    detail: { status },
+  });
+}
+
+/**
+ * 앱의 엔진 프로토콜을 직접 부르는 호출자(데스크톱 모드의 기본 경로, D-15). 동기 호출은 동기 XHR, 비동기 호출은 fetch다.
+ * 본문은 text/plain이라 CORS 사전 요청이 없고, 토큰은 질의 문자열로 보낸다. 진행률은 없다(배치는 500행씩 나뉜다).
+ * @param {NativeEndpoint} endpoint
+ * @returns {NativeCaller}
+ */
+export function createHttpCaller(endpoint) {
+  const url = `${endpoint.url}?t=${encodeURIComponent(endpoint.token)}`;
+  /** @param {string} op @param {unknown} args */
+  const body = (op, args) => JSON.stringify({ cmd: op, args: toWire(args) ?? {} });
+  return {
+    callSync(op, args) {
+      const xhr = new XMLHttpRequest();
+      try {
+        xhr.open('POST', url, false);
+        xhr.setRequestHeader('Content-Type', 'text/plain;charset=UTF-8');
+        xhr.send(body(op, args));
+      } catch (err) {
+        throw new AppError('E_NATIVE_IPC', `engine protocol request failed: ${op}`, {
+          cause: err,
+          detail: { op },
+        });
+      }
+      return unwrapEnvelope(xhr.responseText, xhr.status);
+    },
+    async call(op, args) {
+      /** @type {Response} */
+      let res;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: body(op, args),
+        });
+      } catch (err) {
+        throw new AppError('E_NATIVE_IPC', `engine protocol request failed: ${op}`, {
+          cause: err,
+          detail: { op },
+        });
+      }
+      return unwrapEnvelope(await res.text(), res.status);
+    },
+    dispose() {},
+  };
+}
+
+/**
  * 전용 Worker 전역(`self`)을 포트로 감싼다.
  * @returns {CallerPort | null} Worker 전역이 아니면 null
  */
@@ -233,15 +317,32 @@ export function setNativeCaller(caller) {
 }
 
 /**
- * 호출자를 고른다. 등록된 것 → Worker 전역. 둘 다 없거나 `SharedArrayBuffer`를 쓸 수 없으면 `E_NATIVE_IPC`.
+ * 호출자를 고른다. 등록된 것 → 엔진 프로토콜(`endpoint`) → Worker 전역 위의 공유 버퍼 중계.
+ * 프로토콜 호출자는 `info`를 한 번 불러 닿는지 확인하고, 안 닿으면 공유 버퍼 중계로 내려간다(둘 다 안 되면 `E_NATIVE_IPC`).
+ * @param {NativeEndpoint} [endpoint]
  * @returns {NativeCaller}
  */
-function resolveCaller() {
+function resolveCaller(endpoint) {
   if (registeredCaller) return registeredCaller;
+  /** @type {AppError | null} */
+  let httpError = null;
+  if (endpoint && typeof XMLHttpRequest === 'function') {
+    const http = createHttpCaller(endpoint);
+    try {
+      http.callSync('info', {});
+      registeredCaller = http;
+      return http;
+    } catch (err) {
+      httpError = toAppError(err, 'E_NATIVE_IPC');
+    }
+  }
   if (!syncCallSupported()) {
     throw new AppError(
       'E_NATIVE_IPC',
-      'SharedArrayBuffer/Atomics.wait is unavailable in this thread (crossOriginIsolated required)',
+      httpError
+        ? `engine protocol unreachable (${httpError.message}) and SharedArrayBuffer/Atomics.wait is unavailable`
+        : 'SharedArrayBuffer/Atomics.wait is unavailable in this thread (crossOriginIsolated required)',
+      { cause: httpError },
     );
   }
   const port = workerScopePort();
@@ -249,6 +350,7 @@ function resolveCaller() {
     throw new AppError(
       'E_NATIVE_IPC',
       'native engine requires a dedicated Worker (no inline transport)',
+      { cause: httpError },
     );
   }
   const caller = createPortCaller(port);
@@ -282,9 +384,12 @@ export function createNativeEngine(options = {}) {
   let interrupted = false;
   let opened = false;
 
+  /** @type {NativeEndpoint | undefined} */
+  let endpoint;
+
   /** @returns {NativeCaller} */
   function requireCaller() {
-    if (!caller) caller = resolveCaller();
+    if (!caller) caller = resolveCaller(endpoint);
     return caller;
   }
 
@@ -305,7 +410,8 @@ export function createNativeEngine(options = {}) {
 
   /** @type {Engine} */
   const engine = {
-    async init() {
+    async init(opts) {
+      endpoint = opts.native;
       const c = requireCaller();
       const raw = /** @type {{ sqliteVersion: string, compileOptions: string[] }} */ (
         await c.call('info', {})

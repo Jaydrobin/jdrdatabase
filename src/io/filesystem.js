@@ -9,7 +9,7 @@
  * 이 파일은 메인 스레드에서만 실행된다(gzip·싱크 함수는 DOM 없이도 동작해 Node 테스트가 부른다).
  */
 import { AppError, toAppError } from '../util/errors.js';
-import { tauriInternals, tauriInvoke } from './ipc-bridge.js';
+import { invokeWithChannel, tauriInternals, tauriInvoke } from './ipc-bridge.js';
 
 /** 열기·저장 대화상자에 보이는 확장자. */
 export const DB_EXTENSIONS = Object.freeze(['.db', '.sqlite', '.sqlite3']);
@@ -150,7 +150,8 @@ export async function pickSavePath(suggestedName, kind = 'db') {
  * @returns {Promise<unknown>}
  */
 function engineCall(cmd, args) {
-  return tauriInvoke('engine_call', { cmd, args });
+  // 러스트 `engine_call`은 진행률 채널을 항상 받는다(파일 명령은 보내지 않지만 인자는 있어야 한다).
+  return invokeWithChannel('engine_call', { cmd, args }, undefined);
 }
 
 /** @typedef {{ path: string, size: number, mtime: number }} NativeBackupInfo */

@@ -15,6 +15,7 @@ const NODE_SIDE = [
   'build/**/*.mjs',
   'scripts/**/*.mjs',
   'test/**/*.js',
+  'test/**/*.mjs',
   'playwright.config.js',
   'playwright.perf.config.js',
   'eslint.config.js',
@@ -24,7 +25,15 @@ const BUILD_CONSTANTS = { __JDR_TEST__: 'readonly', __JDR_VERSION__: 'readonly' 
 
 export default defineConfig([
   {
-    ignores: ['node_modules/**', 'dist/**', 'vendor/**', 'test-results/**', 'playwright-report/**'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'vendor/**',
+      'test-results/**',
+      'playwright-report/**',
+      'src-tauri/target/**',
+      'src-tauri/gen/**',
+    ],
   },
   js.configs.recommended,
   {

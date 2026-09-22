@@ -32,6 +32,7 @@ import { AppError, deserializeError, isErrorCode, serializeError } from '../util
  * @typedef {object} TauriInternals
  * @property {(cmd: string, args?: unknown, options?: unknown) => Promise<unknown>} invoke
  * @property {(callback?: (response: unknown) => void, once?: boolean) => number} transformCallback
+ * @property {(filePath: string, protocol?: string) => string} convertFileSrc 커스텀 프로토콜 URL(플랫폼별 형태)
  */
 
 /**
@@ -44,7 +45,12 @@ export function tauriInternals() {
     const internals = g.__TAURI_INTERNALS__;
     if (!internals || typeof internals !== 'object') return null;
     const t = /** @type {Partial<TauriInternals>} */ (internals);
-    if (typeof t.invoke !== 'function' || typeof t.transformCallback !== 'function') return null;
+    if (
+      typeof t.invoke !== 'function' ||
+      typeof t.transformCallback !== 'function' ||
+      typeof t.convertFileSrc !== 'function'
+    )
+      return null;
     return /** @type {TauriInternals} */ (t);
   } catch {
     return null;
