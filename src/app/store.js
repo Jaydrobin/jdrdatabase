@@ -377,6 +377,17 @@ export function createStore(deps) {
   }
 
   /**
+   * 저장이 도는 중에는 파일을 열지 않는다. 열기가 저장보다 먼저 끝나면 `setOpened`가 세운 새 DB의
+   * 상태 위에 `setSaved`가 옛 DB의 이름·메타를 덮어써, 화면에는 A의 이름이 뜨는데 내용은 B가 된다.
+   * @returns {boolean} 열어도 되는가
+   */
+  function canOpenNow() {
+    if (!state.saving) return true;
+    notify.info('file.saveBusy');
+    return false;
+  }
+
+  /**
    * 테이블 목록을 바꾸고 선택이 사라졌으면 첫 테이블로 옮긴다.
    * @param {TableInfo[]} tables
    */
@@ -927,6 +938,7 @@ export function createStore(deps) {
     },
 
     async openFile() {
+      if (!canOpenNow()) return false;
       if (nativeMode) {
         /** @type {string | null} */
         let path;
@@ -952,6 +964,7 @@ export function createStore(deps) {
     },
 
     async openPath(originalPath) {
+      if (!canOpenNow()) return false;
       if (!nativeMode) {
         notify.error(new AppError('E_UNSUPPORTED', 'openPath is desktop-only'));
         return false;
@@ -983,6 +996,7 @@ export function createStore(deps) {
     },
 
     async openPicked(picked) {
+      if (!canOpenNow()) return false;
       if (!(await confirmDiscard())) return false;
       const size = picked.file.size;
       /**
@@ -1623,6 +1637,7 @@ export function createStore(deps) {
     },
 
     async openRecent() {
+      if (!canOpenNow()) return false;
       const recent = await store.recentFile();
       if (!recent) return false;
       if (recent.path !== null) return store.openPath(recent.path);
