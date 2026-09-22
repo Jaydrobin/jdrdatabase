@@ -33,6 +33,7 @@ grep -n 미확인 docs/sessions.md
 | H | 10 (성능·하드닝·접근성) | 완료 |
 | H 점검 | 세션 H 산출물 코드 점검과 수정 | 완료 |
 | I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
+| I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI `desktop` 잡 결과 미확인) |
 
 ## 기록
 
@@ -1341,3 +1342,55 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - 실제 파일 대화상자(`pick_open`·`pick_save`)와 내보내기 경로 싱크(`sink_write`)의 WebView 실측(E2E는 훅으로 경로를 넣고, 싱크는 Node `test:native`의 JSON 경로로만 검사).
 - CI에서의 `tauri build`(릴리스 번들) 성공 여부와 번들 크기.
 - 세션 H 점검이 남긴 항목(실제 브라우저의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등)은 그대로 남습니다.
+
+### 세션 I 점검 (세션 I 산출물 코드 점검) — 2026-09-22
+
+커밋: `c2377f0` fix(ci) 데스크톱 잡 순서 → `96575e1` fix(sink) 내보내기 교체 → `362ad2a` fix(save) 부모 폴더 동기화 → `bebb4e2` fix(save) 뒷정리 실패 → `49904f7` fix(store) 저장 뮤텍스 → `3cc0cde` test(workcopy) 핫 WAL → `19fabd8` docs(design) → `be6d15a` fix(desktop) 프로토콜 토큰.
+
+시작 상태: 로컬 클론이 얕아(depth 50) 원격과 공통 조상이 없는 것처럼 보였습니다(세션 H 점검과 같은 자리). `git fetch --unshallow` 뒤 원격 `36a9e38`으로 맞췄고, 그 상태에서 `npm run check`(356개)가 초록임을 확인하고 시작했습니다. 이 환경에 Rust stable 1.94, WebKitGTK 2.52 개발 라이브러리, `WebKitWebDriver`, `Xvfb`, `tauri-driver` 2.0.6을 설치할 수 있어 러스트 워크스페이스와 Linux 데스크톱 E2E까지 실측했습니다.
+
+**이어받은 미확인 항목의 결과**
+
+- **CI `desktop` 잡(세 OS)의 첫 실행: 세 잡 모두 실패했습니다**(run 35670312597). 원인은 하나이고 아래 1번에서 고쳤습니다. `check-build-e2e`와 `perf`는 같은 커밋에서 초록이었습니다.
+
+**고친 것**
+
+1. **CI `desktop` 잡이 프런트엔드 산출물보다 먼저 러스트를 검사했습니다**(`c2377f0`). 앱 크레이트의 `tauri::generate_context!()`는 컴파일 시점에 `frontendDist`(`../dist/tauri`)를 읽습니다. 워크플로는 `npm ci` 바로 뒤에 `cargo clippy --all-targets`·`cargo test`를 돌렸고 그때 `dist/tauri`가 없어 프로크 매크로가 패닉했습니다(`The frontendDist configuration is set to "../dist/tauri" but this path doesn't exist`). 세 OS 잡이 전부 이 자리에서 죽었습니다. `npm run build`·`npm run verify`를 러스트 검사 앞으로 옮기고 순서의 이유를 주석으로 남겼습니다.
+2. **내보내기 교체가 실패하면 이미 있던 파일이 사라졌습니다**(`96575e1`, 데이터 유실). `sink_close`는 대상이 있으면 `remove_file`로 먼저 지우고 rename했습니다. 그 사이에 rename이 실패하면(잠금·권한·동기화 클라이언트) 내보낸 파일도 없고 원래 파일도 없습니다. `fs::rename`은 대상이 있어도 한 번에 갈아 끼우므로(Unix `rename(2)`, Windows `MoveFileEx` + `MOVEFILE_REPLACE_EXISTING`) `remove_file`을 뺐습니다. 재현 테스트를 먼저 넣었고(임시 파일을 미리 치워 교체를 실패시킴) 고치기 전에는 대상 파일을 읽지 못했습니다.
+3. **저장이 부모 폴더를 동기화하지 않았습니다**(`362ad2a`). `save_to`는 임시 파일을 `sync_all`하지만 rename 두 번이 바꾸는 것은 디렉터리 항목입니다. 마지막 rename 뒤 `sync_dir(&parent)`를 부릅니다. 여기까지 왔으면 파일은 제자리이므로 동기화 실패는 저장을 되돌리지 않고, 폴더를 파일로 열 수 없는 Windows에서는 아무것도 하지 않습니다.
+4. **파일을 바꾼 뒤의 뒷정리 실패를 저장 실패로 돌려줬습니다**(`bebb4e2`). rename이 끝난 뒤의 `file_stamp`·`update_meta_original`에 `?`가 붙어 있었습니다. `db.save`는 실패를 "파일이 그대로다"로 읽고 올려 둔 `revision`·`saved_at`·`saved_by`를 되돌리므로, 사본 revision이 방금 쓴 파일보다 뒤처져 다음 열기의 복구 판정(D-15)이 어긋납니다. 뒷정리를 최선 노력으로 바꾸고, 상태를 읽지 못하면 다음 저장이 `E_ORIGINAL_CHANGED`로 사용자에게 묻도록(조용히 덮어쓰지 않도록) 틀었습니다. 주입 지점 `FailPoint::PostRename`과 재현 테스트를 함께 넣었습니다.
+5. **원본 변경을 되물은 뒤 다시 저장하는 동안 저장 뮤텍스가 풀렸습니다**(`49904f7`). `saveNative`는 `catch` 안에서 `return saveNative(..., { force: true })`로 다시 저장했고, `return`이 `try`/`finally` 안이라 `finally`가 다시 저장이 **시작되자마자** 돌아 `state.saving`을 내렸습니다. 몇 GB 저장이 도는 내내 저장 중 표시가 꺼져 있고 자동 저장이 뮤텍스를 그냥 통과합니다(Worker의 `E_DB_BUSY`가 막지만 그건 마지막 방어선입니다). 저장 한 번(`saveNativeOnce`)과 되묻기·다시 저장(`saveNative`)을 나눴습니다. 저장 성공 알림 시점의 `state.saving`을 보는 검사를 넣었고, 고치기 전에는 거짓이었습니다.
+6. **엔진 프로토콜 토큰을 시각·pid에서 유도했습니다**(`be6d15a`). 토큰은 `random_suffix()` 두 번, 즉 `(나노초, 카운터, pid)`의 FNV-1a 해시였습니다. 시작 시각을 초 단위로만 알아도 후보가 10^9 남짓이고 두 조각이 독립도 아닙니다. 이 프로토콜은 `Backend::call` 전부로 이어지고 `sink_open`은 임의 경로에 씁니다. `RandomState`(프로세스마다 OS 난수로 seed)에서 만드는 `random_token()`을 따로 뒀습니다. 크레이트는 늘지 않습니다(D-12). 임시 파일 이름은 겹치지만 않으면 되므로 `random_suffix()` 그대로입니다.
+
+**검사·문서**
+
+- `3cc0cde` 핫 WAL이 남은 dirty 사본을 기동 정리가 지우지 않는지 검사했습니다. 기존 검사는 `close(false)`로 비정상 종료를 흉내 냈지만 그것은 깨끗한 닫기라 WAL이 체크포인트됩니다. 커넥션을 닫지 않은 채 사본 폴더를 복사해(`-shm` 없이) 실제 크래시 상태를 만들었고, 현재 구현이 통과함을 확인해 검사로 붙잡아 뒀습니다(폴더가 쓰기 가능하면 읽기 전용 커넥션도 WAL을 복구합니다).
+- `19fabd8` "다른 이름으로 저장"은 그 경로에 파일이 이미 있으면 `.bak`으로 옮긴 뒤 씁니다. DESIGN.md Step 11과 6장 표는 "검사·`.bak` 없이 새 파일"이라고 적혀 있었습니다. 코드 쪽이 옳아(rename 실패 때 되돌릴 것이 있어야 하고, 덮어쓰기를 고른 파일도 1세대는 남는 편이 D-04에 맞습니다) 문서를 코드에 맞췄습니다. 3.1절 `filesystem.js` 목록에 `listWorkcopies`·`removeWorkcopy`·`openPathSink`·`baseName`을, `save_to` 절차에 부모 폴더 동기화를 넣었습니다.
+
+**고치지 않고 남긴 것 (판단과 근거)**
+
+- **데스크톱 모드의 열기·저장에 진행률이 없습니다.** 러스트 `open`은 64 MB마다, `save_to`는 단계마다 진행률을 내지만, 기본 경로인 엔진 프로토콜(`jdr://localhost/call`)에는 진행률 채널이 없고(DESIGN.md 3.2도 `engine_call`의 채널을 "메인 스레드의 파일 명령용"으로 적었습니다) `worker.js`의 `db.open`·`db.save` 핸들러도 `ctx.progress`를 받지 않습니다. 5 GB 파일에서 두 작업은 이 앱에서 가장 긴 작업이라 `CLAUDE.md` 5.4("1초 이상 걸릴 수 있는 op는 progress")와 어긋납니다. 프로토콜에 진행률을 얹는 것은 D-15 변경이라 이 세션에서 하지 않았습니다. 후속 제안: 러스트에 `progress_poll(callId)` 명령을 두고 메인이 `engine_call`로 주기적으로 읽거나, 프로토콜 응답을 스트리밍으로 바꿉니다.
+- **시작 복구는 원본 없는 dirty 사본을 하나만 제안합니다.** `recoverWorkcopies`의 `dirty.find(...)`는 `opened_at` 내림차순의 첫 항목이고, 저장한 적 없는 사본이 둘 이상 남으면 나머지는 dirty라 `purge_clean`이 지우지도 않고 UI로 닿을 길도 없습니다. 앱 데이터 폴더에 영구히 쌓입니다. 사본 관리 화면이 없는 v1에서는 목록을 보여 주는 UI가 필요해 설계 변경이므로 남깁니다.
+- **외부 파일에 핫 WAL이 있으면 커밋된 데이터가 사본에 오지 않습니다.** `copy_original`은 `current.db` 본체만 복사하고 `remove_sidecars`가 사본의 `-wal`을 지웁니다. 다른 프로그램이 체크포인트하지 않은 WAL을 남긴 SQLite 파일을 열면, `inspect_original`(읽기 전용 열기)은 WAL까지 보지만 사본은 보지 못해 둘이 어긋나고, 그 상태로 저장하면 WAL에만 있던 커밋이 사라집니다. 앱이 저장한 파일은 `VACUUM INTO` 결과라 WAL이 없어 해당하지 않습니다. 고치려면 사본을 만들 때 `-wal`·`-shm`도 함께 가져가야 하는데, 여러 파일을 원자적으로 복사할 수 없어 다른 프로그램이 쓰는 중이면 일관성이 깨집니다. 원본을 체크포인트하는 쪽은 `CLAUDE.md` 5.9("원본을 바꾸는 코드는 `save.rs` 한 곳")에 걸립니다. 설계 판단이 필요해 남깁니다.
+- **`src-tauri/src/lib.rs`의 `run()`이 `.expect()`를 씁니다.** `CLAUDE.md` 5.9의 문자 그대로는 위반이지만 프로세스 진입점이고, 반환 오류로 바꿔 `process::exit`해도 진단이 나아지지 않습니다(패닉 훅은 `setup()` 안에서 붙으므로 어느 쪽이든 이 오류는 `panic.log`에 남지 않습니다). 규약의 예외로 볼지 리뷰어 판단을 구합니다.
+- **`io/ipc-bridge.js`의 `writeSync`가 던지면 Worker가 영원히 기다립니다.** `handleSync`의 `try`는 `invoke`만 감싸고, 버퍼가 `SharedArrayBuffer`가 아니면 `writeSync`가 던져 `Atomics.wait`를 깨우지 못합니다. 메시지는 같은 앱의 Worker에서만 오므로 실제로 일어나지 않고, 공유 버퍼 중계는 지금 폴백 경로입니다. 관측만 적습니다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **356개** 통과(lint·prettier·`tsc --strict` 포함).
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,775,673 bytes**(3.60 MiB / 예산 6 MiB), 세션 I의 3,775,531 bytes에서 **+142 bytes**. 외부 참조 0, vendor 체크섬 OK, 타우리 변형과 CSP 태그만 다름.
+- [x] `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: 통과.
+- [x] `cargo test --workspace`: **23개** 통과(세션 I의 19개 + 이번 3개 + 토큰 1개).
+- [x] `npm run test:native`: **26개** 통과(실제 rusqlite 엔진에 대한 Step 1 적합성 + 데스크톱 스토어 흐름).
+- [x] `npm run test:e2e`: 브라우저 **66개** 통과.
+- [x] CI `desktop` 잡 수정의 로컬 재현: WebKitGTK 2.52 개발 라이브러리를 설치한 뒤 `npm run build` 없이 돌린 `cargo clippy --workspace --all-targets`는 CI와 같은 프로크 매크로 패닉으로 죽고, `npm run build` 뒤에는 통과합니다.
+- [x] `npm run test:desktop`(tauri-driver 2.0.6 + WebKitGTK 2.52 + Xvfb): **Linux 통과**. 상태바 "데스크톱 모드 · SQLite 3.53.2", Worker의 `SELECT 1`·FTS5 trigram, 다른 이름으로 저장(revision 1) → 편집 → 저장(`.bak`, revision 2) → 다시 열기 → `.bak` 복원 → 원본 변경 대화상자 취소까지 세션 I와 같은 시나리오가 그대로 통과합니다(이번 수정 5번이 닿는 경로입니다). `crossOriginIsolated=false`·`SharedArrayBuffer` 없음도 다시 확인됐습니다(D-15의 프로토콜 경로 전제).
+
+**미확인 (후속 세션에서 이어받음)**
+
+- **이 푸시의 CI `desktop` 잡 결과.** 1번은 로컬에서 같은 실패를 재현하고 고친 뒤 통과를 확인했지만, Windows·macOS 러너에서 `cargo test`·`tauri build`가 처음 끝까지 도는 것은 이 푸시가 처음입니다. 릴리스 번들(`npx tauri build`)의 성공 여부와 번들 크기도 아직 모릅니다.
+- 5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 세션 I에서 이어받아 그대로 남습니다(이 환경의 디스크·시간 예산으로 500만 행 픽스처를 만들지 못했습니다).
+- Windows(WebView2)·macOS(WKWebView)의 데스크톱 모드 전부: `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream. 데스크톱 E2E는 Linux만 돕니다.
+- 실제 파일 대화상자(`pick_open`·`pick_save`)의 WebView 실측. E2E는 `__jdrTest.setPickedPath`로 경로를 넣습니다.
+- 위 "고치지 않고 남긴 것"의 다섯 항목(열기·저장 진행률, 남은 dirty 사본 접근, 외부 파일의 핫 WAL, `run()`의 `expect`, `writeSync` 예외)은 판단이 필요한 채로 남습니다.
+- 세션 I와 세션 H 점검이 남긴 항목(실제 브라우저의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등)은 그대로 남습니다.
