@@ -52,7 +52,7 @@ export const JOURNAL_LIMIT_BYTES = 50 * MB;
  * @property {() => Promise<void>} clear 저널을 비운다(저장 성공 뒤). 정지도 풀린다
  * @property {(dbId: string) => Promise<JournalSummary | null>} recoverable 그 dbId의 기록이 있으면 요약
  * @property {() => Promise<JournalSummary | null>} pending 저널에 남아 있는 기록(dbId 무관). 시작 시 확인용
- * @property {(client: Client, commands: Command[], onProgress?: (done: number, total: number) => void) => Promise<number>} replay `command.apply`로 차례로 적용하고 적용 수를 돌려준다
+ * @property {(client: Client, commands: Command[], onProgress?: (done: number, total: number) => void) => Promise<{ applied: number, skipped: number }>} replay `command.apply`로 차례로 적용한다. 대상이 외부(비STRICT) 테이블로 바뀐 커맨드는 건너뛰고 그 수를 함께 돌려준다
  * @property {() => boolean} isFull
  * @property {() => JournalContext | null} context
  */
@@ -190,9 +190,13 @@ export function createAutosave(options) {
 
     async replay(client, commands, onProgress) {
       let done = 0;
+      let skipped = 0;
       for (const cmd of commands) {
         try {
-          await client.call('command.apply', { cmd });
+          // `replay: true`는 대상이 외부(비STRICT) 테이블로 바뀐 커맨드를 오류 대신 건너뛰게 한다.
+          // 복구 도중 한 항목 때문에 나머지 복구가 통째로 멈추면 그게 더 큰 손실이다.
+          const result = await client.call('command.apply', { cmd, replay: true });
+          if (result.skipped) skipped += 1;
         } catch (err) {
           throw new AppError('E_DB_QUERY', `journal replay failed at command ${done}`, {
             cause: err,
@@ -202,7 +206,7 @@ export function createAutosave(options) {
         done += 1;
         onProgress?.(done, commands.length);
       }
-      return done;
+      return { applied: done - skipped, skipped };
     },
 
     isFull: () => full,

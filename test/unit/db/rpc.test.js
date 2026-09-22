@@ -1007,3 +1007,57 @@ test('db.save·원본 경로 열기는 wasm 엔진에서 E_UNSUPPORTED이고 DB�
   );
   client.close();
 });
+
+test('command.apply: 외부(비STRICT) 테이블의 데이터 커맨드는 거부하고, 저널 재생은 건너뛴다', async () => {
+  const { client } = await readyClient();
+  await client.call('db.open', {});
+  await client.call('engine.exec', { sql: 'CREATE TABLE ext (id INTEGER PRIMARY KEY, a TEXT)' });
+  await client.call('engine.exec', { sql: "INSERT INTO ext VALUES (1, '원본')" });
+  for (const t of ['_jdr_columns', '_jdr_views', '_jdr_tables', '_jdr_meta']) {
+    await client.call('engine.exec', { sql: `DROP TABLE ${t}` });
+  }
+  const { bytes } = await client.call('db.snapshot', {});
+  await client.call('db.open', { bytes, adoptExternal: true });
+  assert.deepEqual(
+    (await client.call('engine.exec', { sql: 'SELECT id, strict FROM _jdr_tables' })).rows,
+    [['ext', 0]],
+    '등록된 외부 테이블은 strict = 0',
+  );
+
+  /** @type {import('../../../src/db/command.js').Command} */
+  const cmd = {
+    type: 'cell.edit',
+    tableId: 'ext',
+    do: [{ sql: 'UPDATE "ext" SET "a" = ? WHERE "id" = ?', params: ['덮어씀', 1] }],
+    undo: [{ sql: 'UPDATE "ext" SET "a" = ? WHERE "id" = ?', params: ['원본', 1] }],
+    summary: 'cell',
+  };
+
+  // UI는 `editableTable`로 막지만 Worker에도 같은 층의 방어가 있어야 한다(세션 B 점검 5번과 같은 규칙).
+  await assert.rejects(
+    client.call('command.apply', { cmd }),
+    (err) =>
+      err instanceof AppError &&
+      err.code === 'E_DB_QUERY' &&
+      /** @type {{ reason?: string }} */ (err.detail ?? {}).reason === 'external_table',
+  );
+  assert.deepEqual(
+    (await client.call('engine.exec', { sql: 'SELECT a FROM ext WHERE id = 1' })).rows,
+    [['원본']],
+    '거부됐으므로 값은 그대로',
+  );
+
+  // 저널 재생은 막지 않는다: 그 항목만 건너뛰고 알린다(복구 전체를 가로막으면 새 버그가 된다).
+  const replayed = await client.call('command.apply', { cmd, replay: true });
+  assert.equal(replayed.affected, 0);
+  assert.equal(replayed.skipped, 'external_table');
+  assert.deepEqual(
+    (await client.call('engine.exec', { sql: 'SELECT a FROM ext WHERE id = 1' })).rows,
+    [['원본']],
+  );
+
+  // 스키마 커맨드와 STRICT 테이블은 그대로 동작한다.
+  const created = await client.call('schema.create', { name: '정상' });
+  assert.ok(created.tableId);
+  client.close();
+});

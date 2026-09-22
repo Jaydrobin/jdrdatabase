@@ -177,6 +177,7 @@ export function assertCommand(value) {
  * @typedef {object} ApplyResult
  * @property {number} affected 변경된 행 수의 합(DDL은 0)
  * @property {number} [nulled] 변환 복사에서 NULL이 된 값의 수(변환 단계가 있을 때만)
+ * @property {'external_table'} [skipped] 적용하지 않고 건너뛴 이유(저널 재생 중 대상이 외부 테이블)
  */
 
 /**

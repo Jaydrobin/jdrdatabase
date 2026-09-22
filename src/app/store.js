@@ -426,8 +426,11 @@ export function createStore(deps) {
     /** @type {boolean} */
     let ok;
     try {
-      const count = await autosave.replay(client, journal.commands);
-      notify.info('file.recovered', { count });
+      const { applied, skipped } = await autosave.replay(client, journal.commands);
+      notify.info('file.recovered', { count: applied });
+      // 사본을 만든 뒤 그 테이블이 외부 등록으로 바뀌면 그 커맨드는 적용되지 않는다. 조용히 넘기면
+      // 사용자는 복구가 다 된 줄 안다.
+      if (skipped > 0) notify.info('file.recoveredSkipped', { count: skipped });
       ok = true;
     } catch (err) {
       notify.error(toAppError(err));

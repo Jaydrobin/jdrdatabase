@@ -49,6 +49,8 @@ export const en = Object.freeze({
   'file.journalPendingFor':
     'Unsaved changes for {name} are recorded. Open that file to recover them.',
   'file.recovered': 'Recovered {count} unsaved changes. Save the file.',
+  'file.recoveredSkipped':
+    '{count} of them were skipped because the target table is now an external (read-only) table.',
   'file.backupSkipped': 'The file is over 200 MB, so the pre-save backup was skipped.',
   'file.backupFailed': 'The pre-save backup could not be made ({code}). Saving continues.',
   'unload.dirty': 'There are unsaved changes.',

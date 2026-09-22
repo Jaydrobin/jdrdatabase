@@ -144,7 +144,7 @@ test('replay: command.apply로 차례로 적용하고 실패 지점을 detail에
     [insertCmd('t', 'a'), insertCmd('t', 'b')],
     (d, total) => progress.push([d, total]),
   );
-  assert.equal(done, 2);
+  assert.deepEqual(done, { applied: 2, skipped: 0 });
   assert.deepEqual(progress, [
     [1, 2],
     [2, 2],

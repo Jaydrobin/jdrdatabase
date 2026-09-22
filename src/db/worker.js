@@ -98,7 +98,7 @@ import {
  *   'schema.softDeleteColumn': { args: { tableId: string, columnId: string }, result: { cmd: Command } },
  *   'schema.restoreColumn': { args: { tableId: string, columnId: string }, result: { cmd: Command } },
  *   'schema.changeColumnType': { args: { tableId: string, columnId: string, type: LogicalType, policy?: CoercePolicy, options?: ColumnOptions | null }, result: { columnId: string, cmd: Command, result: ApplyResult } },
- *   'command.apply': { args: { cmd: Command, direction?: Direction }, result: ApplyResult },
+ *   'command.apply': { args: { cmd: Command, direction?: Direction, replay?: boolean }, result: ApplyResult },
  *   'query.window': { args: { tableId: string, viewSpec: ViewSpec, offset: number, limit: number, seq: number }, result: { rows: WindowRow[], columnIds: string[], seq: number, elapsedMs: number } },
  *   'query.count': { args: { tableId: string, viewSpec: ViewSpec }, result: { count: number, elapsedMs: number } },
  *   'query.row': { args: { tableId: string, rowId: number, colIds?: string[] }, result: { row: FullRow | null } },
@@ -154,6 +154,16 @@ export const COUNT_CACHE_MAX = 64;
  * 루프로 돌아오므로 그 틈에 끼어들 수 있다. 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨지고,
  * 파일에는 아무것도 쓰이지 않았는데 revision만 오른 DB가 남는다.
  */
+/**
+ * 데이터 커맨드인가(스키마·뷰·검색 커맨드가 아닌가). 스키마 op는 `tables.js`가 이미 `requireStrict`를
+ * 하므로, Worker 경계에서 다시 보는 것은 UI 밖에서도 만들어질 수 있는 데이터 커맨드뿐이다.
+ * @param {Command} cmd
+ * @returns {boolean}
+ */
+export function isDataCommand(cmd) {
+  return cmd.type.startsWith('cell.') || cmd.type.startsWith('row.');
+}
+
 export const EXCLUSIVE_OPS = new Set([
   'command.apply',
   'import.run',
@@ -458,7 +468,20 @@ export function createDispatcher(options) {
     'command.apply': async (args, ctx) => {
       const cmd = assertCommand(args?.cmd);
       const direction = args?.direction === 'undo' ? 'undo' : 'do';
-      return applyCommand(requireEngine(), cmd, direction, {
+      const active = requireEngine();
+      // 외부(비STRICT) 테이블은 읽기 전용이다(R7). UI는 `editableTable`로 막지만 Worker에도 같은 층의
+      // 방어를 둔다(세션 B 점검이 `tables.drop`에 넣은 `requireStrict`와 같은 규칙). 스키마 op는
+      // `tables.js`가 이미 검사하므로 여기서는 UI 밖에서도 들어올 수 있는 데이터 커맨드만 본다.
+      if (isDataCommand(cmd) && cmd.tableId !== null) {
+        const target = tables.get(active, cmd.tableId);
+        if (target && !target.strict) {
+          // 저널 재생은 막지 않는다. 사본을 만든 뒤 그 테이블이 외부 등록으로 바뀐 경우 복구 전체가
+          // 멈추면 그게 더 큰 손실이므로, 그 항목만 건너뛰고 호출자가 알릴 수 있게 알려 준다.
+          if (args?.replay === true) return { affected: 0, skipped: 'external_table' };
+          tables.requireStrict(target);
+        }
+      }
+      return applyCommand(active, cmd, direction, {
         signal: ctx.signal,
         progress: ctx.progress,
       });

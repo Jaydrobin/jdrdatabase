@@ -50,6 +50,8 @@ export const ko = Object.freeze({
   'file.journalPendingFor':
     '{name}의 저장되지 않은 변경 기록이 남아 있습니다. 그 파일을 열면 복구할 수 있습니다.',
   'file.recovered': '저장되지 않은 변경 {count}건을 복구했습니다. 파일에 저장하세요.',
+  'file.recoveredSkipped':
+    '그 중 {count}건은 대상 테이블이 외부 파일로 등록되어 적용하지 못했습니다(외부 테이블은 읽기 전용).',
   'file.backupSkipped': '파일이 200 MB를 넘어 저장 전 백업을 건너뛰었습니다.',
   'file.backupFailed': '저장 전 백업을 만들지 못했습니다({code}). 저장은 계속합니다.',
   'unload.dirty': '저장하지 않은 변경 사항이 있습니다.',

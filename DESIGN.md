@@ -978,7 +978,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `query.row` | `{ tableId, rowId, colIds }` | `{ row }`. `row = { id, cells, createdAt, updatedAt }`(`cells`는 열 id → 전문 값, `createdAt`·`updatedAt`은 시스템 열)이고 없는 행이면 `row: null`. `colIds`를 비우면 살아 있는 열 전부 | |
 | `query.rows` | `{ tableId, viewSpec, offset, limit, colIds? }` | `{ rows }`. 뷰 순서로 `offset`부터 `limit`개(1만 이하)의 전문 행(`query.row`와 같은 형태). `colIds`를 비우면 소프트 삭제된 열까지 물리 열 전부(행 삭제의 되돌리기 스냅샷용). 붙여넣기·다중 편집·행 삭제가 커맨드를 만들기 전에 옛 값을 읽는 데 쓴다 | 불가(짧음) |
 | `query.stats` | `{ tableId }` | `{ count, minId, maxId }`. 빈 테이블이면 `minId`·`maxId`는 null. 행 추가 커맨드가 새 `id`를 정하는 데 쓴다 | |
-| `command.apply` | `{ cmd, direction? }` | `{ affected, nulled? }`. `direction`은 `'do'`(기본) 또는 `'undo'`. `nulled`는 변환 단계가 NULL로 만든 값의 수. 저널 재생과 되돌리기가 쓴다 | 변환 단계가 있을 때만 |
+| `command.apply` | `{ cmd, direction?, replay? }` | `{ affected, nulled?, skipped? }`. `direction`은 `'do'`(기본) 또는 `'undo'`. `nulled`는 변환 단계가 NULL로 만든 값의 수. 데이터 커맨드(`cell.*`·`row.*`)의 대상이 외부(비STRICT) 테이블이면 거부한다(R7. 스키마 op는 `tables.js`가 이미 검사한다). `replay`면 거부 대신 건너뛰고 `skipped: 'external_table'`로 알린다 — 사본을 만든 뒤 대상이 외부 등록으로 바뀌었을 때 복구 전체가 멈추지 않게 한다. 저널 재생과 되돌리기가 쓴다 | 변환 단계가 있을 때만 |
 | `search.enable` | `{ tableId }` | `{ cmd }`. FTS5 테이블·트리거 생성과 초기 인덱싱(`{ index }` 단계, `progress.phase = 'index'`)을 커맨드 하나로 적용하고 돌려준다. 검색할 열이 없거나 이미 켜져 있거나 비STRICT 테이블이면 `E_DB_QUERY` | 가능 |
 | `search.disable` | `{ tableId }` | `{ cmd }`. 트리거·FTS 테이블 삭제. `undo`가 인덱스를 다시 만든다 | 불가 |
 | `views.list` | `{ tableId }` | `{ views }`. `views[i] = { id, tableId, name, spec }`(`spec`은 파싱된 JSON) | |
