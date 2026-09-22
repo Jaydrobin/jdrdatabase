@@ -5,7 +5,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { selectEngine } from '../../../src/db/engine.js';
-import { WASM_MAX_FILE_BYTES, WASM_WARN_FILE_BYTES } from '../../../src/db/engine-wasm.js';
+import {
+  createWasmEngine,
+  WASM_MAX_FILE_BYTES,
+  WASM_WARN_FILE_BYTES,
+} from '../../../src/db/engine-wasm.js';
 import { GB, MB } from '../../../src/util/bytes.js';
 import { AppError } from '../../../src/util/errors.js';
 import { loadWasmBinary, openWasmEngine } from './helpers.js';
@@ -207,5 +211,74 @@ test('snapshot: 장부와 어긋나게 트랜잭션이 열려 있으면 파일�
   // 롤백해 장부와 맞추면 다시 내보낼 수 있다.
   engine.exec('ROLLBACK');
   assert.deepEqual(engine.snapshot(), clean);
+  await engine.close();
+});
+
+test('롤백이 실패하면 엔진을 잠근다(이후 op 거부, snapshot으로 꺼내기는 허용)', async () => {
+  // 롤백 실패는 실제로는 메모리 부족에서 나온다. 결정적으로 재현할 수 없어 주입 지점을 둔다
+  // (`src-tauri/core/src/save.rs`의 `FailPoint`와 같은 방식).
+  const engine = createWasmEngine({ maxResultRows: 10_000, failPoint: 'rollback' });
+  await engine.init({ wasmBinary: await loadWasmBinary() });
+  await engine.open();
+  await engine.transaction(() => {
+    engine.run('CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT) STRICT');
+    engine.run("INSERT INTO t (a) VALUES ('하나')");
+  });
+
+  // 트랜잭션 안의 실패 → 롤백도 실패한다. 원래 오류를 그대로 던지고 롤백 실패는 detail에 남긴다.
+  await assert.rejects(
+    engine.transaction(() => {
+      engine.run('INSERT INTO 없는테이블 (a) VALUES (1)');
+    }),
+    (err) =>
+      err instanceof AppError &&
+      /** @type {{ rollbackFailed?: string }} */ (err.detail ?? {}).rollbackFailed !== undefined,
+  );
+
+  // 이제 sqlite의 트랜잭션 상태를 알 수 없다. 더 쓰면 열린 채 남은 트랜잭션 위에 쌓인다.
+  for (const attempt of [
+    () => engine.exec('SELECT 1'),
+    () => engine.run("INSERT INTO t (a) VALUES ('둘')"),
+    () => engine.prepareCached('SELECT 1'),
+  ]) {
+    assert.throws(
+      attempt,
+      (err) => err instanceof AppError && err.code === 'E_ENGINE_LOCKED',
+      String(attempt),
+    );
+  }
+  await assert.rejects(
+    engine.transaction(() => {}),
+    (err) => err instanceof AppError && err.code === 'E_ENGINE_LOCKED',
+  );
+
+  // 트랜잭션이 남은 상태에서는 저장도 막힌다. 세션 H가 넣은 `snapshot()`의 autocommit 가드가
+  // 그 자리를 이미 지키고 있어, 반쯤 적용된 상태가 파일로 나가지 않는다.
+  assert.throws(
+    () => engine.snapshot(),
+    (err) => err instanceof AppError,
+  );
+  await engine.close();
+});
+
+test('롤백이 실패해도 sqlite가 트랜잭션을 끝냈으면 잠그지 않는다', async () => {
+  // 세션 H가 실측한 SQLITE_NOMEM이 이쪽이다: 롤백은 실패로 오지만 DB는 계속 쓸 수 있었다.
+  // 무조건 잠그면 복구 가능한 상황을 죽은 세션으로 만든다.
+  const engine = await openWasmEngine();
+  await engine.transaction(() => {
+    engine.run('CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT) STRICT');
+  });
+  await assert.rejects(
+    engine.transaction(() => {
+      engine.run('INSERT INTO 없는테이블 (a) VALUES (1)');
+    }),
+    (err) => err instanceof AppError,
+  );
+  // 롤백이 성공한 보통 경로: 잠기지 않고 계속 쓸 수 있다.
+  await engine.transaction(() => {
+    engine.run("INSERT INTO t (a) VALUES ('그 뒤')");
+  });
+  assert.deepEqual(engine.exec('SELECT a FROM t').rows, [['그 뒤']]);
+  assert.ok(engine.snapshot().byteLength > 0);
   await engine.close();
 });

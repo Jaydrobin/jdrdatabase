@@ -164,6 +164,7 @@ function toQueryError(err, sql, extra = {}) {
 /**
  * @typedef {object} WasmEngineOptions
  * @property {number} maxResultRows `exec` 결과 행 상한. `engine.js`의 `MAX_RESULT_ROWS`를 `selectEngine`이 넘긴다
+ * @property {'rollback'} [failPoint] 테스트 전용 실패 주입. `selectEngine`은 넘기지 않으므로 릴리스 경로에는 없다
  */
 
 /**
@@ -173,7 +174,14 @@ function toQueryError(err, sql, extra = {}) {
  * @returns {Engine}
  */
 export function createWasmEngine(options) {
-  const { maxResultRows } = options;
+  const { maxResultRows, failPoint } = options;
+  /**
+   * 롤백이 실패한 뒤 sqlite에 트랜잭션이 그대로 남아 있을 때 세운다. 그 상태에서 더 쓰면 열린 채 남은
+   * 트랜잭션 위에 쌓이고 저장은 그 상태를 파일로 내보낸다. 롤백이 실패해도 sqlite가 트랜잭션을
+   * 끝냈으면(세션 H가 실측한 SQLITE_NOMEM이 그렇다) 잠그지 않고 `txDepth`만 맞춘다.
+   * @type {string | null}
+   */
+  let lockedBy = null;
   /** @type {Sqlite3Static | null} */
   let sqlite3 = null;
   /** @type {Database | null} */
@@ -184,6 +192,26 @@ export function createWasmEngine(options) {
   const cache = new Map();
   let txDepth = 0;
   let interrupted = false;
+
+  /** sqlite에 트랜잭션이 열려 있는가. 롤백 실패 뒤 `txDepth`를 믿을 수 없을 때 실제 상태를 묻는다. */
+  function stillInTransaction() {
+    try {
+      const database = requireDb();
+      return requireSqlite3().capi.sqlite3_get_autocommit(database.pointer ?? 0) === 0;
+    } catch {
+      // 상태를 물을 수조차 없으면 최악을 가정한다.
+      return true;
+    }
+  }
+
+  /** 잠긴 엔진이면 던진다. `snapshot`·`close`는 부르지 않는다(데이터를 꺼내는 길). */
+  function requireUsable() {
+    if (lockedBy !== null) {
+      throw new AppError('E_ENGINE_LOCKED', 'engine is locked after a failed rollback', {
+        detail: { reason: lockedBy },
+      });
+    }
+  }
 
   /** @returns {Database} */
   function requireDb() {
@@ -376,6 +404,7 @@ export function createWasmEngine(options) {
     },
 
     exec(sql, params) {
+      requireUsable();
       const stmt = acquire(sql);
       const sqlText = typeof sql === 'string' ? sql : sql.sql;
       try {
@@ -409,6 +438,7 @@ export function createWasmEngine(options) {
     },
 
     run(sql, params) {
+      requireUsable();
       if (txDepth === 0) {
         throw new AppError('E_DB_QUERY', 'write outside transaction', {
           detail: { sql: (typeof sql === 'string' ? sql : sql.sql).slice(0, 200) },
@@ -435,6 +465,7 @@ export function createWasmEngine(options) {
     },
 
     async runBatch(sql, paramsList, options = {}) {
+      requireUsable();
       const database = requireDb();
       const sqlText = typeof sql === 'string' ? sql : sql.sql;
       // 취소 표식은 배치가 소비할 때만 지운다. 배치 진입 시 지우면 취소 결정과 배치 시작 사이에
@@ -477,6 +508,7 @@ export function createWasmEngine(options) {
     },
 
     async transaction(fn) {
+      requireUsable();
       requireDb();
       const depth = txDepth;
       const savepoint = `jdr_sp_${depth}`;
@@ -489,8 +521,15 @@ export function createWasmEngine(options) {
       } catch (err) {
         const original = toAppError(err, 'E_DB_QUERY');
         try {
+          // 주입은 실제 롤백을 건너뛰어 "롤백이 실패했고 트랜잭션도 남은" 위험한 쪽을 만든다.
+          if (failPoint === 'rollback') throw new Error('injected rollback failure');
           execRaw(depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
         } catch (rollbackErr) {
+          // 롤백 실패가 곧 사용 불가는 아니다. sqlite에 물어 트랜잭션이 정말 남았을 때만 잠근다.
+          // 남지 않았으면 `txDepth`가 실제와 어긋난 것뿐이므로 0으로 맞추고 계속 쓴다(세션 H가
+          // 실측한 SQLITE_NOMEM 경로: 롤백은 실패로 오지만 DB는 계속 쓸 수 있었다).
+          if (stillInTransaction()) lockedBy = 'rollback_failed';
+          else txDepth = 0;
           // 메모리 부족은 롤백도 실패시킨다. 롤백 실패로 원래 코드(E_MEM)를 가리면 UI가 "저장 후
           // 다시 시작" 대신 일반 질의 오류로 안내하게 되므로 원래 오류를 그대로 던지고 롤백 실패는 detail에 남긴다.
           throw new AppError(original.code, original.message, {
@@ -504,11 +543,12 @@ export function createWasmEngine(options) {
         }
         throw original;
       } finally {
-        txDepth -= 1;
+        if (txDepth > 0) txDepth -= 1;
       }
     },
 
     prepareCached(sql) {
+      requireUsable();
       acquire(sql);
       return { sql };
     },

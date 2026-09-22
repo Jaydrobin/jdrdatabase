@@ -428,6 +428,8 @@ export const en = Object.freeze({
     'This device previously saved a newer revision. The file may not be fully synced.',
   'error.E_DB_QUERY': 'A database operation failed.',
   'error.E_DB_BUSY': 'Another operation is in progress. Try again when it finishes.',
+  'error.E_ENGINE_LOCKED':
+    'A rollback did not complete, so the database state is unknown. No further changes or saves are allowed. The original file is untouched — restart the app to recover unsaved changes.',
   'error.E_RESULT_TOO_LARGE': 'Internal error: query result is too large (over 10,000 rows).',
   'error.E_BATCH_TOO_LARGE': 'Internal error: a single batch is too large.',
   'error.E_MEM': 'Out of memory. The operation was aborted. Save and restart the app.',

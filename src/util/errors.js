@@ -19,6 +19,7 @@ export const ERROR_CODES = Object.freeze(
     'E_REVISION_BEHIND',
     'E_DB_QUERY',
     'E_DB_BUSY',
+    'E_ENGINE_LOCKED',
     'E_RESULT_TOO_LARGE',
     'E_BATCH_TOO_LARGE',
     'E_MEM',
@@ -48,6 +49,7 @@ export const ERROR_CODES = Object.freeze(
 const NOT_RECOVERABLE = new Set(
   /** @type {ErrorCode[]} */ ([
     'E_ENV_NO_WASM',
+    'E_ENGINE_LOCKED',
     'E_RESULT_TOO_LARGE',
     'E_BATCH_TOO_LARGE',
     'E_MEM',
