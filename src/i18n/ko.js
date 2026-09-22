@@ -56,8 +56,9 @@ export const ko = Object.freeze({
   'file.backupFailed': '저장 전 백업을 만들지 못했습니다({code}). 저장은 계속합니다.',
   'unload.dirty': '저장하지 않은 변경 사항이 있습니다.',
   'confirm.discard.title': '저장되지 않은 변경',
-  'confirm.discard.message': '저장하지 않은 변경 사항이 있습니다. 버리고 계속하시겠습니까?',
-  'confirm.discard.ok': '버리고 계속',
+  'confirm.discard.message':
+    '저장하지 않은 변경 사항이 있습니다. 계속하면 이 화면에서는 사라지지만 기록은 남아, 이 파일을 다시 열 때 복구를 제안합니다.',
+  'confirm.discard.ok': '저장하지 않고 계속',
   'confirm.adopt.title': '다른 도구가 만든 SQLite 파일',
   'confirm.adopt.message':
     '이 파일은 다른 도구가 만든 SQLite 파일입니다. 메타 정보를 추가하여 이 앱에서 관리하시겠습니까?\n기존 테이블은 읽기 전용으로 등록되고, 파일은 저장할 때까지 변경되지 않습니다.',
@@ -304,6 +305,8 @@ export const ko = Object.freeze({
   'import.validate.noTarget': '추가할 테이블을 고르세요.',
   'import.failed':
     '가져오기에 실패했습니다: {message}. 데이터베이스는 가져오기 전 상태 그대로입니다.',
+  'import.tooManyChoices':
+    '선택 목록으로 가져오기에는 항목이 너무 많습니다(최대 {max}개). 그 열은 텍스트로 가져오세요.',
   'import.cancelled': '가져오기를 취소했습니다. 데이터베이스는 가져오기 전 상태 그대로입니다.',
   'import.invalidAt':
     '{row}번째 레코드의 "{column}" 열 값이 타입에 맞지 않아 중단했습니다. 데이터베이스는 가져오기 전 상태 그대로입니다.',

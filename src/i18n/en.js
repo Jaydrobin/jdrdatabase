@@ -55,8 +55,9 @@ export const en = Object.freeze({
   'file.backupFailed': 'The pre-save backup could not be made ({code}). Saving continues.',
   'unload.dirty': 'There are unsaved changes.',
   'confirm.discard.title': 'Unsaved changes',
-  'confirm.discard.message': 'There are unsaved changes. Discard them and continue?',
-  'confirm.discard.ok': 'Discard and continue',
+  'confirm.discard.message':
+    'There are unsaved changes. Continuing leaves this view, but they stay recorded and will be offered for recovery the next time you open this file.',
+  'confirm.discard.ok': 'Continue without saving',
   'confirm.adopt.title': 'SQLite file from another tool',
   'confirm.adopt.message':
     'This SQLite file was created by another tool. Add metadata so this app can manage it?\nExisting tables are registered read-only and the file is not modified until you save.',
@@ -304,6 +305,8 @@ export const en = Object.freeze({
   'import.validate.duplicateTarget': 'Target column "{name}" is used twice.',
   'import.validate.noTarget': 'Choose a table to append to.',
   'import.failed': 'Import failed: {message}. The database is unchanged.',
+  'import.tooManyChoices':
+    'Too many distinct values for a select column (max {max}). Import that column as text.',
   'import.cancelled': 'Import cancelled. The database is unchanged.',
   'import.invalidAt':
     'Record {row}, column "{column}" does not match the type; aborted. The database is unchanged.',
