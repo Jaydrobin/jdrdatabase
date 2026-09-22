@@ -448,3 +448,30 @@ test('열 상한: 물리 열이 2,000개에 이르면 E_DB_QUERY(column_limit)',
   );
   await engine.close();
 });
+
+test('addColumn: select 항목 수 상한을 넘으면 거부한다', async () => {
+  // 상한이 없으면 가져오기가 열의 모든 고유값을 선택지로 만들 수 있고, 그 목록이
+  // `_jdr_columns.options`에 JSON으로 들어가 스키마를 읽을 때마다 파싱된다.
+  const engine = await freshDb();
+  const { tableId } = await tables.create(engine, { name: 'T' });
+  const tooMany = Array.from({ length: tables.MAX_SELECT_CHOICES + 1 }, (_, i) => `항목${i}`);
+  await assert.rejects(
+    tables.addColumn(engine, tableId, {
+      name: '많음',
+      type: 'select',
+      options: { choices: tooMany },
+    }),
+    (err) =>
+      err instanceof AppError &&
+      err.code === 'E_VALUE_INVALID' &&
+      /** @type {{ reason?: string }} */ (err.detail ?? {}).reason === 'too_many_choices',
+  );
+  // 상한까지는 받는다.
+  const ok = await tables.addColumn(engine, tableId, {
+    name: '딱맞음',
+    type: 'select',
+    options: { choices: tooMany.slice(0, tables.MAX_SELECT_CHOICES) },
+  });
+  assert.ok(ok.columnId);
+  await engine.close();
+});

@@ -152,6 +152,9 @@ export function errorText(err) {
       ? /** @type {Record<string, unknown>} */ (err.detail)
       : {};
   if (err.code === 'E_IMPORT_CANCELLED') return t('import.cancelled');
+  if (err.code === 'E_VALUE_INVALID' && detail.reason === 'too_many_choices') {
+    return t('import.tooManyChoices', { max: formatInteger(Number(detail.max)) });
+  }
   if (err.code === 'E_VALUE_INVALID' && typeof detail.rowIndex === 'number') {
     return t('import.invalidAt', {
       row: formatInteger(detail.rowIndex),

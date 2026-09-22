@@ -54,6 +54,9 @@ import { isLogicalType } from './values.js';
  */
 
 /** 표시 이름 길이 상한. */
+/** `select` 열의 항목 수 상한. 사람이 드롭다운에서 고르는 목록이므로 넉넉하다. */
+export const MAX_SELECT_CHOICES = 1000;
+
 export const MAX_NAME_LENGTH = 200;
 
 /**
@@ -92,6 +95,13 @@ function normalizeOptions(options, type) {
     const o = /** @type {Record<string, unknown>} */ (options);
     if (Array.isArray(o.choices)) {
       const choices = [...new Set(o.choices.map((c) => String(c).trim()).filter((c) => c))];
+      // 상한이 없으면 가져오기가 열의 모든 고유값을 선택지로 만들 수 있다. 30만 행이면
+      // `_jdr_columns.options`가 수 MB가 되고 스키마를 읽을 때마다 통째로 파싱된다.
+      if (choices.length > MAX_SELECT_CHOICES) {
+        throw new AppError('E_VALUE_INVALID', 'too many select choices', {
+          detail: { reason: 'too_many_choices', count: choices.length, max: MAX_SELECT_CHOICES },
+        });
+      }
       if (choices.length > 0) out.choices = choices;
     }
     if (typeof o.decimals === 'number' && Number.isInteger(o.decimals) && o.decimals >= 0) {
