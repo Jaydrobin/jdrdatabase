@@ -33,7 +33,7 @@ grep -n 미확인 docs/sessions.md
 | H | 10 (성능·하드닝·접근성) | 완료 |
 | H 점검 | 세션 H 산출물 코드 점검과 수정 | 완료 |
 | I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
-| I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI `desktop` 잡 결과 미확인) |
+| I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI 다섯 잡 초록. Windows·macOS WebView 실측은 미확인) |
 
 ## 기록
 
@@ -1345,7 +1345,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
 ### 세션 I 점검 (세션 I 산출물 코드 점검) — 2026-09-22
 
-커밋: `c2377f0` fix(ci) 데스크톱 잡 순서 → `96575e1` fix(sink) 내보내기 교체 → `362ad2a` fix(save) 부모 폴더 동기화 → `bebb4e2` fix(save) 뒷정리 실패 → `49904f7` fix(store) 저장 뮤텍스 → `3cc0cde` test(workcopy) 핫 WAL → `19fabd8` docs(design) → `be6d15a` fix(desktop) 프로토콜 토큰.
+커밋: `c2377f0` fix(ci) 데스크톱 잡 순서 → `96575e1` fix(sink) 내보내기 교체 → `362ad2a` fix(save) 부모 폴더 동기화 → `bebb4e2` fix(save) 뒷정리 실패 → `49904f7` fix(store) 저장 뮤텍스 → `3cc0cde` test(workcopy) 핫 WAL → `19fabd8` docs(design) → `be6d15a` fix(desktop) 프로토콜 토큰 → `ab44bdf` docs(session) → `40e12be` fix(ci) CRLF → `ecdbbac` fix(save) Windows sync.
 
 시작 상태: 로컬 클론이 얕아(depth 50) 원격과 공통 조상이 없는 것처럼 보였습니다(세션 H 점검과 같은 자리). `git fetch --unshallow` 뒤 원격 `36a9e38`으로 맞췄고, 그 상태에서 `npm run check`(356개)가 초록임을 확인하고 시작했습니다. 이 환경에 Rust stable 1.94, WebKitGTK 2.52 개발 라이브러리, `WebKitWebDriver`, `Xvfb`, `tauri-driver` 2.0.6을 설치할 수 있어 러스트 워크스페이스와 Linux 데스크톱 E2E까지 실측했습니다.
 
@@ -1362,9 +1362,13 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 5. **원본 변경을 되물은 뒤 다시 저장하는 동안 저장 뮤텍스가 풀렸습니다**(`49904f7`). `saveNative`는 `catch` 안에서 `return saveNative(..., { force: true })`로 다시 저장했고, `return`이 `try`/`finally` 안이라 `finally`가 다시 저장이 **시작되자마자** 돌아 `state.saving`을 내렸습니다. 몇 GB 저장이 도는 내내 저장 중 표시가 꺼져 있고 자동 저장이 뮤텍스를 그냥 통과합니다(Worker의 `E_DB_BUSY`가 막지만 그건 마지막 방어선입니다). 저장 한 번(`saveNativeOnce`)과 되묻기·다시 저장(`saveNative`)을 나눴습니다. 저장 성공 알림 시점의 `state.saving`을 보는 검사를 넣었고, 고치기 전에는 거짓이었습니다.
 6. **엔진 프로토콜 토큰을 시각·pid에서 유도했습니다**(`be6d15a`). 토큰은 `random_suffix()` 두 번, 즉 `(나노초, 카운터, pid)`의 FNV-1a 해시였습니다. 시작 시각을 초 단위로만 알아도 후보가 10^9 남짓이고 두 조각이 독립도 아닙니다. 이 프로토콜은 `Backend::call` 전부로 이어지고 `sink_open`은 임의 경로에 씁니다. `RandomState`(프로세스마다 OS 난수로 seed)에서 만드는 `random_token()`을 따로 뒀습니다. 크레이트는 늘지 않습니다(D-12). 임시 파일 이름은 겹치지만 않으면 되므로 `random_suffix()` 그대로입니다.
 
+7. **Windows 체크아웃의 CRLF가 vendor 체크섬과 산출물 크기를 바꿨습니다**(`40e12be`). 1번을 고치자 Windows 잡이 더 진행해 `npm run verify`에서 `체크섬 불일치: vendor/sqlite3.mjs`로 죽었습니다. `.gitattributes`가 없어 텍스트 파일이 CRLF로 체크아웃되고, vendor 파일의 SHA-256이 `vendor/CHECKSUMS`와 어긋나며 CSS도 한 줄에 1바이트씩 늘어납니다(Windows 19.2 KB / Linux 18.1 KB). 작업 트리를 LF로 고정하되, 바이트가 곧 검사 대상인 `vendor/**`와 `test/fixtures/**`는 변환에서 뺐습니다 — `mixed-newlines.csv`의 CRLF/LF 혼재가 파서 검사의 입력이라 `eol=lf`를 걸면 그 검사가 무의미해집니다(CLAUDE.md 6장). `git add --renormalize .`이 아무것도 바꾸지 않으므로 저장소 안의 blob은 이미 전부 LF이고 이 파일은 Windows 체크아웃에만 영향을 줍니다.
+8. **Windows에서 모든 저장이 sync 단계에서 거부됐습니다**(`ecdbbac`, 7번을 고치자 드러남). `save_to`는 `VACUUM INTO`가 만든 임시 파일을 `fs::File::open`(읽기 전용)으로 열어 `sync_all`을 불렀습니다. Windows의 `FlushFileBuffers`는 핸들에 쓰기 권한을 요구하므로 ERROR_ACCESS_DENIED(5)로 실패하고 저장이 `E_FILE_PERMISSION`으로 끝납니다. Windows 러너에서 `cargo test -p jdr-core --test save`의 6개가 전부 이 오류로 죽었습니다(run 35687879010). `OpenOptions::new().write(true)`로 엽니다. Unix의 `fsync`는 읽기 전용 fd도 받으므로 이 회귀를 잡는 검사는 Windows CI 자체입니다. 데스크톱 저장 전체가 Windows에서 동작하지 않던 것이므로 세션 I 산출물의 가장 큰 결함이었습니다.
+
 **검사·문서**
 
 - `3cc0cde` 핫 WAL이 남은 dirty 사본을 기동 정리가 지우지 않는지 검사했습니다. 기존 검사는 `close(false)`로 비정상 종료를 흉내 냈지만 그것은 깨끗한 닫기라 WAL이 체크포인트됩니다. 커넥션을 닫지 않은 채 사본 폴더를 복사해(`-shm` 없이) 실제 크래시 상태를 만들었고, 현재 구현이 통과함을 확인해 검사로 붙잡아 뒀습니다(폴더가 쓰기 가능하면 읽기 전용 커넥션도 WAL을 복구합니다).
+- `failed_sink_close_keeps_the_existing_target`의 실패 주입은 열려 있는 임시 파일을 지우는 방식이라 `#[cfg(unix)]`로 묶었습니다(Windows는 공유 모드에 삭제가 없어 열린 파일을 지울 수 없습니다). 고친 쪽과 정상 경로 검사는 두 플랫폼이 같습니다.
 - `19fabd8` "다른 이름으로 저장"은 그 경로에 파일이 이미 있으면 `.bak`으로 옮긴 뒤 씁니다. DESIGN.md Step 11과 6장 표는 "검사·`.bak` 없이 새 파일"이라고 적혀 있었습니다. 코드 쪽이 옳아(rename 실패 때 되돌릴 것이 있어야 하고, 덮어쓰기를 고른 파일도 1세대는 남는 편이 D-04에 맞습니다) 문서를 코드에 맞췄습니다. 3.1절 `filesystem.js` 목록에 `listWorkcopies`·`removeWorkcopy`·`openPathSink`·`baseName`을, `save_to` 절차에 부모 폴더 동기화를 넣었습니다.
 
 **고치지 않고 남긴 것 (판단과 근거)**
@@ -1384,13 +1388,16 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - [x] `npm run test:native`: **26개** 통과(실제 rusqlite 엔진에 대한 Step 1 적합성 + 데스크톱 스토어 흐름).
 - [x] `npm run test:e2e`: 브라우저 **66개** 통과.
 - [x] CI `desktop` 잡 수정의 로컬 재현: WebKitGTK 2.52 개발 라이브러리를 설치한 뒤 `npm run build` 없이 돌린 `cargo clippy --workspace --all-targets`는 CI와 같은 프로크 매크로 패닉으로 죽고, `npm run build` 뒤에는 통과합니다.
+- [x] **CI 다섯 잡 전부 초록**(푸시 `ecdbbac`, run 35688664051·35688664082): `check-build-e2e`, `perf`, `desktop (ubuntu-latest)`, `desktop (macos-latest)`, `desktop (windows-latest)`. 세션 I가 남긴 "CI `desktop` 잡 첫 실행 미확인"이 이로써 해소됩니다.
+- [x] **세 OS의 러스트 검사·타우리 빌드·릴리스 번들**: 세 잡 모두 `cargo fmt --check`·`clippy -D warnings`·`cargo test --workspace`·`npm run test:native`·`tauri build --debug`·`tauri build`가 끝까지 돌았고 설치본이 나왔습니다 — macOS `jdrdatabase_0.1.0_aarch64.dmg`(업로드 3,498,989 bytes), Windows `jdrdatabase_0.1.0_x64_en-US.msi` + `jdrdatabase_0.1.0_x64-setup.exe`(업로드 6,941,302 bytes), Linux는 `.deb`·`.AppImage`·`.rpm`. 세션 I의 "CI에서의 `tauri build` 성공 여부와 번들 크기" 미확인도 해소됩니다.
+- [x] **CI Linux 데스크톱 E2E**: `desktop (ubuntu-latest, true)` 잡이 `cargo install tauri-driver` 뒤 `xvfb-run npm run test:desktop`까지 통과했습니다. 로컬 실측과 같은 결과입니다.
 - [x] `npm run test:desktop`(tauri-driver 2.0.6 + WebKitGTK 2.52 + Xvfb): **Linux 통과**. 상태바 "데스크톱 모드 · SQLite 3.53.2", Worker의 `SELECT 1`·FTS5 trigram, 다른 이름으로 저장(revision 1) → 편집 → 저장(`.bak`, revision 2) → 다시 열기 → `.bak` 복원 → 원본 변경 대화상자 취소까지 세션 I와 같은 시나리오가 그대로 통과합니다(이번 수정 5번이 닿는 경로입니다). `crossOriginIsolated=false`·`SharedArrayBuffer` 없음도 다시 확인됐습니다(D-15의 프로토콜 경로 전제).
 
 **미확인 (후속 세션에서 이어받음)**
 
-- **이 푸시의 CI `desktop` 잡 결과.** 1번은 로컬에서 같은 실패를 재현하고 고친 뒤 통과를 확인했지만, Windows·macOS 러너에서 `cargo test`·`tauri build`가 처음 끝까지 도는 것은 이 푸시가 처음입니다. 릴리스 번들(`npx tauri build`)의 성공 여부와 번들 크기도 아직 모릅니다.
+- ~~이 푸시의 CI `desktop` 잡 결과.~~ 위 검증 절에 적었습니다. 세 OS 전부 초록이고 설치본까지 나왔습니다.
 - 5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 세션 I에서 이어받아 그대로 남습니다(이 환경의 디스크·시간 예산으로 500만 행 픽스처를 만들지 못했습니다).
-- Windows(WebView2)·macOS(WKWebView)의 데스크톱 모드 전부: `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream. 데스크톱 E2E는 Linux만 돕니다.
+- **Windows(WebView2)·macOS(WKWebView)에서 앱이 실제로 도는 것**은 여전히 미확인입니다. 이번에 확인된 것은 러스트 쪽(`cargo test`가 저장·사본·싱크를 세 OS에서 검증)과 빌드·번들까지이고, WebView 안에서 도는 부분 — `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream — 은 데스크톱 E2E가 Linux에서만 돌기 때문에 확인되지 않습니다. 8번(Windows의 `sync_all`)이 러스트 단위 테스트에서만 드러난 것처럼, WebView 쪽에도 같은 종류의 플랫폼 차이가 남아 있을 수 있습니다. Windows E2E는 Microsoft Edge Driver로 붙일 수 있으므로 후속 세션에서 `desktop` 잡의 `e2e` 행렬 값을 Windows에도 켜는 것을 제안합니다.
 - 실제 파일 대화상자(`pick_open`·`pick_save`)의 WebView 실측. E2E는 `__jdrTest.setPickedPath`로 경로를 넣습니다.
 - 위 "고치지 않고 남긴 것"의 다섯 항목(열기·저장 진행률, 남은 dirty 사본 접근, 외부 파일의 핫 WAL, `run()`의 `expect`, `writeSync` 예외)은 판단이 필요한 채로 남습니다.
 - 세션 I와 세션 H 점검이 남긴 항목(실제 브라우저의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등)은 그대로 남습니다.
