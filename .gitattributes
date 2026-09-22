@@ -1,0 +1,19 @@
+# 산출물이 바이트 단위로 재현돼야 하고(`verify.mjs`가 vendor 체크섬을 본다) 파서 픽스처는 줄 끝 자체가
+# 검사 대상이므로, 줄 끝은 플랫폼과 무관하게 고정한다.
+
+# 작업 트리의 텍스트 파일은 어디서나 LF. Windows 체크아웃이 CRLF로 바뀌면 CSS 한 줄마다 1바이트가 늘어
+# 산출물 크기가 플랫폼마다 달라진다.
+* text=auto eol=lf
+
+# 서드파티 고정 버전. 한 바이트라도 바뀌면 `vendor/CHECKSUMS`의 SHA-256과 어긋난다(CLAUDE.md 5.8).
+vendor/** -text
+
+# 바이트 픽스처. `mixed-newlines.csv`는 CRLF/LF 혼재 자체가 검사 대상이고, `.xlsx`·`.db`는 이진이다
+# (CLAUDE.md 6장).
+test/fixtures/** -text
+
+# 이진 자산.
+*.png binary
+*.ico binary
+*.icns binary
+*.wasm binary

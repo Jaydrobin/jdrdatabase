@@ -69,6 +69,11 @@ fn sink_writes_chunks_and_replaces_target_on_close() {
 
 /// 교체가 실패해도 이미 있던 파일은 살아 있어야 한다(`save.rs`의 `.bak` 원복과 같은 약속).
 /// 대상을 먼저 지우고 rename하면, 그 사이에 실패했을 때 내보낸 파일도 원래 파일도 없다.
+///
+/// 실패 주입이 "열려 있는 임시 파일 지우기"라 Unix에서만 돈다. Windows는 공유 모드에 삭제가 없어
+/// 열린 파일을 지울 수 없다. 고친 쪽(`remove_file` 없이 rename 하나로 교체)은 두 플랫폼이 같고,
+/// 정상 경로는 위 검사가 두 플랫폼에서 덮는다.
+#[cfg(unix)]
 #[test]
 fn failed_sink_close_keeps_the_existing_target() {
     let tmp = TempDir::new("sink 교체 실패");
