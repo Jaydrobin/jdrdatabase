@@ -8,7 +8,71 @@ on:
     branches: [main]
   pull_request:
 
+# 같은 ref에 새 푸시가 오면 PR 실행만 취소해 러너 시간을 아낀다. `main` 푸시 실행은 릴리스·기준선의
+# 근거로 남아야 하므로 취소하지 않는다(cancel-in-progress를 pull_request에서만 true로 둔다).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # 문서만 바뀐 푸시에서 무거운 잡을 건너뛴다. `paths-ignore`로 워크플로 자체를 막으면 필수 체크가
+  # 영영 pending으로 남아 병합이 막히므로, 워크플로는 늘 돌리고 잡 수준 `if`로 건너뛴다(건너뛴 잡은
+  # skipped로 보고되어 필수 체크를 만족한다). 서드파티 액션을 쓰지 않고 git diff로만 판정한다.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect non-docs changes
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          have() { [ -n "$1" ] && [ "$1" != '0000000000000000000000000000000000000000' ] && git cat-file -e "$1^{commit}" 2>/dev/null; }
+          files=''
+          known=0
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            # v1 구현은 PR 하나를 세션마다 이어 푸시하므로(CLAUDE.md 8장) PR 전체 diff에는 늘 코드가
+            # 들어 있다. 판정 대상은 "이번 푸시"여야 하므로 synchronize의 before..after를 먼저 본다.
+            if have "$BEFORE_SHA" && have "$AFTER_SHA"; then
+              files="$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA")"
+              known=1
+            # PR을 연 첫 실행에는 before가 없고, force-push 뒤에는 before가 사라진다. 둘 다 PR 전체를 본다.
+            elif have "$BASE_SHA" && have "$HEAD_SHA"; then
+              files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+              known=1
+            fi
+          elif have "$BEFORE_SHA" && have "$GITHUB_SHA"; then
+            files="$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")"
+            known=1
+          fi
+          # 범위를 정할 수 없으면(첫 푸시, force-push로 사라진 before 등) 건너뛰지 않는다.
+          if [ "$known" = '0' ]; then
+            echo 'diff range unknown -> run everything'
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo '--- changed files ---'
+          printf '%s\n' "$files"
+          # docs/** 와 README.md 만 남으면 문서 전용. 빈 줄도 같이 지운다.
+          rest="$(printf '%s\n' "$files" | grep -Ev '^(docs/.*|README\.md)?$' || true)"
+          if [ -n "$rest" ]; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            echo 'non-docs changes found -> run everything'
+          else
+            echo 'code=false' >> "$GITHUB_OUTPUT"
+            echo 'docs-only change -> heavy jobs skipped'
+          fi
+
   check-build-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -63,6 +127,8 @@ jobs:
   # test/perf/perf-baseline.json(같은 러너의 기준선) 대비 30% 회귀를 실패로 본다(CLAUDE.md 6장).
   # 요약 JSON은 로그와 아티팩트(test-results/perf/summary.json)에 남는다. 기준선 갱신은 그 값을 옮겨 적는다.
   perf:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
