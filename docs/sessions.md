@@ -32,7 +32,7 @@ grep -n 미확인 docs/sessions.md
 | G 점검 | 세션 G 산출물 코드 점검과 수정 | 완료 |
 | H | 10 (성능·하드닝·접근성) | 완료 |
 | H 점검 | 세션 H 산출물 코드 점검과 수정 | 완료 |
-| I | 11 (타우리 셸·네이티브 엔진) | 대기 |
+| I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
 
 ## 기록
 
@@ -1286,3 +1286,58 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
   지금까지 관찰된 "코드 변경 없는 빨강"의 원인은 기계 속도(3번)와 표본 하나짜리 바깥값(5번) 두 가지뿐이고, 남은 시간 항목들은 세 실행 모두 보정된 기준 안이었습니다. 다음 세션들의 푸시에서 또 코드 변경 없이 빨강이 나오면 같은 식으로 그 항목의 잡음 원인을 적고 측정 방식을 고치는 것이지 기준선을 올리는 것이 아닙니다.
 - 2번의 파이어폭스 실측은 여전히 불가합니다(Playwright 브라우저 다운로드 403). 크로미움에서 합성 `WheelEvent`로만 확인했습니다.
 - 세션 H의 미확인 목록(실제 브라우저에서의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등 세션 G 점검·F 점검·E 점검·D 점검에서 이어진 항목)은 그대로 남습니다.
+
+### 세션 I (Step 11) — 2026-09-21
+
+커밋: `145c738` docs(design) 착수 전 확정 → `6b1f19a` feat(native) 러스트 코어 → `a68ee57` feat(native) JS 엔진·브리지·db.save·test:native → `e962954` feat(app) 데스크톱 열기·저장·복구·백업·내보내기 → feat(desktop) 타우리 앱 크레이트·엔진 프로토콜·데스크톱 E2E·CI·문서(이 기록 포함).
+
+시작 상태: 원격이 강제 갱신되어 있어 로컬 브랜치를 원격 `91a2858`로 맞춘 뒤 `npm run check`(349개)가 초록임을 확인하고 시작했습니다. 이 실행 환경에는 Rust stable(1.94), WebKitGTK 2.52 개발 라이브러리, `WebKitWebDriver`, `Xvfb`, `tauri-driver`를 설치할 수 있어 러스트 워크스페이스 전체 빌드와 Linux 데스크톱 E2E까지 실측했습니다. 세션 H 점검의 미확인 항목은 아래 "미확인"에 이어받았습니다.
+
+**설계 변경 (코드보다 먼저 DESIGN.md v0.11에 반영, 리뷰어 확인 필요)**
+
+- **네이티브 엔진의 동기 호출.** 엔진 인터페이스의 `exec`·`run`은 동기이고 `query.js`·`tables.js`·`schema.js`가 반환값을 바로 쓰므로, Worker의 네이티브 구현은 러스트 호출을 동기적으로 기다려야 합니다. 착수 전 확정은 `SharedArrayBuffer`+`Atomics.wait`로 메인의 브리지를 기다리는 중계(COOP/COEP 헤더 전제)였는데, **실측 결과 WebKitGTK는 `app.security.headers`로 COOP/COEP를 내도 `tauri://localhost` 문서가 `crossOriginIsolated`가 아니고 `SharedArrayBuffer`가 없었습니다**(tauri-driver 세션에서 `E_NATIVE_IPC` 잠금 화면 확인). 그래서 앱이 `jdr` 커스텀 프로토콜(`register_asynchronous_uri_scheme_protocol`)을 등록하고 Worker가 `jdr://localhost/call`에 **동기 XHR**(`exec`·`run`)과 fetch(그 밖)로 직접 요청하는 경로를 기본으로 바꿨습니다(타우리 자체 IPC가 `ipc://` 프로토콜에 fetch하는 것과 같은 방식. text/plain 본문이라 CORS 사전 요청이 없고, 토큰은 프로세스마다 새로 만들어 질의 문자열로 보냅니다). 공유 버퍼 중계는 폴백이자 Node 테스트 경로로 남겼습니다(D-15, 3.2 그림, Step 11 주요 함수).
+- **러스트 크레이트 둘(D-12).** `src-tauri/core`(`jdr-core`)는 타우리에 의존하지 않아 WebView·GTK 없이 `cargo test`가 돌고, 표준 입출력 하네스 `jdr-ipc-stdio`로 같은 명령을 노출해 Node의 `npm run test:native`가 실제 rusqlite 엔진에 대해 Step 1 적합성 테스트를 돌립니다. fs 플러그인은 쓰지 않고(바이트 이동은 러스트 `std::fs`), 대화상자는 러스트 명령 `pick_open`·`pick_save`가 dialog 플러그인을 감쌉니다. `@tauri-apps/api`는 런타임 의존이라 쓰지 않고 `window.__TAURI_INTERNALS__`를 직접 부릅니다.
+- **작업 사본 dirty 판정(D-15).** 사본 키는 `db_id`(메타 없는 파일은 경로 해시), 쓰기 op 뒤 Worker가 `_jdr_meta.dirty = 1`, `db.save` 성공 뒤 0. 남은 dirty 사본은 다시 열 때 revision 비교로 복구/버리기를 묻고, 재사용한 사본은 사본을 만들 때의 원본 상태와 비교해 그 사이 바뀐 원본을 덮어쓰지 않습니다(`E_ORIGINAL_CHANGED`). 새 DB를 "다른 이름으로 저장"한 사본은 `new-*` 폴더에 남으므로 원본 경로(`meta.json`)로도 찾습니다. 실패한 `db.save`는 올린 revision·saved_at·saved_by를 되돌립니다(그대로 두면 사본 revision이 파일보다 앞서 복구 판정이 어긋납니다. 실제 엔진 테스트가 드러냄).
+- 6장: `db.open`의 native 인자(`originalPath`·`discardWorkcopy`·`workcopyKey`)와 `workcopy` 결과, `db.save`의 인자·결과, `db.close`의 `discardWorkcopy`, `engine.init`의 `native`. 3.1: `src-tauri/`(앱: `commands.rs`·`protocol.rs`, 코어: `db.rs`·`save.rs`·`sink.rs`·`workcopy.rs`·`error.rs`·`value.rs`·`bin/jdr-ipc-stdio.rs`), `test/native/`, `test/desktop/`, `docs/desktop.md`, `.github/workflows/desktop.yml`. CLAUDE.md: `test:native`·`test:desktop`·`cargo test --workspace` 명령, 디렉터리·의존성·테스트 규약, Worker 쪽 러스트 호출 위치.
+
+**Step 11 완료 기준**
+
+- [x] `cargo test`(코어 19개 + 앱 크레이트 컴파일): `PRAGMA compile_options`에 `ENABLE_FTS5`(rusqlite 0.40 `bundled`, SQLite 3.53.2), 저장 원자성(`VACUUM INTO` 실패 주입: 없는 폴더 아래 임시 경로 → 원본·`.bak` 바이트 동일, 임시 파일 없음 / rename 실패 주입 → 원본을 `.bak`에서 원복하고 임시 파일 경로를 detail로), `run_batch` 원자성(1만 행 중 5,001번째 실패 → 0행, 바깥 트랜잭션 안에서는 SAVEPOINT), 다른 스레드의 `interrupt`로 20억 행 재귀 질의 중단(`E_IMPORT_CANCELLED`, 200 ms 뒤 호출 → 즉시 종료, 커넥션 재사용 가능), 한글·공백 경로 왕복(`한글 폴더/데이터 베이스 (1).db`, 저장 → `.bak` → 복원 → 다시 열기). 그 밖에 원본 변경 감지·`force`, 다른 이름으로 저장, dirty 사본 복구·버리기·경로로 찾기·원본 상태 비교, 새 DB 임시 사본 목록·정리·키로 열기, 비SQLite·손상·외부 파일, 경로 싱크, JSON 값·base64. `cargo fmt --check`·`cargo clippy --workspace --all-targets -- -D warnings` 0건.
+- [x] Step 1 엔진 적합성 테스트를 네이티브 엔진에 대해 통과: `npm run test:native` **26개**(적합성 19 + 큰 응답 버퍼 재수신 1 + 사본 저장 왕복 1 + 데스크톱 스토어 흐름 5). `engine-contract.js`를 wasm과 공유하며(`engine-contract.test.js`는 wasm만 부른다), worker_threads 스레드의 브리지(`io/ipc-bridge.js`)가 `jdr-ipc-stdio` 프로세스를 잇고 메인 스레드의 엔진이 `Atomics.wait`로 기다립니다. tauri-driver 환경에서는 아래 E2E가 Worker 안의 같은 엔진으로 `SELECT 1`·FTS5 trigram 한글 부분 일치를 확인했습니다.
+- [x] 데스크톱 E2E(tauri-driver): **Linux(WebKitGTK 2.52, Xvfb)에서 통과.** `test/desktop/run.mjs`가 테스트 변형(`dist/test/tauri/index.html`)을 담은 디버그 바이너리를 만들고 WebDriver 프로토콜을 fetch로 직접 말합니다. 검사: 상태바 "데스크톱 모드 · SQLite 3.53.2", IndexedDB·BroadcastChannel 사용 가능, Worker 전송, `SELECT 1`, FTS5, 새 테이블 → 훅으로 경로 주입 → 다른 이름으로 저장(revision 1) → 편집 → 저장(`.bak`, revision 2) → 새로 만들기 → 다시 열기(2행) → `.bak` 복원 → 원본 변경 감지 대화상자에서 "취소"(파일 그대로). 파일 대화상자는 `__jdrTest.setPickedPath`로 대신합니다. **Windows는 미확인**(CI `desktop` 잡은 세 OS에서 빌드까지만, E2E는 Linux만).
+- [ ] **5 GB 픽스처 성능(미확인).** 열기 2초·창 질의 50 ms·저장 1.5배는 재지 않았습니다. 이 환경의 디스크 예산과 시간으로 500만 행 픽스처(약 5 GB)를 만들 수 없었고, 데스크톱 성능 spec(`test/perf`의 데스크톱 판)도 이번 세션에 넣지 않았습니다. 후속 세션(I-2)에서 `gen-fixture.mjs --rows 5000000 --db`로 만든 파일을 `test:desktop`에 넣어 8장 데스크톱 표를 채워야 합니다.
+- [x] `verify.mjs`가 브라우저·타우리 산출물이 CSP 태그 외 동일함을 확인: `verify OK`(두 변형 192바이트 차이 = CSP 메타 줄).
+- [x] `docs/desktop.md`: 브라우저 모드와의 차이(상한·열기·저장·백업·미저장 변경), 작업 사본 위치(OS별 앱 데이터 폴더, WAL 부속 파일), 저장 절차와 `.bak`, 클라우드 폴더 사용, 미저장 변경 복구, 빌드·검사 명령, 구조.
+
+**검증 결과**
+
+- [x] `npm run check`: eslint 0건, prettier 통과, tsc 0오류, 단위 테스트 **356개**(세션 H 점검 349 + 브리지·전송 형식 6 + `db.save` wasm 거부 1, `selectEngine('native')` 검사 갱신).
+- [x] `npm run build && npm run verify`: `verify OK`, 외부 참조 0건(허용 vendor URL 리터럴 160건), vendor 체크섬 6개 일치.
+- [x] `npm run test:e2e`: Chromium `file://`에서 **66개 통과**(브라우저 모드 회귀 없음. 세션 H 점검 65 + a11y 1은 세션 H 점검 이후의 값).
+- [x] `npm run test:native`: 26개 통과(실제 rusqlite 엔진).
+- [x] `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`: 19개 통과(앱 크레이트는 테스트 0개, 컴파일·클리피 통과).
+- [x] `npm run test:desktop`(Linux, Xvfb): 통과(위 완료 기준).
+- [x] 7.1 grep은 `conventions.test.js`가 대신합니다(0건. 모드 문자열 허용 위치에 `engine-native.js` 포함, `db.save`가 6장 표와 OpMap 양쪽에 있음). 새 오류 코드 없음(`E_NATIVE_IPC`·`E_DISK_FULL`·`E_FILE_LOCKED`·`E_ORIGINAL_CHANGED`는 이미 있었음). i18n 키 17개 추가(`status.mode.native`, `lock.nativeIpc`, `confirm.originalChanged.*`, `confirm.workcopy.*`, `file.workcopyPendingFor`, `file.workcopyMismatch`, `file.savedBackup`), ko/en 동일.
+- [x] `DESIGN.md` v0.11 갱신이 `145c738`(착수 전)과 마지막 커밋(실측 뒤 전송 경로 변경)에 포함. `CLAUDE.md` 3·4·5.8·6·7.1장 갱신.
+
+**산출물 크기 (`verify` 출력)**
+
+- `dist/jdrdatabase.html` 3,775,531 bytes (3.60 MiB / 예산 6 MiB). 세션 H 점검(3,744,207) 대비 **+31,324 bytes**(네이티브 엔진·엔진 프로토콜 호출자·브리지·데스크톱 저장 경로·문구).
+- `dist/tauri/index.html` 3,775,339 bytes.
+- 데스크톱 디버그 바이너리(Linux, 테스트 변형 포함) 244 MB. 릴리스 번들 크기는 CI에서 확인.
+
+**점검했지만 고치지 않은 것 (판단 근거와 함께)**
+
+- **데스크톱 모드의 대화상자는 러스트가 엽니다.** JS는 `pick_open`·`pick_save` 앱 명령만 부르므로 dialog 플러그인의 JS 권한(`dialog:default`)을 capabilities에 주지 않았습니다. 앱 명령은 타우리 2에서 별도 권한 없이 허용됩니다.
+- **`app.security.headers`의 COOP/COEP는 남겨 두었습니다.** WebKitGTK에서는 효과가 없었지만 WebView2 등 다른 WebView에서 폴백 경로(공유 버퍼 중계)를 열어 줄 수 있고, 헤더가 있어도 프로토콜 경로가 먼저입니다.
+- **`engine.exec`(진단·테스트 전용)는 사본을 dirty로 만들지 않습니다.** 검사 질의가 dirty 표식을 올리면 다음 실행에서 복구를 잘못 제안했습니다(실제 엔진 테스트가 드러냄).
+- **긴 `exec`(수백만 행 `count(*)`) 도중 취소는 없습니다.** Worker가 동기 XHR로 멈춰 있어 취소 메시지를 받을 수 없고, wasm 모드도 문장 도중 취소는 없습니다(D-15). 러스트 `interrupt` 명령은 있으므로 메인이 직접 부르는 취소는 후속에서 붙일 수 있습니다.
+- **네이티브 모드는 `PRAGMA integrity_check`를 열 때 돌리지 않습니다.** 5 GB 파일에서 분 단위가 걸리고 8장의 "열기 2초"를 지킬 수 없습니다. 헤더와 `sqlite_master` 읽기로 SQLite 파일임은 확인하고, 손상은 첫 읽기에서 `E_FILE_CORRUPT`·`E_DB_QUERY`로 드러납니다.
+
+**미확인 (후속 세션에서 이어받음)**
+
+- 5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 위 완료 기준 참고.
+- Windows(WebView2)·macOS(WKWebView)에서의 데스크톱 모드 전부: `http://jdr.localhost/call` 형태의 프로토콜에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream. CI `desktop` 잡(세 OS)의 첫 실행 결과도 미확인입니다(이 푸시가 첫 실행).
+- 실제 파일 대화상자(`pick_open`·`pick_save`)와 내보내기 경로 싱크(`sink_write`)의 WebView 실측(E2E는 훅으로 경로를 넣고, 싱크는 Node `test:native`의 JSON 경로로만 검사).
+- CI에서의 `tauri build`(릴리스 번들) 성공 여부와 번들 크기.
+- 세션 H 점검이 남긴 항목(실제 브라우저의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등)은 그대로 남습니다.
