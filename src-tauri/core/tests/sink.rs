@@ -66,3 +66,34 @@ fn sink_writes_chunks_and_replaces_target_on_close() {
         Code::FileWrite
     );
 }
+
+/// 교체가 실패해도 이미 있던 파일은 살아 있어야 한다(`save.rs`의 `.bak` 원복과 같은 약속).
+/// 대상을 먼저 지우고 rename하면, 그 사이에 실패했을 때 내보낸 파일도 원래 파일도 없다.
+#[test]
+fn failed_sink_close_keeps_the_existing_target() {
+    let tmp = TempDir::new("sink 교체 실패");
+    let b = Backend::new(tmp.join("app"));
+    let target = tmp.join("기존.csv");
+    std::fs::write(&target, "소중한 기존 내용".as_bytes()).unwrap();
+    let id = ok(&b, "sink_open", json!({ "path": target.to_string_lossy() }))
+        .as_u64()
+        .unwrap();
+    ok(&b, "sink_write", json!({ "id": id, "bytes": "새 내용" }));
+
+    // 교체 실패를 주입한다: 임시 파일을 미리 치운다(잠금·권한·동기화 클라이언트가 rename을 막는 경우를 대신한다).
+    let leftover = std::fs::read_dir(&tmp.path)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().contains(".tmp-"))
+        .expect("임시 파일");
+    std::fs::remove_file(&leftover).unwrap();
+
+    let err = call(&b, "sink_close", json!({ "id": id })).unwrap_err();
+    assert_eq!(err.code, Code::FileWrite);
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        "소중한 기존 내용".as_bytes(),
+        "교체가 실패하면 이미 있던 파일은 그대로여야 한다"
+    );
+}

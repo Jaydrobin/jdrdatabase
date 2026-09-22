@@ -94,7 +94,8 @@ impl Backend {
         }
     }
 
-    /// 동기화한 뒤 임시 파일을 대상 자리에 놓는다. 대상이 있으면 덮어쓴다.
+    /// 동기화한 뒤 임시 파일을 대상 자리에 원자적으로 놓는다. 대상이 있으면 그 자리에서 갈아 끼우며,
+    /// 실패하면 대상은 이전 내용 그대로 남는다.
     pub fn sink_close(&self, id: u64) -> Result<SinkInfo> {
         let sink = self
             .lock_sinks()
@@ -106,10 +107,9 @@ impl Backend {
                 .sync_all()
                 .map_err(|e| AppError::from_io(e, "sync", Some(&sink.tmp)))?;
             drop(sink.file);
-            if sink.target.exists() {
-                fs::remove_file(&sink.target)
-                    .map_err(|e| AppError::from_io(e, "replace target", Some(&sink.target)))?;
-            }
+            // rename은 대상이 있어도 한 번에 갈아 끼운다(Unix `rename(2)`, Windows `MoveFileEx` +
+            // `MOVEFILE_REPLACE_EXISTING`). 대상을 먼저 지우면 그 뒤 rename이 실패했을 때
+            // 내보낸 파일도 원래 파일도 없다(`save.rs`가 `.bak`을 되돌려 놓는 것과 같은 약속).
             fs::rename(&sink.tmp, &sink.target)
                 .map_err(|e| AppError::from_io(e, "move temp to target", Some(&sink.target)))
         })();
