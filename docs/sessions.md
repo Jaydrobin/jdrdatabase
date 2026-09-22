@@ -35,7 +35,7 @@ grep -n 미확인 docs/sessions.md
 | I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
 | I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI 다섯 잡 초록. Windows·macOS WebView 실측은 미확인) |
 | J | 누적 미수정 항목 정리(세션 A~I의 "점검했지만 고치지 않은 것" 12건) | 완료(CI 다섯 잡 초록) |
-| K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(문서 전용 푸시의 skipped 실측은 후속 커밋에 기록) |
+| K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(코드 푸시·문서 전용 푸시 양쪽 실측. concurrency 취소 동작과 main 푸시 경로는 미확인) |
 
 ## 기록
 
@@ -1500,7 +1500,9 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
 **미확인 (후속에서 이어받음)**
 
-- **문서 전용 커밋에서 `perf`·`desktop`이 skipped로 보고되는지는 이 커밋이 그 실측입니다.** 이 커밋은 `docs/sessions.md`만 바꾸므로 `changes`가 `code=false`를 내고 두 잡이 skipped여야 합니다. 결과는 다음 커밋에 적습니다.
+- ~~문서 전용 커밋에서 `perf`·`desktop`이 skipped로 보고되는지는 이 커밋이 그 실측입니다.~~ **확인됐습니다**(푸시 `a067bd9`, `docs/sessions.md` 한 파일). `changes`가 바뀐 파일로 `docs/sessions.md`만 찍고 `code=false`를 냈고, `ci` run 35721772843의 **`perf`가 skipped**, `desktop` run 35721772867의 **`desktop`이 skipped**입니다. 두 run의 결론은 그대로 **success**라 required check가 pending으로 남지 않습니다. `check-build-e2e`는 조건 없이 돌아 통과했습니다.
+
+  아낀 시간: `desktop` run이 **8분 35초 → 8초**(세 OS 러스트 빌드·타우리 번들·데스크톱 E2E가 통째로 빠짐), `ci` run은 `perf`(3.1분, 별도 러너)가 빠지고 `check-build-e2e`만 남아 3분 56초입니다. `changes` 잡 자체의 비용은 잡당 5~8초입니다.
 - **`concurrency`의 실제 취소 동작은 미확인입니다.** 설정이 붙은 것과 group 값은 확인했지만, "PR 실행 중에 새 푸시가 오면 앞 실행이 cancelled 된다"와 "`main` 푸시 실행은 취소되지 않는다"를 실제로 보려면 앞 실행이 도는 중에 겹쳐 푸시해야 합니다. CI 소모를 줄이려는 세션에서 그것만을 위해 겹쳐 푸시하지 않았습니다. 다음 세션이 자연스럽게 연속 푸시를 하면 그때 확인됩니다.
 - **`push`(main) 경로는 미확인입니다.** 이 브랜치의 실행은 전부 `pull_request` 이벤트라, `github.event.before`를 쓰는 갈래와 `cancel-in-progress: false`는 병합 때 처음 돕니다. 로컬에서 같은 입력으로 스크립트를 돌려 본 것까지입니다.
 - 세션 J와 그 앞 세션들의 미확인 목록(SheetJS 0.20.3 갱신, Windows·macOS WebView 실측, 5 GB 픽스처 데스크톱 성능, 실제 한글 IME·스크린 리더, Firefox·Safari 등)은 이 세션이 줄이지 못했고 그대로 남습니다.
