@@ -281,12 +281,31 @@ fn copy_original(
     result
 }
 
-fn remove_sidecars(db_path: &Path) {
-    for suffix in ["-wal", "-shm", "-journal"] {
-        let mut name = db_path.as_os_str().to_owned();
-        name.push(suffix);
-        let _ = fs::remove_file(PathBuf::from(name));
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// 원본 옆의 부속 파일을 사본 옆으로 함께 가져온다.
+///
+/// 다른 프로그램이 체크포인트 없이 죽으면 마지막 커밋들이 본체가 아니라 `-wal`에 있고, 저널 모드로
+/// 쓰다 죽었으면 `-journal`에 되돌릴 내용이 있다. 본체만 복사하면 그 커밋이 보이지 않고, 그대로
+/// 저장하면 원본에서도 사라진다. 부속 파일을 함께 두면 SQLite가 열 때 복구한다.
+///
+/// `-shm`은 공유 메모리 색인일 뿐이라 가져오지 않는다. SQLite가 `-wal`을 보고 다시 만든다.
+fn copy_sidecars(original: &Path, target: &Path) -> Result<()> {
+    for suffix in ["-wal", "-journal"] {
+        let from = with_suffix(original, suffix);
+        if !from.is_file() {
+            continue;
+        }
+        let to = with_suffix(target, suffix);
+        fs::copy(&from, &to).map_err(|e| AppError::from_io(e, "copy: sidecar", Some(&from)))?;
     }
+    // 앞선 사본이 남긴 `-shm`이 있으면 지운다(폴더는 `prepare`가 새로 만들지만 값싼 방어다).
+    let _ = fs::remove_file(with_suffix(target, "-shm"));
+    Ok(())
 }
 
 /// 사본 폴더에 dirty 사본이 있으면 그 revision과 함께 돌려준다.
@@ -389,7 +408,7 @@ pub fn prepare(
         .map_err(|e| AppError::from_io(e, "create workcopy dir", Some(&dir)))?;
     let started = std::time::Instant::now();
     copy_original(original, &db_path, info.size, progress)?;
-    remove_sidecars(&db_path);
+    copy_sidecars(original, &db_path)?;
     let meta = WorkcopyMeta {
         original_path: Some(original.to_string_lossy().into_owned()),
         original_mtime: Some(info.mtime),

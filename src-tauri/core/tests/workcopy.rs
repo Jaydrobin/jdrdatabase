@@ -367,3 +367,43 @@ fn random_token_is_not_derived_from_time_and_pid() {
     // 시각·pid만으로 만들면 같은 밀리초 안에서 접미사 두 개가 같은 값으로 겹칠 수 있다.
     assert_ne!(a[..16], a[16..], "두 조각이 같은 seed에서 나오면 안 된다");
 }
+
+/// 다른 프로그램이 체크포인트하지 않은 WAL을 남긴 파일을 열면, WAL에만 있는 커밋도 보여야 한다.
+/// 본체만 복사하면 그 커밋이 사라지고, 그대로 저장하면 원본에서도 없어진다.
+#[test]
+fn hot_wal_of_an_external_file_is_copied_into_the_workcopy() {
+    let tmp = TempDir::new("외부 핫 WAL");
+    let original = tmp.join("다른 도구.db");
+    let app = tmp.join("app");
+
+    // 다른 프로그램이 WAL 모드로 쓰다가 체크포인트 없이 죽은 상태를 만든다.
+    {
+        let conn = rusqlite::Connection::open(&original).expect("open");
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT);
+             INSERT INTO t (s) VALUES ('본체에 있는 행');",
+        )
+        .expect("schema");
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .expect("checkpoint");
+        // 여기부터의 커밋은 WAL에만 있다.
+        conn.execute_batch("INSERT INTO t (s) VALUES ('WAL에만 있는 행');")
+            .expect("wal insert");
+        std::mem::forget(conn); // 닫지 않는다(닫으면 체크포인트된다).
+    }
+    let wal = std::path::PathBuf::from(format!("{}-wal", original.to_string_lossy()));
+    assert!(
+        wal.is_file(),
+        "이 검사는 체크포인트되지 않은 WAL이 있어야 뜻이 있다"
+    );
+
+    let b = Backend::new(&app);
+    open_original(&b, &original);
+    assert_eq!(
+        b.exec("SELECT count(*) FROM t", None).unwrap().rows,
+        vec![vec![SqlValue::Integer(2)]],
+        "WAL에만 있던 커밋도 사본에 와야 한다",
+    );
+    b.close(true).unwrap();
+}
