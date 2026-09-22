@@ -2,7 +2,7 @@
 
 `DESIGN.md` 5.0의 세션 묶음(A~I)과 그 사이의 점검 세션이 무엇을 검증했고 무엇을 검증하지 못했는지를 쌓는 파일이다. 세션을 끝낼 때마다 절을 하나 더하고, 그 절에 해당 Step의 "완료 기준"을 항목별로 옮겨 적어 각각 어떻게 확인했는지 적는다. 확인하지 못한 것은 **미확인**으로 표시한다(`CLAUDE.md` 7.1·7.3·9장).
 
-다음 세션은 이 파일의 마지막 절에서 "미확인" 항목을 이어받는다. 병합 전에는 모든 절의 미확인 항목이 해소됐는지 확인한다.
+다음 세션은 이 파일에 쌓인 "미확인" 항목을 이어받는다. 항목은 세션 D부터 누적으로 이월되므로 마지막 절만 읽으면 앞 세션 것이 빠진다. 통독하는 대신 아래 grep으로 줄 번호를 모아 필요한 줄의 앞뒤 맥락만 읽는다. 병합 전에는 모든 절의 미확인 항목이 해소됐는지 확인한다.
 
 ```
 grep -n 미확인 docs/sessions.md
@@ -35,6 +35,7 @@ grep -n 미확인 docs/sessions.md
 | I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
 | I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI 다섯 잡 초록. Windows·macOS WebView 실측은 미확인) |
 | J | 누적 미수정 항목 정리(세션 A~I의 "점검했지만 고치지 않은 것" 12건) | 완료(CI 다섯 잡 초록) |
+| K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(문서 전용 푸시의 skipped 실측은 후속 커밋에 기록) |
 
 ## 기록
 
@@ -1464,3 +1465,42 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - **SheetJS 0.20.3**(위 조건부 항목). 프록시가 `cdn.sheetjs.com`을 열어야 가능합니다.
 - 5 GB 픽스처의 데스크톱 성능 예산, Windows·macOS의 WebView 실측, 그리고 세션 I 점검이 남긴 나머지 항목은 그대로입니다.
 - **이 세션이 손대지 않은 "점검했지만 고치지 않은 것"**: 사용자와 합의한 대로 받아들인 트레이드오프(고정 열 뒤 스크롤, `selectAll`의 활성 셀, `clearRange` 그룹 수, 내보내기 역압, `export.stream` 배타, 자동 저장 실패 토스트, 읽기 전용에서도 내보내기, `engine.exec` 비배타, 네이티브 `integrity_check` 생략, `NULLS LAST`의 빈 문자열, `views.list` 실패 삼킴, `restoreBackup`의 빈 `db_id`, 오버레이가 스크롤 막대를 덮음, `run()`의 `expect`, `writeSync` 예외, 평문 `.xlsx`, UTF-16 추정, `decodeHead`의 죽은 `try/catch`, XLSX 날짜 로컬 시각, `plan()`의 늦은 이름 검사, 머리글 정렬의 마우스 전용)는 각 세션 절에 근거와 함께 그대로 남아 있습니다.
+
+### 세션 K (CI 유지보수) — 2026-09-22
+
+커밋: `33314ce` ci(workflows) → `d2b3b1a` docs(claude) → 이 커밋 docs(session).
+
+시작 상태: 로컬 클론이 얕아(depth 50) 원격 브랜치보다 **144 커밋 뒤처져** 있었고, 얕은 히스토리 탓에 원격과 갈라진 것처럼 보였습니다. `git fetch --unshallow` 뒤 원격 `a73eaa4`로 fast-forward 했습니다(force-push 없음). 그 상태에서 `npm run check`(362개)가 초록임을 확인하고 시작했습니다. 이 세션은 `DESIGN.md` 5.0의 Step을 구현하지 않고, CI 소모와 불필요한 빨강을 줄이는 유지보수만 합니다.
+
+**한 일**
+
+1. **`concurrency`를 두 워크플로에 추가했습니다**(`33314ce`). group은 `${{ github.workflow }}-${{ github.ref }}`, `cancel-in-progress`는 `${{ github.event_name == 'pull_request' }}`입니다. 세션마다 이어 푸시하는 브랜치라 앞 실행이 끝까지 도는 동안 새 실행이 또 시작돼 러너 시간을 두 번 썼습니다. `main` 푸시 실행은 릴리스와 perf 기준선의 근거로 남아야 하므로 취소 대상에서 뺐습니다.
+
+2. **`changes` 잡을 앞세워 문서 전용 푸시에서 `perf`·`desktop`을 건너뜁니다**(`33314ce`). `paths-ignore`를 쓰지 않은 이유가 핵심입니다 — 워크플로가 아예 돌지 않으면 required check가 영영 pending으로 남아 병합이 막힙니다. 워크플로는 늘 돌리고 잡 수준 `if`로 건너뛰면 **skipped로 보고되어 required check를 만족**합니다. `ci.yml`의 `check-build-e2e`는 조건 없이 늘 돕니다. 서드파티 액션을 새로 넣지 않고 `git diff`로만 판정합니다.
+
+   판정 범위를 **이번 푸시의 증분**으로 잡았습니다. v1 구현은 PR 하나를 세션마다 이어 푸시하므로(`CLAUDE.md` 8장) PR 전체 diff(`base...head`)에는 늘 코드가 들어 있어, 그것으로 판정하면 이 브랜치에서는 문서 전용 커밋이 **영영 건너뛰어지지 않습니다**. 그래서 `pull_request`의 `synchronize`가 주는 `before..after`를 먼저 보고, PR을 연 첫 실행과 force-push 뒤(=`before`가 사라진 경우)에는 PR 전체로, 그것도 안 되면 "전부 실행"으로 내려갑니다. `push`는 `before..sha`를 봅니다. 범위를 정할 수 없을 때 건너뛰지 않는 쪽으로 내려가는 것이 안전한 방향입니다.
+
+3. **`CLAUDE.md` 9장에 세션 인계 문서를 읽는 방법을 적었습니다**(`d2b3b1a`). 기존 문구는 "`docs/sessions.md`의 마지막 절에서 미확인 항목을 이어받는다"였는데, 미확인 항목은 세션 D부터 누적으로 이월되어 직전 절만 읽으면 앞 세션 것이 빠집니다. 1,466줄을 통독하는 대신 `grep -n 미확인 docs/sessions.md`로 줄 번호를 모아 필요한 맥락만 읽도록 적고, 같은 취지로 이 파일 머리말도 고쳤습니다. 파일은 쪼개지 않았고, `CLAUDE.md` 2장의 `DESIGN.md` 필독 범위(D-01 ~ D-15)는 그대로 뒀습니다.
+
+4. **`CLAUDE.md` 3장의 `test:perf` 설명을 고쳤습니다**(`d2b3b1a`). "(CI 밖에서 실행)"이 `ci.yml`의 `perf` 잡, 그리고 6장의 "CI에서는 기준선 대비 30% 회귀"와 어긋났습니다. perf를 CI에서 계속 돌리는 것이 의도이므로 3장 쪽을 맞췄습니다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **362개** 통과(세션 J와 같음. 이 세션은 런타임 코드를 건드리지 않습니다).
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,783,864 bytes**(3.61 MiB / 예산 6 MiB)로 세션 J와 **변화 없음**.
+- [x] `npm run test:e2e`: 브라우저 **68개** 통과.
+- [x] **판정 스크립트를 로컬에서 떼어 돌렸습니다.** 워크플로 YAML에서 `filter` 스텝의 `run`만 꺼내 환경 변수를 바꿔 가며 15가지 입력을 넣었습니다. PR synchronize(문서 전용 → `code=false`, 코드 → `true`), force-push와 PR 첫 실행의 폴백(PR 전체가 코드면 `true`), 양쪽 다 불명(`true`), `push`의 문서 전용·코드·첫 푸시(zeros → `true`), 그리고 경로 경계(루트 `README.md`만 → `false`, `docs/a/b/c.md` → `false`, `docs/` + 코드 혼합 → `true`, `src/README.md` → `true`, 루트 `docs.md` → `true`, 이름에 공백이 든 파일 → `true`). 폴백은 전부 "건너뛰지 않는" 쪽입니다.
+- [x] YAML 파싱과 잡 구조: `ci.yml`은 `changes`·`check-build-e2e`·`perf`, `desktop.yml`은 `changes`·`desktop`이고 `check-build-e2e`에는 `needs`·`if`가 **없음**을 확인했습니다.
+
+**CI 실측 — 코드 푸시(`d2b3b1a`)**
+
+- [x] **`ci` run 35720458939 초록.** `changes`가 `synchronize`의 증분 `a73eaa4..d2b3b1a`를 골라 `.github/workflows/ci.yml`·`.github/workflows/desktop.yml`·`CLAUDE.md`를 찍고 `code=true`를 냈습니다(잡 전체 **5초**). `check-build-e2e` 통과, **`perf`가 건너뛰지 않고 실제로 돌아** 7개 spec 통과·10개 항목 비교·건너뜀 0개·**회귀 없음**(3.1분, 픽스처 캐시 적중).
+- [x] **`desktop` run 35720458940 초록.** `changes`(5초) 뒤 세 OS가 모두 돌았습니다 — `cargo fmt`·`clippy -D warnings`·`cargo test`·`test:native`·`tauri build --debug`·릴리스 번들, Linux는 tauri-driver 데스크톱 E2E까지.
+- 즉 **코드 커밋에서는 두 잡이 정상 실행된다**가 실측으로 확인됐습니다.
+
+**미확인 (후속에서 이어받음)**
+
+- **문서 전용 커밋에서 `perf`·`desktop`이 skipped로 보고되는지는 이 커밋이 그 실측입니다.** 이 커밋은 `docs/sessions.md`만 바꾸므로 `changes`가 `code=false`를 내고 두 잡이 skipped여야 합니다. 결과는 다음 커밋에 적습니다.
+- **`concurrency`의 실제 취소 동작은 미확인입니다.** 설정이 붙은 것과 group 값은 확인했지만, "PR 실행 중에 새 푸시가 오면 앞 실행이 cancelled 된다"와 "`main` 푸시 실행은 취소되지 않는다"를 실제로 보려면 앞 실행이 도는 중에 겹쳐 푸시해야 합니다. CI 소모를 줄이려는 세션에서 그것만을 위해 겹쳐 푸시하지 않았습니다. 다음 세션이 자연스럽게 연속 푸시를 하면 그때 확인됩니다.
+- **`push`(main) 경로는 미확인입니다.** 이 브랜치의 실행은 전부 `pull_request` 이벤트라, `github.event.before`를 쓰는 갈래와 `cancel-in-progress: false`는 병합 때 처음 돕니다. 로컬에서 같은 입력으로 스크립트를 돌려 본 것까지입니다.
+- 세션 J와 그 앞 세션들의 미확인 목록(SheetJS 0.20.3 갱신, Windows·macOS WebView 실측, 5 GB 픽스처 데스크톱 성능, 실제 한글 IME·스크린 리더, Firefox·Safari 등)은 이 세션이 줄이지 못했고 그대로 남습니다.
