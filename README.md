@@ -50,4 +50,4 @@ cargo test --manifest-path src-tauri/Cargo.toml --workspace   # 러스트 테스
 
 성능 측정은 로컬에서는 8장의 절대 예산으로 판정하고, CI의 `perf` 잡은 같은 러너에서 잰 기준선(`test/perf/perf-baseline.json`) 대비 30% 이상 회귀를 실패로 본다. 측정값 요약은 `test-results/perf/summary.json`에 남는다.
 
-릴리스는 `v*` 태그를 푸시하면 `release` 워크플로가 검사·빌드·검증을 거쳐 `dist/jdrdatabase.html`과 SHA-256을 GitHub 릴리스에 첨부한다. `dist/`는 저장소에 커밋하지 않는다.
+릴리스는 `release` 워크플로가 만든다. `v*` 태그를 푸시하거나, Actions 탭의 `release` 워크플로에서 "Run workflow"로 버전(예: `1.2.0`)을 입력하면 실행한 커밋에 `v<버전>` 태그를 만든다. 워크플로는 검사·빌드·검증을 거친 브라우저용 `jdrdatabase.html`과 Windows·Linux·macOS에서 빌드한 데스크톱 설치본(`.msi`·설치 프로그램 `.exe`, `.deb`·`.AppImage`·`.rpm`, `.dmg`), 설치 없이 실행하는 Windows 포터블 실행 파일 `jdrdatabase-desktop.exe`를 한 GitHub 릴리스에 첨부하고, 첨부 파일 전부의 SHA-256을 `SHA256SUMS`에 적는다. 설치본의 버전은 릴리스 버전의 숫자 부분(`X.Y.Z`)이고, 버전에 `-rc.1` 같은 꼬리표가 붙으면 프리릴리스로 올린다. 데스크톱 파일은 코드 서명을 하지 않는다. `dist/`는 저장소에 커밋하지 않는다.
