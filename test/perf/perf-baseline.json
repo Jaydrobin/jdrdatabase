@@ -1,0 +1,27 @@
+{
+  "environment": "GitHub Actions ubuntu-latest, Chromium 141 (Playwright 1.56.0), ci.yml perf 잡 run 35616156607 (커밋 cb18b84, 보정값·측정값을 같은 실행에서 옮겨 적음). 판정 대상만 남김(세션 H 점검: report.js의 GATED_METRICS). app-300k.saveHwmBytes만 run 35811610414(커밋 31c1279)의 값: 저장 시점 메모리를 표본 최대값(peakRssBytes) 대신 최고 수위(VmHWM)로 재게 바꾼 새 항목이다(세션 L). 바이트 항목은 보정하지 않으므로 보정값과 같은 실행일 필요가 없다",
+  "recordedAt": "2026-09-21T15:05:44Z",
+  "calibrationMs": 559,
+  "metrics": {
+    "app-300k": {
+      "saveHwmBytes": 1163780096,
+      "exportCsvMs": 17760
+    },
+    "import-csv": {
+      "importMs": 13991
+    },
+    "import-xlsx": {
+      "previewMs": 2893,
+      "importMs": 4912
+    },
+    "memory": {
+      "heapLastBytes": 7797084,
+      "rssLastBytes": 318459904
+    },
+    "search": {
+      "likeMs": 687.4,
+      "likeShortMs": 812.1,
+      "indexBuildMs": 27409
+    }
+  }
+}

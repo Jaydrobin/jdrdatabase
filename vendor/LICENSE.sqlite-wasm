@@ -1,0 +1,28 @@
+vendor/sqlite3.mjs, vendor/sqlite3.wasm, vendor/sqlite3.d.mts
+==============================================================
+
+Source: npm package @sqlite.org/sqlite-wasm 3.53.4-build1
+        https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.53.4-build1.tgz
+        (dist/index.mjs -> sqlite3.mjs, dist/sqlite3.wasm -> sqlite3.wasm, dist/index.d.mts -> sqlite3.d.mts)
+Upstream: https://github.com/sqlite/sqlite-wasm (wrapper) and https://sqlite.org/wasm (SQLite Wasm build)
+
+1. SQLite and the SQLite Wasm/JS build (sqlite3.wasm and the JavaScript API
+   inside sqlite3.mjs) are in the public domain. From https://sqlite.org/copyright.html:
+
+   The author disclaims copyright to this source code. In place of a legal
+   notice, here is a blessing:
+
+     May you do good and not evil.
+     May you find forgiveness for yourself and forgive others.
+     May you share freely, never taking more than you give.
+
+2. The npm packaging and the TypeScript type declarations (sqlite3.d.mts) added
+   by the @sqlite.org/sqlite-wasm wrapper project are licensed under the
+   Apache License, Version 2.0 (declared in the package's package.json).
+   You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.

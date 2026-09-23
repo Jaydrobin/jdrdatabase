@@ -1,0 +1,229 @@
+name: desktop
+
+# 데스크톱(Step 11): 세 플랫폼에서 러스트 워크스페이스 검사(fmt·clippy·test), 실제 rusqlite 엔진에 대한 JS 적합성
+# 테스트(test:native), 타우리 빌드. Linux(WebKitWebDriver + Xvfb)와 Windows(Edge Driver)는 tauri-driver로 데스크톱
+# E2E까지 돌린다. macOS는 tauri-driver가 지원하지 않는다.
+# 브라우저 산출물 검사는 ci.yml이 맡는다. 러스트 빌드가 느리므로 PR과 main 푸시에서만 돈다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 같은 ref에 새 푸시가 오면 PR 실행만 취소해 러너 시간을 아낀다. `main` 푸시 실행은 릴리스·기준선의
+# 근거로 남아야 하므로 취소하지 않는다(cancel-in-progress를 pull_request에서만 true로 둔다).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # 문서만 바뀐 푸시에서 무거운 잡을 건너뛴다. `paths-ignore`로 워크플로 자체를 막으면 필수 체크가
+  # 영영 pending으로 남아 병합이 막히므로, 워크플로는 늘 돌리고 잡 수준 `if`로 건너뛴다(건너뛴 잡은
+  # skipped로 보고되어 필수 체크를 만족한다). 서드파티 액션을 쓰지 않고 git diff로만 판정한다.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect non-docs changes
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          have() { [ -n "$1" ] && [ "$1" != '0000000000000000000000000000000000000000' ] && git cat-file -e "$1^{commit}" 2>/dev/null; }
+          files=''
+          known=0
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            # v1 구현은 PR 하나를 세션마다 이어 푸시하므로(CLAUDE.md 8장) PR 전체 diff에는 늘 코드가
+            # 들어 있다. 판정 대상은 "이번 푸시"여야 하므로 synchronize의 before..after를 먼저 본다.
+            if have "$BEFORE_SHA" && have "$AFTER_SHA"; then
+              files="$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA")"
+              known=1
+            # PR을 연 첫 실행에는 before가 없고, force-push 뒤에는 before가 사라진다. 둘 다 PR 전체를 본다.
+            elif have "$BASE_SHA" && have "$HEAD_SHA"; then
+              files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+              known=1
+            fi
+          elif have "$BEFORE_SHA" && have "$GITHUB_SHA"; then
+            files="$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")"
+            known=1
+          fi
+          # 범위를 정할 수 없으면(첫 푸시, force-push로 사라진 before 등) 건너뛰지 않는다.
+          if [ "$known" = '0' ]; then
+            echo 'diff range unknown -> run everything'
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo '--- changed files ---'
+          printf '%s\n' "$files"
+          # docs/** 와 README.md 만 남으면 문서 전용. 빈 줄도 같이 지운다.
+          rest="$(printf '%s\n' "$files" | grep -Ev '^(docs/.*|README\.md)?$' || true)"
+          if [ -n "$rest" ]; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            echo 'non-docs changes found -> run everything'
+          else
+            echo 'code=false' >> "$GITHUB_OUTPUT"
+            echo 'docs-only change -> heavy jobs skipped'
+          fi
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            e2e: true
+          - os: windows-latest
+            e2e: true
+          - os: macos-latest
+            e2e: false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Linux dependencies (WebKitGTK, WebDriver, Xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb
+
+      - name: Install
+        run: npm ci
+
+      # 러스트 검사보다 먼저 돈다: 앱 크레이트의 `tauri::generate_context!()`가 컴파일 시점에
+      # `frontendDist`(../dist/tauri)를 읽으므로, 없으면 clippy·test가 프로크 매크로 패닉으로 죽는다.
+      - name: Build browser artifacts
+        run: npm run build
+
+      - name: Verify artifact
+        run: npm run verify
+
+      - name: Rust format
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+
+      - name: Rust lint
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+
+      - name: Native engine contract (JS ↔ rusqlite)
+        run: npm run test:native
+
+      - name: Tauri build (debug, no bundle)
+        run: npx tauri build --debug --no-bundle
+        working-directory: src-tauri
+
+      - name: Install tauri-driver
+        if: matrix.e2e
+        run: cargo install tauri-driver --locked
+
+      - name: Desktop E2E (tauri-driver + Xvfb)
+        if: matrix.e2e && runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1400x900x24" npm run test:desktop
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+
+      # tauri-driver는 Windows에서 msedgedriver를 쓰고, 드라이버는 WebView2 런타임과 버전이 같아야 한다.
+      # 러너에 미리 깔린 드라이버는 Edge 브라우저 버전을 따르므로 런타임 버전의 드라이버를 먼저 받는다.
+      - name: Edge Driver matching the WebView2 runtime (Windows)
+        if: matrix.e2e && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+          Write-Host "WebView2 runtime: $version"
+          $dir = Join-Path $env:RUNNER_TEMP 'edgedriver'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $driver = $null
+          if ($version) {
+            try {
+              Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile (Join-Path $dir 'edgedriver.zip')
+              Expand-Archive (Join-Path $dir 'edgedriver.zip') -DestinationPath $dir -Force
+              $driver = Join-Path $dir 'msedgedriver.exe'
+            } catch {
+              Write-Host "download failed: $($_.Exception.Message)"
+            }
+          }
+          if (-not $driver -or -not (Test-Path $driver)) {
+            $driver = Join-Path $env:EdgeWebDriver 'msedgedriver.exe'
+            Write-Host "falling back to the runner's Edge Driver"
+          }
+          & $driver --version
+          "JDR_NATIVE_DRIVER=$driver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Desktop E2E (tauri-driver + Edge Driver)
+        if: matrix.e2e && runner.os == 'Windows'
+        run: npm run test:desktop
+
+      # Windows E2E가 실패하면 원인을 가르는 정보를 남긴다. 남은 앱·WebView2 프로세스를 먼저 정리하고(single-instance가
+      # 새 실행을 앞 인스턴스로 넘기면 진단이 흐려진다), tauri-driver와 같은 capability로 Edge Driver에 직접 세션을
+      # 요청해 드라이버의 상세 로그(앱을 띄운 방법과 기다린 파일)와 WebView2 프로세스가 실제로 받은 명령줄을 찍는다.
+      - name: Windows app diagnostics (on E2E failure)
+        if: failure() && matrix.e2e && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = (Resolve-Path 'src-tauri\target\debug\jdrdatabase-desktop.exe' -ErrorAction SilentlyContinue).Path
+          if (-not $app) { Write-Host 'no debug binary'; exit 0 }
+          Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2|msedgedriver|tauri-driver' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          $driver = if ($env:JDR_NATIVE_DRIVER) { $env:JDR_NATIVE_DRIVER } else { Join-Path $env:EdgeWebDriver 'msedgedriver.exe' }
+          $log = Join-Path $env:RUNNER_TEMP 'msedgedriver.log'
+          $d = Start-Process -FilePath $driver -ArgumentList '--port=9515', '--verbose', "--log-path=$log" -PassThru
+          Start-Sleep -Seconds 2
+          $caps = @{ capabilities = @{ alwaysMatch = @{ browserName = 'webview2'; 'ms:edgeOptions' = @{ binary = $app; args = @() } } } } | ConvertTo-Json -Depth 6
+          try {
+            $r = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:9515/session' -Body $caps -ContentType 'application/json' -TimeoutSec 90
+            Write-Host "session created: $($r.value.sessionId)"
+          } catch {
+            Write-Host "session failed: $($_.Exception.Message)"
+            if ($_.ErrorDetails) { Write-Host $_.ErrorDetails.Message }
+          }
+          Write-Host '--- WebView2 / app processes and command lines ---'
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'jdrdatabase|msedgewebview2' } | ForEach-Object { Write-Host "$($_.ProcessId) $($_.Name): $($_.CommandLine)" }
+          Write-Host '--- msedgedriver log (launch, environment, DevTools) ---'
+          Get-Content $log -ErrorAction SilentlyContinue | Select-String -Pattern 'Launching|WEBVIEW2|user-data-dir|remote-debugging|DevToolsActivePort|environment|binary|Failed|ERROR' | Select-Object -First 80 | ForEach-Object { Write-Host $_.Line }
+          Stop-Process -Id $d.Id -Force -ErrorAction SilentlyContinue
+          Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2' } | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Tauri bundle (release)
+        run: npx tauri build
+        working-directory: src-tauri
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+          if-no-files-found: ignore

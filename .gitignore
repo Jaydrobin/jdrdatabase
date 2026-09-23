@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+test/fixtures/generated/
+*.log
+.DS_Store
+src-tauri/target/
+src-tauri/core/target/
+src-tauri/gen/

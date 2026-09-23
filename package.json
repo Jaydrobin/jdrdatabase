@@ -1,0 +1,39 @@
+{
+  "name": "jdrdatabase",
+  "version": "0.1.0",
+  "private": true,
+  "description": "서버 없이 브라우저에서 단독 동작하는 스프레드시트형 SQLite 데이터베이스 관리 앱 (단일 HTML 파일)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "npm run lint && npm run typecheck && npm test",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node scripts/run-unit-tests.mjs",
+    "build": "node build/build.mjs",
+    "verify": "node build/verify.mjs",
+    "test:e2e": "node build/build.mjs --test && playwright test",
+    "fixture": "node scripts/gen-fixture.mjs",
+    "test:perf": "playwright test -c playwright.perf.config.js",
+    "test:native": "node scripts/run-native-tests.mjs",
+    "test:desktop": "node test/desktop/run.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "1.56.0",
+    "@tauri-apps/cli": "2.11.5",
+    "@types/node": "^26.6.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.8",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}
