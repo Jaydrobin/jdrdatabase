@@ -7,9 +7,10 @@
  *   이름을 고치려 할 때마다 정렬이 두 번 바뀐다. 정렬은 정렬 버튼(Shift+클릭은 보조 정렬)과 열 메뉴에서 한다.
  * - 이벤트는 머리글 행 하나에 위임한다(`mount`/`unmount`). 칸마다 리스너를 달지 않는다.
  * - 머리글의 버튼은 `tabindex="-1"`이다. 그리드의 탭 정지는 스크롤 영역 하나이며, 키보드로는 활성 셀에서
- *   Shift+F10·ContextMenu로 그 열의 메뉴를 연다(`app/shortcuts.js`의 `column-menu`).
+ *   Shift+F10·ContextMenu로 그 열의 메뉴를 연다(`app/shortcuts.js`의 `columnMenu`).
  * - 사용자 데이터(열 이름)는 textContent·value로만 넣는다(CLAUDE.md 5.5).
  */
+import { setSortDirection } from '../../db/query.js';
 import { t } from '../../i18n/index.js';
 import { formatInteger } from '../../util/format.js';
 import { changeColumnTypeFlow, deleteColumnFlow } from '../dialogs/column.js';
@@ -53,7 +54,7 @@ import * as menu from '../menu.js';
 /**
  * @typedef {object} HeaderController
  * @property {(cell: HTMLElement, column: ColumnInfo, sortEntry: SortEntry | null, options: { writable: boolean }) => void} render 머리글 칸의 내용을 그린다
- * @property {(col: number) => void} openRename 이름 편집기를 연다(읽기 전용·외부 테이블이면 안내만)
+ * @property {(col: number, options?: { mergeWithAdd?: boolean }) => void} openRename 이름 편집기를 연다(읽기 전용·외부 테이블이면 안내만). `mergeWithAdd`는 "+ 열" 직후에 연 편집기라는 표시로, 확정한 이름을 열 추가와 한 히스토리 항목으로 합친다(D-16)
  * @property {(col: number, anchor?: HTMLElement | null) => void} openMenu 열 메뉴를 연다. 앵커가 없으면 그 열의 머리글 칸
  * @property {() => void} beforeBuild 그리드가 머리글 칸을 지우기 전. 편집기를 떼어 두고 포커스·선택 범위를 기억한다(떼어 낼 때의 blur는 확정이 아니다)
  * @property {() => void} afterBuild 그리드가 머리글을 다시 만든 뒤. 편집기의 열이 사라졌으면 닫고, 있으면 새 칸에 다시 붙인다
@@ -92,7 +93,7 @@ export function createHeader(deps) {
   error.className = 'jdr-grid__hrename-error';
   error.setAttribute('role', 'alert');
   error.hidden = true;
-  /** @type {{ columnId: string, tableId: string, name: string } | null} */
+  /** @type {{ columnId: string, tableId: string, name: string, mergeWithAdd: boolean } | null} */
   let renaming = null;
   /** 확정이 진행 중이다(겹치는 확정·취소를 막는다). */
   let committing = false;
@@ -166,7 +167,9 @@ export function createHeader(deps) {
     committing = true;
     let ok = false;
     try {
-      ok = await store.renameColumn(target.tableId, target.columnId, name);
+      ok = await store.renameColumn(target.tableId, target.columnId, name, {
+        mergeWithAdd: target.mergeWithAdd,
+      });
     } finally {
       committing = false;
     }
@@ -231,8 +234,9 @@ export function createHeader(deps) {
     const editable = writableTable(store, table);
     const sort = store.viewSpecOf(table.id).sort;
     const sorted = sort.some((s) => s.colId === column.id);
+    // 다른 열의 정렬은 그대로 두고 이 열의 방향만 정한다(D-16). 이 열 하나로 바꾸는 것은 정렬 버튼 클릭이다.
     /** @param {'asc' | 'desc'} dir */
-    const sortOnly = (dir) => store.setSort(table.id, [{ colId: column.id, dir }]);
+    const sortColumn = (dir) => store.setSort(table.id, setSortDirection(sort, column.id, dir));
     return [
       {
         key: 'rename',
@@ -246,8 +250,8 @@ export function createHeader(deps) {
         disabled: !editable,
         run: () => void changeColumnTypeFlow({ commands, toasts, tableId: table.id, column }),
       },
-      { key: 'sortAsc', label: t('columnMenu.sortAsc'), run: () => sortOnly('asc') },
-      { key: 'sortDesc', label: t('columnMenu.sortDesc'), run: () => sortOnly('desc') },
+      { key: 'sortAsc', label: t('columnMenu.sortAsc'), run: () => sortColumn('asc') },
+      { key: 'sortDesc', label: t('columnMenu.sortDesc'), run: () => sortColumn('desc') },
       {
         key: 'sortClear',
         label: t('columnMenu.sortClear'),
@@ -371,7 +375,7 @@ export function createHeader(deps) {
       cell.classList.toggle('jdr-grid__hcell--readonly', !options.writable);
     },
 
-    openRename(col) {
+    openRename(col, options = {}) {
       const table = host.table();
       const column = host.columns()[col];
       if (!table || !column) return;
@@ -383,7 +387,12 @@ export function createHeader(deps) {
       if (renaming) closeRename(false);
       const cell = host.revealColumn(col);
       if (!cell) return;
-      renaming = { columnId: column.id, tableId: table.id, name: column.name };
+      renaming = {
+        columnId: column.id,
+        tableId: table.id,
+        name: column.name,
+        mergeWithAdd: options.mergeWithAdd === true,
+      };
       hideError();
       input.value = column.name;
       host.overlay.append(error);

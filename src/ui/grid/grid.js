@@ -210,7 +210,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {(row: number) => boolean} isGhostRow 그 행 순번이 빈 행인가(`row >= rowCount`이고 빈 행이 켜져 있음)
  * @property {() => number} displayRowCount 그리는 행 수(실제 행 + 빈 행)
  * @property {() => void} refreshGhost 읽기 전용 여부가 바뀐 뒤 빈 행을 다시 판정한다. 꺼지면 빈 행의 편집기를 닫는다
- * @property {(columnId: string) => void} startRename 그 열로 옮겨 머리글의 이름 편집기를 연다("+ 열" 직후)
+ * @property {(columnId: string) => void} startRename 그 열로 옮겨 머리글의 이름 편집기를 연다("+ 열" 직후. 확정한 이름은 열 추가와 한 히스토리 항목이 된다)
  * @property {(scrollTop: number, viewportHeight: number) => RowRange} computeRange
  * @property {(range?: RowRange) => void} render
  * @property {() => void} invalidate 블록 캐시를 버리고 행 수를 다시 세어 다시 그린다
@@ -1372,7 +1372,8 @@ export function createGrid(deps) {
 
     startRename(columnId) {
       const col = columns.findIndex((c) => c.id === columnId);
-      if (col >= 0) headerCtl.openRename(col);
+      // "+ 열" 직후의 이름은 열 추가와 한 번에 되돌린다(D-16).
+      if (col >= 0) headerCtl.openRename(col, { mergeWithAdd: true });
     },
 
     scrollToRow(row) {

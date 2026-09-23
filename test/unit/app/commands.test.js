@@ -15,6 +15,7 @@ import {
   ghostRowInserts,
   insertRows,
   invert,
+  mergeCommands,
   UNDO_SNAPSHOT_MAX_ROWS,
 } from '../../../src/app/commands.js';
 import { applyCommand, isCommand } from '../../../src/db/command.js';
@@ -415,4 +416,58 @@ test('빈 행 확정(D-16): k번째 빈 행에 쓰면 k행이 생기고 값은 �
   await applyCommand(engine, cmd, 'undo');
   assert.equal(stats(engine, table).count, 0, '되돌리기 한 번에 만들어진 행이 모두 사라진다');
   await engine.close();
+});
+
+test('mergeCommands(D-16 "+ 열"): 열 추가 + 이름 바꾸기를 한 항목으로, 되돌리면 덤프 동일 → 다시 적용', async () => {
+  const engine = await openWasmEngine();
+  await migrate(engine, { appVersion: 'test' });
+  const { tableId } = await tables.create(engine, {
+    name: '시트',
+    columns: [{ name: '열 1', type: 'text' }],
+  });
+  const before = dumpDb(engine);
+  const added = await tables.addColumn(engine, tableId, { name: '열 2', type: 'text' });
+  const renamed = await tables.renameColumn(engine, tableId, added.columnId, { name: '메모' });
+  const after = dumpDb(engine);
+  const merged = mergeCommands(added.cmd, renamed.cmd);
+  assert.equal(isCommand(merged), true);
+  assert.equal(merged.type, 'column.add');
+  assert.equal(merged.tableId, tableId);
+  // 되돌리기: 이름을 먼저 되돌린 뒤 열을 지운다(한 트랜잭션).
+  await applyCommand(engine, merged, 'undo');
+  assert.deepEqual(dumpDb(engine), before, '되돌리기 한 번에 열이 사라진다');
+  await applyCommand(engine, merged, 'do');
+  assert.deepEqual(dumpDb(engine), after, '다시 실행하면 이름까지 돌아온다');
+  // 역커맨드(저널 기록)도 do 방향으로 같은 결과.
+  await applyCommand(engine, invert(merged), 'do');
+  assert.deepEqual(dumpDb(engine), before);
+  await engine.close();
+});
+
+test('mergeCommands: 되돌릴 수 없는 커맨드는 합치지 않는다', () => {
+  /** @type {Command} */
+  const ok = {
+    type: 'a',
+    tableId: 't',
+    do: [{ sql: 'SELECT 1' }],
+    undo: [{ sql: 'SELECT 1' }],
+    summary: 'a',
+  };
+  /** @type {Command} */
+  const drop = {
+    type: 'table.drop',
+    tableId: 't',
+    do: [{ sql: 'SELECT 1' }],
+    undo: [],
+    summary: 'd',
+    irreversible: true,
+  };
+  assert.throws(
+    () => mergeCommands(ok, drop),
+    (e) => e instanceof AppError && e.code === 'E_UNDO_LIMIT',
+  );
+  assert.throws(
+    () => mergeCommands(drop, ok),
+    (e) => e instanceof AppError && e.code === 'E_UNDO_LIMIT',
+  );
 });

@@ -181,6 +181,47 @@ test('스키마 op의 커맨드는 스토어 알림으로 히스토리에 들어
   client.close();
 });
 
+test('"+ 열" 직후의 이름 확정(mergeWithAdd)은 열 추가와 한 항목: 되돌리기 한 번에 열이 사라지고 저널에는 역커맨드가 남는다(D-16)', async () => {
+  const { client, store, history, autosave, tableId } = await setup();
+  const columns = () => (store.getState().tables[0]?.columns ?? []).map((c) => c.name);
+  const added = await store.addDefaultColumn(tableId);
+  assert.ok(added);
+  assert.equal(
+    await store.renameColumn(tableId, added.columnId, '메모', { mergeWithAdd: true }),
+    true,
+  );
+  assert.deepEqual(columns(), ['이름', '메모']);
+  assert.equal(history.state().undo, 1, '추가와 이름이 한 항목');
+  assert.equal(await history.undo(), true);
+  assert.deepEqual(columns(), ['이름'], '되돌리기 한 번에 열이 사라진다');
+  assert.equal(await history.redo(), true);
+  assert.deepEqual(columns(), ['이름', '메모']);
+  assert.equal(await history.undo(), true);
+
+  // 저널: add, rename, 합친 항목의 역(되돌리기), 합친 항목(다시 실행), 다시 역. 재생은 do 방향이므로 열이 없다.
+  const dbId = store.getState().meta.db_id ?? '';
+  const journal = (await autosave.recoverable(dbId))?.commands.slice(-5) ?? [];
+  assert.deepEqual(
+    journal.map((c) => c.type),
+    ['column.add', 'column.rename', 'column.add', 'column.add', 'column.add'],
+  );
+  assert.deepEqual(
+    journal.map((c) => c.summary.startsWith('undo ')),
+    [false, false, true, false, true],
+  );
+
+  // 표시가 없는 이름 바꾸기(머리글 더블클릭·사이드바)는 합치지 않는다.
+  const again = await store.addDefaultColumn(tableId);
+  assert.ok(again);
+  const undoBefore = history.state().undo;
+  await store.renameColumn(tableId, again.columnId, '비고');
+  assert.equal(history.state().undo, undoBefore + 1);
+  // 맨 위가 열 추가가 아니면 표시가 있어도 따로 쌓는다.
+  await store.renameColumn(tableId, again.columnId, '비고2', { mergeWithAdd: true });
+  assert.equal(history.state().undo, undoBefore + 2);
+  client.close();
+});
+
 test('되돌릴 수 없는 커맨드가 들어오면 스택을 비우고, 파일을 열어도 비운다', async () => {
   const { client, store, history, tableId } = await setup();
   await history.apply(insertRows({ tableId, count: 1, firstId: 1, now: NOW }));

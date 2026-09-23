@@ -175,6 +175,12 @@ test('"+ 열" → 열 31과 머리글 이름 편집기 → 한글 IME로 확정.
   await expect(editor).toHaveCount(0);
   await expect(headerCell(page, '메모')).toHaveCount(1);
   await expect(page.locator('.jdr-grid__scroller')).toBeFocused();
+  // 추가와 이름 짓기는 한 동작이다: 되돌리기 한 번에 열이 사라지고, 다시 실행 한 번에 이름까지 돌아온다.
+  await page.keyboard.press('Control+z');
+  await expect(headerCell(page, '메모')).toHaveCount(0);
+  await expect(headerCell(page, '열 31')).toHaveCount(0);
+  await page.keyboard.press('Control+y');
+  await expect(headerCell(page, '메모')).toHaveCount(1);
 
   // 열 5를 지운 뒤 "+ 열": 자동 이름은 소프트 삭제된 이름도 건너뛴다.
   const menu = await openColumnMenu(page, '열 5');
@@ -291,6 +297,36 @@ test('열 메뉴(우클릭·Shift+F10): 타입을 선택으로 바꾸고 예시�
   await keyMenu.getByRole('menuitem', { name: '정렬 해제' }).click();
   await expect(headerCell(page, '열 1')).not.toHaveAttribute('aria-sort', /.+/);
   await expect(page.locator('.jdr-grid__row--ghost').first()).toBeVisible();
+
+  // 열 메뉴의 정렬은 다른 열의 정렬을 지우지 않는다: 없는 열은 끝에 붙고, 있는 열은 그 자리에서 방향만.
+  const sortOf = async () =>
+    ((await hook(page).view())?.sort ?? []).map((s) => [s.colId, s.dir].join(':'));
+  const idOf = async (/** @type {string} */ name) =>
+    (await hook(page).state())?.tables[0]?.columns.find(
+      (c) => c.name === name && c.deletedAt === null,
+    )?.id ?? '';
+  const [id1, id3] = [await idOf('열 1'), await idOf('열 3')];
+  await (
+    await openColumnMenu(page, '열 1')
+  )
+    .getByRole('menuitem', { name: '내림차순 정렬' })
+    .click();
+  await (
+    await openColumnMenu(page, '열 3')
+  )
+    .getByRole('menuitem', { name: '오름차순 정렬' })
+    .click();
+  expect(await sortOf()).toEqual([`${id1}:desc`, `${id3}:asc`]);
+  await (
+    await openColumnMenu(page, '열 1')
+  )
+    .getByRole('menuitem', { name: '오름차순 정렬' })
+    .click();
+  expect(await sortOf()).toEqual([`${id1}:asc`, `${id3}:asc`]);
+  await (await openColumnMenu(page, '열 1')).getByRole('menuitem', { name: '정렬 해제' }).click();
+  expect(await sortOf()).toEqual([`${id3}:asc`]);
+  await (await openColumnMenu(page, '열 3')).getByRole('menuitem', { name: '정렬 해제' }).click();
+  expect(await sortOf()).toEqual([]);
 
   // 정렬 버튼: 클릭은 없음 → 오름 → 내림 → 없음, Shift+클릭은 보조 정렬.
   const sort1 = headerCell(page, '열 1').locator('[data-hbtn="sort"]');

@@ -20,6 +20,7 @@ import {
   PREVIEW_CHARS,
   pruneViewSpec,
   stats,
+  setSortDirection,
   toggleSort,
   visibleColumns,
 } from '../../../src/db/query.js';
@@ -520,4 +521,22 @@ test('normalizeViewSpec·isPlainView·toggleSort·pruneViewSpec', async () => {
   assert.equal(pruneViewSpec({ sort: [{ colId: name, dir: 'asc' }] }, after).changed, false);
   void table;
   await engine.close();
+});
+
+test('setSortDirection(D-16 열 메뉴): 다른 열의 정렬은 두고, 있으면 그 자리에서 방향만, 없으면 끝에 붙인다', () => {
+  const sort = [
+    { colId: 'c_age', dir: /** @type {const} */ ('desc') },
+    { colId: 'c_active', dir: /** @type {const} */ ('asc') },
+  ];
+  assert.deepEqual(setSortDirection(sort, 'c_name', 'asc'), [
+    ...sort,
+    { colId: 'c_name', dir: 'asc' },
+  ]);
+  assert.deepEqual(setSortDirection(sort, 'c_age', 'asc'), [
+    { colId: 'c_age', dir: 'asc' },
+    { colId: 'c_active', dir: 'asc' },
+  ]);
+  assert.deepEqual(setSortDirection(sort, 'c_active', 'asc'), sort, '같은 방향이면 그대로');
+  assert.deepEqual(setSortDirection([], 'c_name', 'desc'), [{ colId: 'c_name', dir: 'desc' }]);
+  assert.equal(sort.length, 2, '입력 목록은 바꾸지 않는다');
 });

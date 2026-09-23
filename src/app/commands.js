@@ -157,6 +157,34 @@ export function invert(cmd) {
 }
 
 /**
+ * 차례로 적용된 두 커맨드를 히스토리 항목 하나로 합친다(D-16: "+ 열"의 추가와 이름 짓기).
+ * `do`는 앞 → 뒤, `undo`는 뒤의 undo → 앞의 undo이며 커맨드 실행기가 한 트랜잭션으로 적용한다.
+ * 되돌릴 수 없는 커맨드는 합치지 않는다.
+ * @param {Command} first 먼저 적용된 커맨드(종류·테이블은 이것을 따른다)
+ * @param {Command} second
+ * @returns {Command}
+ */
+export function mergeCommands(first, second) {
+  if (
+    first.irreversible ||
+    second.irreversible ||
+    first.undo.length === 0 ||
+    second.undo.length === 0
+  ) {
+    throw new AppError('E_UNDO_LIMIT', 'irreversible commands cannot be merged', {
+      detail: { first: first.type, second: second.type },
+    });
+  }
+  return {
+    type: first.type,
+    tableId: first.tableId,
+    do: [...first.do, ...second.do],
+    undo: [...second.undo, ...first.undo],
+    summary: `${first.summary} + ${second.summary}`,
+  };
+}
+
+/**
  * 셀 하나를 바꾼다. `_updated_at`은 커맨드가 명시적으로 갱신하고 되돌리기가 원래 값으로 되돌린다.
  * @param {{ tableId: string, rowId: number, colId: string, oldValue: SqlValue, newValue: SqlValue, oldUpdatedAt: string | null, now: string }} input
  * @returns {Command}

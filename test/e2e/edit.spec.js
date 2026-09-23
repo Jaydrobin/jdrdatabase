@@ -193,16 +193,13 @@ test('되돌리기·다시 실행: 셀 편집과 열 추가를 단축키와 버�
   await page.keyboard.press('Control+y');
   await expect(cell(page, 0, 0)).toHaveText('changed');
 
-  // 스키마 커맨드(열 추가와 머리글의 이름 바꾸기)도 히스토리에 들어온다. "+ 열"은 자동 이름으로
-  // 열을 만들고(`열 1`) 이름 편집기의 확정이 이름을 바꾸므로 커맨드 두 개다(D-16).
+  // 스키마 커맨드도 히스토리에 들어온다. "+ 열"의 추가와 이름 편집기의 확정은 한 항목이라(D-16)
+  // 되돌리기 한 번에 열이 사라지고, 다시 실행 한 번에 이름까지 돌아온다.
   await addColumnUi(page, '비고');
   await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveText('비고');
   await page.click('[data-action="undo"]');
-  await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveText('열 1');
-  await page.click('[data-action="undo"]');
   await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveCount(0);
   await expect(page.locator('.jdr-sidebar__column-name', { hasText: '비고' })).toHaveCount(0);
-  await page.click('[data-action="redo"]');
   await page.click('[data-action="redo"]');
   await expect(headerCell(page, '비고')).toHaveCount(1);
   await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveText('비고');

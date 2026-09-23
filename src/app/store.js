@@ -170,6 +170,13 @@ export const MIN_COLUMN_WIDTH = 40;
  * @typedef {object} RecordOptions
  * @property {boolean} [fromHistory] 히스토리(`app/history.js`)가 적용·되돌리기·다시 실행으로 부른 것. `onCommand`를 내지 않는다
  * @property {boolean} [refresh] false면 `data:changed`를 내지 않는다(호출자가 그리드 캐시를 직접 고친 경우). 기본 true
+ * @property {boolean} [mergeWithAdd] "+ 열" 직후 이름 편집기의 확정(D-16). `onCommand` 구독자(히스토리)에 실어 보내 직전의 열 추가와 한 항목으로 합치게 한다
+ */
+
+/**
+ * `onCommand` 알림의 부가 정보.
+ * @typedef {object} CommandNotice
+ * @property {boolean} mergeWithAdd 직전의 열 추가와 합칠 커맨드인가(`RecordOptions.mergeWithAdd`)
  */
 
 /**
@@ -210,7 +217,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(args: ExportArgs, callOptions?: CallOptions) => Promise<ExportOutcome | null>} exportTable 저장 위치 선택 → `export.stream` 조각을 싱크에 쓰기. 취소는 null, 실패는 던진다(싱크는 버린다)
  * @property {() => void} markDirty
  * @property {(cmd: Command, options?: RecordOptions) => Promise<void>} recordCommand 적용된 커맨드를 저널에 넣고 dirty로 표시한다. 히스토리가 부른 것이 아니면 `onCommand` 구독자에게 알린다
- * @property {(handler: (cmd: Command) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
+ * @property {(handler: (cmd: Command, notice: CommandNotice) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
  * @property {() => void} refreshData 그리드가 블록 캐시를 버리고 다시 읽게 한다(`data:changed`)
  * @property {() => Promise<boolean>} recoverPending 시작 시 저널에 남은 새 DB 기록을 복구 제안한다
  * @property {() => Promise<WorkcopyEntry[]>} listWorkcopies 데스크톱 모드: 복구를 기다리는 dirty 작업 사본. 브라우저 모드는 빈 배열
@@ -222,7 +229,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {<K extends SchemaOp>(op: K, args: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result'] | null>} runSchemaOp 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다. 실패는 알리고 null
  * @property {(name: string, options?: { columns?: NewColumn[] }) => Promise<string | null>} createTable 테이블을 만들고(기본 열은 `columns`, D-16) 그 테이블을 고른다. 만든 테이블 id. 실패는 알리고 null
  * @property {(tableId: string) => Promise<{ columnId: string, columnCount: number } | null>} addDefaultColumn 자동 이름(`column.defaultName`)의 텍스트 열을 끝에 붙인다(D-16). 이름은 살아 있는 열과 소프트 삭제된 열의 이름을 모두 건너뛰고, Worker가 이름 겹침으로 거부하면 목록을 다시 읽어 한 번만 다시 시도한다
- * @property {(tableId: string, columnId: string, name: string) => Promise<boolean>} renameColumn 열 표시 이름 바꾸기(머리글 이름 편집기). 실패는 알리고 false
+ * @property {(tableId: string, columnId: string, name: string, options?: { mergeWithAdd?: boolean }) => Promise<boolean>} renameColumn 열 표시 이름 바꾸기(머리글 이름 편집기). `mergeWithAdd`면 히스토리가 직전의 열 추가와 합친다(D-16). 실패는 알리고 false
  * @property {() => Promise<void>} refreshTables `schema.list`로 테이블 목록을 다시 읽는다
  * @property {(tableId: string) => TableViewState} getViewState 테이블의 뷰 상태(복사본)
  * @property {(tableId: string, columnId: string, width: number) => void} setColumnWidth
@@ -292,7 +299,7 @@ export function createStore(deps) {
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
   const listeners = new Map();
-  /** @type {Set<(cmd: Command) => void>} */
+  /** @type {Set<(cmd: Command, notice: CommandNotice) => void>} */
   const commandListeners = new Set();
   /** @type {Map<string, TableViewState>} */
   const views = new Map();
@@ -1000,6 +1007,36 @@ export function createStore(deps) {
     return gzip ? `${base}.gz` : base;
   }
 
+  /**
+   * 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다(`runSchemaOp`의 본문).
+   * `record`는 `recordCommand`에 넘기는 선택 사항(열 추가와 이름 합치기 표시).
+   * @template {SchemaOp} K
+   * @param {K} op
+   * @param {OpMap[K]['args']} args
+   * @param {CallOptions | undefined} options
+   * @param {RecordOptions} record
+   * @returns {Promise<OpMap[K]['result'] | null>}
+   */
+  async function schemaOp(op, args, options, record) {
+    if (state.readOnly !== 'none') {
+      notify.info('file.readOnlyBlocked');
+      return null;
+    }
+    /** @type {OpMap[K]['result']} */
+    let result;
+    try {
+      result = await client.call(op, args, options);
+    } catch (err) {
+      notify.error(toStoreError(err));
+      // 적용되지 않았으므로 상태를 그대로 두되, 목록이 어긋났을 수 있으니 다시 읽는다(E_DB_QUERY 등).
+      await store.refreshTables();
+      return null;
+    }
+    await store.recordCommand(result.cmd, record);
+    await store.refreshTables();
+    return result;
+  }
+
   /** @type {Store} */
   const store = {
     getState: () => ({
@@ -1473,7 +1510,8 @@ export function createStore(deps) {
       }
       store.markDirty();
       if (!options.fromHistory) {
-        for (const handler of commandListeners) handler(cmd);
+        const notice = { mergeWithAdd: options.mergeWithAdd === true };
+        for (const handler of commandListeners) handler(cmd, notice);
       }
       // 커맨드는 DB 내용을 바꿨다. 그리드는 블록 캐시를 버리고 다시 읽는다(D-06).
       if (options.refresh !== false) emit('data:changed');
@@ -1553,23 +1591,7 @@ export function createStore(deps) {
     },
 
     async runSchemaOp(op, args, options) {
-      if (state.readOnly !== 'none') {
-        notify.info('file.readOnlyBlocked');
-        return null;
-      }
-      /** @type {OpMap[typeof op]['result']} */
-      let result;
-      try {
-        result = await client.call(op, args, options);
-      } catch (err) {
-        notify.error(toStoreError(err));
-        // 적용되지 않았으므로 상태를 그대로 두되, 목록이 어긋났을 수 있으니 다시 읽는다(E_DB_QUERY 등).
-        await store.refreshTables();
-        return null;
-      }
-      await store.recordCommand(result.cmd);
-      await store.refreshTables();
-      return result;
+      return schemaOp(op, args, options, {});
     },
 
     async createTable(name, options = {}) {
@@ -1612,8 +1634,11 @@ export function createStore(deps) {
       }
     },
 
-    async renameColumn(tableId, columnId, name) {
-      return (await store.runSchemaOp('schema.renameColumn', { tableId, columnId, name })) !== null;
+    async renameColumn(tableId, columnId, name, options = {}) {
+      const result = await schemaOp('schema.renameColumn', { tableId, columnId, name }, undefined, {
+        mergeWithAdd: options.mergeWithAdd === true,
+      });
+      return result !== null;
     },
 
     getViewState(tableId) {
