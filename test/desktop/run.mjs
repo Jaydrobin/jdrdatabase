@@ -157,8 +157,10 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 20));
     await writeFile(file, await readFile(`${file}.bak`));
     const beforeSize = (await readFile(file)).byteLength;
-    // 취소는 대화상자 버튼을 눌러야 한다: 대화상자가 뜨면 취소 버튼을 누른다.
-    const savePromise = hook(sessionId, 'hook.save()');
+    // 취소는 대화상자 버튼을 눌러야 한다: 대화상자가 뜨면 취소 버튼을 누른다. 저장은 페이지 안에서 시작만 하고
+    // Promise를 창에 둔다. Edge Driver(Windows)는 세션의 명령을 하나씩 처리하므로, 저장을 기다리는 비동기 스크립트를
+    // 걸어 둔 채 대화상자를 찾는 스크립트를 보내면 서로 기다리다 스크립트 시간 초과로 끝난다(WebKitWebDriver는 동시에 받는다).
+    await execute(sessionId, 'window.__jdrPendingSave = window.__jdrTest.save(); return true;');
     await waitFor(
       async () =>
         (await execute(
@@ -171,7 +173,7 @@ async function main() {
       sessionId,
       'const b = Array.from(document.querySelectorAll(".jdr-dialog button")).find((x) => x.textContent === "취소"); if (b) b.click(); return !!b;',
     );
-    assert.equal(await savePromise, false);
+    assert.equal(await hook(sessionId, 'window.__jdrPendingSave'), false);
     assert.equal(
       (await readFile(file)).byteLength,
       beforeSize,
