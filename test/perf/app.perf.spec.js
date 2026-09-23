@@ -104,16 +104,24 @@ test('30만 행: 셀 편집 30 ms 이하, 스냅샷 저장 5초 이하, 저장 �
   }
   const editMax = Math.max(...editSamples);
 
-  // 2) 저장: db.snapshot 왕복(revision 갱신 + 직렬화 + 300 MB transfer). 그동안의 렌더러 RSS 최대값이 8장의 "최대 힙".
-  const snapshotWork = page.evaluate(async () => {
-    const hook = /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window)).__jdrTest;
-    const started = performance.now();
-    const result = /** @type {{ bytes: Uint8Array }} */ (
-      await hook.call('db.snapshot', { bumpRevision: true, savedBy: 'perf' })
-    );
-    return { ms: performance.now() - started, bytes: result.bytes.byteLength };
-  });
-  const { result: snapshot, peakRss, samples } = await peakRssDuring(browser, snapshotWork);
+  // 2) 저장: db.snapshot 왕복(revision 갱신 + 직렬화 + 300 MB transfer). 그동안의 렌더러 RSS 최고 수위가 8장의 "최대 힙".
+  // 작업은 함수로 넘겨 최고 수위를 되돌린 뒤에 시작한다.
+  const snapshotWork = () =>
+    page.evaluate(async () => {
+      const hook = /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window))
+        .__jdrTest;
+      const started = performance.now();
+      const result = /** @type {{ bytes: Uint8Array }} */ (
+        await hook.call('db.snapshot', { bumpRevision: true, savedBy: 'perf' })
+      );
+      return { ms: performance.now() - started, bytes: result.bytes.byteLength };
+    });
+  const {
+    result: snapshot,
+    peakRss,
+    samples,
+    method: peakMethod,
+  } = await peakRssDuring(browser, snapshotWork);
   expect(snapshot.bytes).toBeGreaterThan(size * 0.9);
 
   // 3) 실제 저장 경로(도구 모음 저장 → 다운로드 폴백). 디스크 쓰기 대신 Blob 다운로드까지.
@@ -143,7 +151,7 @@ test('30만 행: 셀 편집 30 ms 이하, 스냅샷 저장 5초 이하, 저장 �
       editMaxMs: editMax,
       snapshotMs: +snapshot.ms.toFixed(0),
       saveMs,
-      peakRssBytes: peakRss,
+      saveHwmBytes: peakRss,
       exportCsvMs: exportMs,
     },
     {
@@ -154,6 +162,7 @@ test('30만 행: 셀 편집 30 ms 이하, 스냅샷 저장 5초 이하, 저장 �
       rssIdle,
       rssOpened,
       rssSamples: samples,
+      peakMethod,
       exportBytes,
     },
   );
