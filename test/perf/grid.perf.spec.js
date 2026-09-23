@@ -70,6 +70,29 @@ test('30만 행 스크롤: 프레임 렌더 p95 16 ms 이하, 창 질의 최대 
     }, top);
     await page.waitForTimeout(60);
   }
+  // 끝으로 점프(D-16): 맨 끝은 빈 행 30줄이다. 빈 행은 창 질의를 하지 않으므로 마지막 실제 행이 걸친
+  // 블록(200행 단위라 많아야 둘)만 읽는다.
+  const queriesBeforeEnd =
+    (
+      await page.evaluate(() =>
+        /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window)).__jdrTest.grid(),
+      )
+    )?.queries ?? 0;
+  await scroller.evaluate((el, value) => {
+    el.scrollTop = value;
+  }, maxScroll);
+  const lastGhost = page.locator(`.jdr-grid__row[data-row="${FIXTURE_ROWS + 29}"]`);
+  await expect(lastGhost).toBeVisible();
+  await expect(lastGhost).toHaveClass(/jdr-grid__row--ghost/);
+  await page.waitForTimeout(300);
+  const queriesAtEnd =
+    (
+      await page.evaluate(() =>
+        /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window)).__jdrTest.grid(),
+      )
+    )?.queries ?? 0;
+  expect(queriesAtEnd - queriesBeforeEnd).toBeLessThanOrEqual(2);
+
   // 2) 연속 휠 스크롤: 프레임마다 렌더가 일어난다(렌더 시간).
   await scroller.evaluate((el) => {
     el.scrollTop = 0;
