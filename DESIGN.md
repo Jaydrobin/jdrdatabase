@@ -305,8 +305,10 @@ vacuum()                       // wasm: 트랜잭션 밖 VACUUM(데이터베이�
 
 - **툴팁**은 버튼·선택 상자 하나가 무엇을 하는지 한 문장으로 말한다. **도움말 대화상자**는 한 문장으로 설명되지 않는 개념(열 삭제와 정리, 저장·복구, 여러 PC에서 쓰기, 검색 인덱스, 빈 행, 단축키)을 주제별로 담는다. 툴팁만으로는 개념을 담을 수 없고, 도움말만 있으면 버튼마다 찾아 읽어야 한다.
 - 툴팁은 HTML `title` 속성을 쓰지 않는다. `title`은 키보드 포커스와 터치에서 보이지 않고, 표시 지연·위치·닫기를 제어할 수 없어 WCAG 2.1의 1.4.13(추가 콘텐츠를 닫을 수 있고, 가리킬 수 있고, 유지되어야 함)을 만족하지 못한다. 공용 모듈 `ui/tooltip.js`가 마우스를 올린 뒤 500 ms 또는 키보드 포커스 즉시 보여 주고, Esc·포커스 이탈·포인터 이탈로 닫으며, 대상에 `aria-describedby`를 단다. 툴팁 요소는 문서에 하나다.
-- 문구는 i18n 키로만 둔다. 툴팁은 `hint.<data-action>`, 도움말은 `help.<주제>.title`과 `help.<주제>.body`(빈 줄로 나눈 문단, `textContent`로 출력)다. 단축키 주제는 문구가 아니라 `app/shortcuts.js`의 단축키 표에서 만든다. 문구로 따로 쓰면 단축키를 바꿀 때 도움말이 어긋난다. `en.js`는 `ko.js`와 키가 같아야 하므로(D-14) 영어 문구도 함께 쓴다.
-- 저장·복구 주제는 모드마다 내용이 다르며 `capabilities().persistence`(`snapshot` / `native`)로 고른다.
+- 툴팁 요소는 포인터 이벤트를 받지 않는다(`pointer-events: none`). 받으면 툴팁이 그 아래의 버튼·머리글을 덮어 클릭을 가로채고, 포인터가 툴팁 위에 있는 한 닫히지 않으므로 덮인 버튼을 누를 길이 없어진다. "가리킬 수 있음"은 좌표로 지킨다: 포인터가 대상을 떠나도 대상과 툴팁을 함께 감싼 사각형 안에 있는 동안은 닫지 않는다. 누르면(`pointerdown`) 닫고 포인터가 그 대상을 떠날 때까지 다시 띄우지 않으며, 스크롤하면 위치가 어긋나므로 닫는다.
+- 툴팁을 다는 것은 버튼과 선택 상자다. 텍스트 입력칸(검색 상자, 이름 입력)에는 달지 않는다. 입력칸은 포커스를 얻으면 마우스로 눌렀어도 `:focus-visible`이어서 툴팁이 입력하는 내내 떠 있게 되고, 필요한 정보는 레이블·예시·설명 줄이 이미 늘 보여 준다(아래).
+- 문구는 i18n 키로만 둔다. 툴팁은 `hint.<data-action>`이고, `data-action`이 없는 요소(머리글의 정렬·메뉴 버튼, 고정 열 선택 상자)는 `hint.<요소 이름>`, 상태에 따라 하는 일이 바뀌는 버튼(검색 인덱스 만들기·삭제·오래됨)은 상태마다 키를 둔다. 도움말은 `help.<주제>.title`과 `help.<주제>.body`(빈 줄로 나눈 문단, `textContent`로 출력)다. 단축키 주제는 문구가 아니라 `app/shortcuts.js`의 단축키 표에서 만든다. 문구로 따로 쓰면 단축키를 바꿀 때 도움말이 어긋난다. `en.js`는 `ko.js`와 키가 같아야 하므로(D-14) 영어 문구도 함께 쓴다.
+- 저장·복구 주제는 모드마다 내용이 다르며 `capabilities().persistence`(`snapshot` / `native`)로 고른다(`help.saving.body` / `help.saving.bodyNative`).
 - 입력할 때 필요한 정보는 툴팁에 숨기지 않는다. 선택 항목 입력칸은 흐린 예시(placeholder, 예: `진행 중` / `완료` / `보류`)와 입력칸 아래의 설명 줄을 늘 보여 준다.
 
 ---
@@ -1105,17 +1107,18 @@ v2 묶음(N~P)의 브랜치와 PR:
 
 **선행 조건**: 세션 O가 같은 브랜치에 푸시되고 그 커밋의 CI가 초록.
 
-**산출물**: `ui/tooltip.js`, `ui/dialogs/help.js`, `ui/toolbar.js`(도움말 버튼, 기존 `title` 제거), `ui/sidebar.js`·`ui/grid/grid.js`·`ui/grid/header.js`·`ui/dialogs/settings.js`(툴팁 연결), `app/shortcuts.js`(단축키 표에 설명 키), `i18n/ko.js`·`en.js`(`hint.*`, `help.*`, `shortcut.*`), `styles/app.css`, `test/unit/conventions.test.js`(툴팁 규칙), `CLAUDE.md` 5.5(툴팁 규칙), `docs/support-matrix.md`(F1, 비활성 버튼의 포인터 이벤트, 시크릿 모드의 IDB 수명)
+**산출물**: `ui/tooltip.js`, `ui/dialogs/help.js`, `ui/toolbar.js`(도움말 버튼, 검색 인덱스 버튼의 `title`을 상태별 툴팁으로), `ui/sidebar.js`·`ui/grid/grid.js`·`ui/grid/header.js`·`ui/dialogs/settings.js`·`ui/dialogs/filter.js`·`ui/editor/longtext.js`(툴팁 연결), `ui/dialogs/import.js`(미리보기 칸의 `title` 제거), `ui/dialogs/dialog.js`(처음 포커스를 받을 요소, 포커스 트랩이 `tabindex="-1"` 버튼을 건너뜀), `main.js`(`tooltip.mount`), `app/shortcuts.js`(F1과 `describe`), `i18n/ko.js`·`en.js`(`hint.*`, `help.*`, `shortcut.*`), `styles/app.css`, `test/unit/conventions.test.js`(툴팁 규칙), `CLAUDE.md` 5.5(툴팁 규칙), `docs/support-matrix.md`(F1, 비활성 버튼의 포인터 이벤트, 시크릿 모드의 IDB 수명)
 
 **주요 함수**
-- `tooltip.mount(root)` / `tooltip.unmount()`: 문서에 툴팁 요소 하나(`role="tooltip"`)를 만들고 `root`에 `pointerover`·`pointerout`·`focusin`·`focusout`·`keydown`을 위임한다. 대상은 `data-hint` 속성(i18n 키)을 가진 요소다. 마우스는 500 ms 뒤, 키보드 포커스(`:focus-visible`)는 즉시 보인다. 터치 포인터(`pointerType === 'touch'`)에는 보이지 않는다. 보일 때 대상에 `aria-describedby`를 달고 숨길 때 뗀다. 위치는 보일 때 `getBoundingClientRect` 한 번으로 정하고 화면 밖으로 나가면 반대편에 놓는다. 툴팁 위로 포인터를 옮겨도 닫히지 않는다(WCAG 1.4.13).
-- `help.open({ topic? })`: 왼쪽 주제 목록, 오른쪽 본문. 주제는 `basics`(테이블·열·빈 행), `types`(열 타입과 선택 항목 예시), `columns`(숨기기·삭제·복원·데이터베이스 정리), `sortFilter`, `search`(검색 인덱스와 3자 규칙), `views`, `importExport`, `saving`(모드별), `multiPc`(revision 경고. `docs/cloud-sync.md`의 요약), `appData`(D-18의 비우기, 시크릿 모드의 일반적 동작), `shortcuts`. 본문 문단은 `help.<주제>.body`를 빈 줄로 나눠 `p` 요소에 `textContent`로 넣는다.
-- `shortcuts.describe()` → `{ keys, labelKey }[]`: `SHORTCUTS` 표의 항목마다 표시용 키 조합(`Ctrl+S` 등, macOS는 `⌘`)과 `shortcut.<action>` 설명 키. 도움말의 단축키 주제가 이 목록만으로 그려진다.
-- 도구 모음의 "도움말" 버튼과 단축키 F1(`help-open`). F1을 브라우저·WebView가 가로채면 버튼만 남는다. 실측은 `docs/support-matrix.md`에 적는다.
+- `tooltip.mount(root)` / `tooltip.unmount()`: 문서에 툴팁 요소 하나(`role="tooltip"`)를 만들고 `root`(`main.js`가 `document.body`를 넘긴다. 대화상자도 body에 붙는다)에 `pointerover`·`pointerout`·`pointerdown`·`focusin`·`focusout`·`keydown`을 위임한다. 대상은 `data-hint` 속성(i18n 키)을 가진 요소다. 마우스는 500 ms 뒤, 키보드 포커스(`:focus-visible`)는 즉시 보인다. 터치 포인터(`pointerType === 'touch'`)에는 보이지 않는다. 보일 때 대상에 `aria-describedby`를 달고 숨길 때 뗀다(대상이 이미 가진 id는 남긴다). 숨긴 툴팁은 문구를 비운다. 위치는 보일 때 대상의 `getBoundingClientRect` 한 번과 툴팁 크기 한 번으로 정한다: 대상 아래, 화면 밖으로 나가면 위, 가로는 화면 안으로 민다. 툴팁 위로 포인터를 옮겨도 닫히지 않는다(WCAG 1.4.13, 보이는 동안만 `pointermove`로 대상·툴팁을 감싼 사각형을 확인한다). Esc는 툴팁만 닫고 전파를 막지 않는다(열린 대화상자·편집기의 Esc도 그대로 돈다).
+- `help.open({ topic?, persistence })`: 왼쪽 주제 목록, 오른쪽 본문. `persistence`는 호출자(도구 모음)가 `store.capabilities().persistence`를 넘긴다(대화상자는 스토어를 모른다). 주제 목록은 세로 탭(`role="tablist"`, `aria-orientation="vertical"`)이며 고른 탭만 탭 정지(`tabindex="0"`)이고 ↑↓·Home·End로 옮기면 그 주제를 보인다. 대화상자가 열리면 고른 탭이 포커스를 받는다(`openDialog`의 `initialFocus`). 버튼은 "닫기" 하나다. 주제는 `basics`(테이블·열·빈 행), `types`(열 타입과 선택 항목 예시), `columns`(숨기기·삭제·복원·데이터베이스 정리), `sortFilter`, `search`(검색 인덱스와 3자 규칙), `views`, `importExport`, `saving`(모드별), `multiPc`(revision 경고. `docs/cloud-sync.md`의 요약), `appData`(D-18의 비우기, 시크릿 모드의 일반적 동작), `shortcuts`. 본문 문단은 `help.<주제>.body`를 빈 줄로 나눠 `p` 요소에 `textContent`로 넣는다.
+- `shortcuts.describe({ mac? })` → `{ keys, labelKey }[]`: `SHORTCUTS` 표의 항목마다 표시용 키 조합(`Ctrl+Shift+S` 등, `mac`이면 `⌘`·`⇧`)과 `shortcut.<action>` 설명 키. `mac`을 주지 않으면 `navigator.platform`(기능 감지)으로 정한다. 도움말의 단축키 주제가 이 목록만으로 그려지며, 같은 행동의 조합 여럿(다시 실행의 Ctrl+Shift+Z와 Ctrl+Y)은 한 줄에 모은다.
+- 도구 모음의 "도움말" 버튼(`data-action="help-open"`)과 단축키 F1(`SHORTCUTS`의 문서 범위 행동 `help`. 모달이 떠 있으면 v1의 문서 단축키처럼 무시한다). F1을 브라우저·WebView가 가로채면 버튼만 남는다. 실측은 `docs/support-matrix.md`에 적는다.
 
 **예외 처리**
 - 비활성(`disabled`) 버튼은 포커스를 받지 않고 일부 브라우저에서 포인터 이벤트도 내지 않는다. 비활성 버튼의 툴팁이 보이는지 브라우저별로 실측해 적고, 보이지 않는 환경에서는 "왜 꺼졌는지"를 도움말 주제로 대신한다. `disabled`를 `aria-disabled`로 바꾸는 것은 이 Step에서 하지 않는다(키보드 동작이 바뀐다).
-- 툴팁을 띄운 요소가 DOM에서 사라짐(그리드 다시 마운트, 대화상자 닫힘): 다음 `focusout`·`pointerout`을 기다리지 않고 요소 연결 여부를 확인해 숨긴다.
+- 툴팁을 띄운 요소가 DOM에서 사라짐(그리드 다시 마운트, 대화상자 닫힘): 다음 `focusout`·`pointerout`을 기다리지 않고 요소 연결 여부를 확인해 숨긴다. 보이는 동안만 `MutationObserver`(`root`의 자식 목록)를 걸어 확인하고, 500 ms 대기가 끝날 때도 확인한다. 가상 그리드는 스크롤마다 노드를 바꾸므로 숨긴 동안에는 관찰하지 않는다.
+- 가져오기 미리보기 칸은 v1에서 긴 값의 앞 500자를 `title`로 보였다. 툴팁 문구는 i18n 키뿐이라 사용자 값을 담지 않으므로 이 `title`은 없앤다. 미리보기는 앞부분과 말줄임을 보이고, 전체 값은 가져온 뒤 그리드·장문 편집기에서 본다.
 - 모달 대화상자 위의 툴팁: 툴팁 요소는 최상위 쌓임 순서에 두고, 대화상자의 포커스 트랩에 걸리지 않는다(툴팁은 포커스를 받지 않는다).
 - 도움말 대화상자는 v1 모달 기반(`dialog.js`)을 쓴다. 포커스 트랩·Esc·닫을 때 포커스 복귀가 같다.
 - 누락된 문구 키: `t()`는 키 자체를 보여 주므로 화면에서 드러나지만, 단위 테스트가 먼저 잡는다(아래).
