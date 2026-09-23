@@ -12,6 +12,9 @@ import { nameValidator } from './table.js';
 /** @typedef {import('../../db/values.js').ColumnOptions} ColumnOptions */
 /** @typedef {import('../../db/values.js').CoercePolicy} CoercePolicy */
 /** @typedef {import('../../i18n/index.js').MessageKey} MessageKey */
+/** @typedef {import('../../app/commands.js').SchemaCommands} SchemaCommands */
+/** @typedef {import('../../db/tables.js').ColumnInfo} ColumnInfo */
+/** @typedef {import('../toast.js').Toasts} Toasts */
 
 /**
  * @param {LogicalType} type
@@ -211,4 +214,43 @@ export function confirmDeleteColumn(name) {
     okLabel: t('column.delete.ok'),
     danger: true,
   });
+}
+
+/**
+ * 타입 변경 대화상자 → 적용. 사이드바와 그 밖의 진입점이 같은 경로를 쓴다.
+ * 10만 행 이상에서는 청크마다 진행률이 오고, 취소는 다음 청크 전에 롤백된다(Step 3 예외 처리).
+ * @param {{ commands: SchemaCommands, toasts: Toasts, tableId: string, column: ColumnInfo }} input
+ * @returns {Promise<void>}
+ */
+export async function changeColumnTypeFlow(input) {
+  const { commands, toasts, tableId, column } = input;
+  const choice = await promptChangeType({
+    name: column.name,
+    current: column.type,
+    choices: column.options?.choices,
+  });
+  if (!choice) return;
+  const controller = new AbortController();
+  const result = await commands.changeColumnType(tableId, column.id, choice, {
+    signal: controller.signal,
+    onProgress: (p) => {
+      toasts.progress('column.changeType.progress', { done: p.done, total: p.total }, () =>
+        controller.abort(),
+      );
+    },
+  });
+  toasts.progress(null);
+  if (result && result.nulled > 0)
+    toasts.info('column.changeType.nulled', { count: result.nulled });
+}
+
+/**
+ * 열 삭제 확인 → 소프트 삭제. 사이드바와 그 밖의 진입점이 같은 경로를 쓴다.
+ * @param {{ commands: SchemaCommands, tableId: string, column: ColumnInfo }} input
+ * @returns {Promise<void>}
+ */
+export async function deleteColumnFlow(input) {
+  if (await confirmDeleteColumn(input.column.name)) {
+    await input.commands.softDeleteColumn(input.tableId, input.column.id);
+  }
 }

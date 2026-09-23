@@ -8,8 +8,8 @@ import { t } from '../i18n/index.js';
 import { WARN_COLUMNS } from '../db/schema.js';
 import { toAppError } from '../util/errors.js';
 import {
-  confirmDeleteColumn,
-  promptChangeType,
+  changeColumnTypeFlow,
+  deleteColumnFlow,
   promptColumnName,
   promptNewColumn,
   typeLabel,
@@ -270,29 +270,9 @@ export function mountSidebar(parent, deps) {
         }
         return;
       }
-      case 'column-type': {
-        if (!table || !column) return;
-        const input = await promptChangeType({
-          name: column.name,
-          current: column.type,
-          choices: column.options?.choices,
-        });
-        if (!input) return;
-        // 10만 행 이상에서는 청크마다 진행률이 오고, 취소는 다음 청크 전에 롤백된다(Step 3 예외 처리).
-        const controller = new AbortController();
-        const result = await commands.changeColumnType(tableId, columnId, input, {
-          signal: controller.signal,
-          onProgress: (p) => {
-            toasts.progress('column.changeType.progress', { done: p.done, total: p.total }, () =>
-              controller.abort(),
-            );
-          },
-        });
-        toasts.progress(null);
-        if (result && result.nulled > 0)
-          toasts.info('column.changeType.nulled', { count: result.nulled });
+      case 'column-type':
+        if (table && column) await changeColumnTypeFlow({ commands, toasts, tableId, column });
         return;
-      }
       case 'column-up':
       case 'column-down': {
         if (!table || !column) return;
@@ -307,13 +287,9 @@ export function mountSidebar(parent, deps) {
         await commands.reorderColumns(tableId, ids);
         return;
       }
-      case 'column-delete': {
-        if (!table || !column) return;
-        if (await confirmDeleteColumn(column.name)) {
-          await commands.softDeleteColumn(tableId, columnId);
-        }
+      case 'column-delete':
+        if (table && column) await deleteColumnFlow({ commands, tableId, column });
         return;
-      }
       case 'column-restore':
         if (table && column) await commands.restoreColumn(tableId, columnId);
         return;
