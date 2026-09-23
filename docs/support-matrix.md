@@ -41,17 +41,18 @@ Firefox·Safari(WebKit) 열은 세션 H에서도 채우지 못했다. Playwright
 
 ## 데스크톱 모드 (타우리 WebView)
 
-측정 방법: `npm run test:desktop`(`test/desktop/run.mjs`)이 테스트 변형(`dist/test/tauri/index.html`)을 담은 디버그 바이너리를 tauri-driver로 띄워 WebDriver로 검사한다. 세션 I는 이 실행 환경(Ubuntu 24.04, WebKitGTK 2.52.6, Xvfb, `WEBKIT_DISABLE_COMPOSITING_MODE=1`·`WEBKIT_DISABLE_DMABUF_RENDERER=1`)에서 실측했다. Windows·macOS는 CI `desktop` 잡이 빌드만 하고 E2E는 돌리지 않으므로(tauri-driver는 macOS 미지원, Windows는 Edge Driver 필요) 미확인이다.
+측정 방법: `npm run test:desktop`(`test/desktop/run.mjs`)이 테스트 변형(`dist/test/tauri/index.html`)을 담은 디버그 바이너리를 tauri-driver로 띄워 WebDriver로 검사한다. Linux는 세션 I가 이 실행 환경(Ubuntu 24.04, WebKitGTK 2.52.6, Xvfb, `WEBKIT_DISABLE_COMPOSITING_MODE=1`·`WEBKIT_DISABLE_DMABUF_RENDERER=1`)에서, Windows는 세션 M이 CI `desktop` 잡(`windows-latest`, WebView2 런타임 152.0.4191.66과 같은 버전의 Edge Driver)에서 실측했다. 앱은 Edge Driver가 주는 WebView2 환경 변수를 메인 창에 넘긴다(`src-tauri/src/lib.rs`의 `create_main_window`). macOS는 tauri-driver가 지원하지 않아 CI가 빌드만 하므로 미확인이다.
 
 | 기능 | Windows WebView2 | macOS WKWebView | Linux WebKitGTK 2.52 |
 |---|---|---|---|
-| 타우리 전역 객체(`__TAURI_INTERNALS__`)로 데스크톱 모드 판정, 상태바 "데스크톱 모드" | 미확인 | 미확인 | ✓ (세션 I) |
-| Blob URL Worker 안에서 `jdr://localhost/call` 커스텀 프로토콜에 동기 XHR·fetch(엔진 프로토콜, D-15) | 미확인 (`http://jdr.localhost/call` 형태) | 미확인 | ✓ (세션 I: Worker 안 `SELECT 1`, FTS5 trigram 한글 부분 일치) |
-| `SharedArrayBuffer`·`crossOriginIsolated`(`app.security.headers`의 COOP/COEP) | 미확인 | 미확인 | ✗ `crossOriginIsolated: false`, `SharedArrayBuffer` 없음(세션 I). 공유 버퍼 중계 폴백은 쓰이지 않고 프로토콜 경로로 동작 |
-| 작업 사본 열기 → 편집 → `db.save`(VACUUM INTO → `.bak` → rename) → 다시 열기 | 미확인 | 미확인 | ✓ (세션 I: 한글 폴더·파일 이름, revision 1 → 2, `.bak` 생성) |
-| `.bak` 복원(러스트 `restore_backup`) | 미확인 | 미확인 | ✓ (세션 I) |
-| 원본 변경 감지(`E_ORIGINAL_CHANGED`) → 대화상자 → 취소 | 미확인 | 미확인 | ✓ (세션 I: 대화상자의 "취소" 버튼 클릭까지) |
+| 타우리 전역 객체(`__TAURI_INTERNALS__`)로 데스크톱 모드 판정, 상태바 "데스크톱 모드" | ✓ (세션 M) | 미확인 | ✓ (세션 I) |
+| Blob URL Worker 안에서 `jdr://localhost/call` 커스텀 프로토콜에 동기 XHR·fetch(엔진 프로토콜, D-15) | ✓ (세션 M: `http://jdr.localhost/call` 형태. Worker 안 `SELECT 1`, FTS5 trigram 한글 부분 일치) | 미확인 | ✓ (세션 I: Worker 안 `SELECT 1`, FTS5 trigram 한글 부분 일치) |
+| `SharedArrayBuffer`·`crossOriginIsolated`(`app.security.headers`의 COOP/COEP) | ✓ `crossOriginIsolated: true`, `SharedArrayBuffer` 있음(세션 M). 엔진은 그래도 프로토콜 경로가 기본이다 | 미확인 | ✗ `crossOriginIsolated: false`, `SharedArrayBuffer` 없음(세션 I). 공유 버퍼 중계 폴백은 쓰이지 않고 프로토콜 경로로 동작 |
+| 작업 사본 열기 → 편집 → `db.save`(VACUUM INTO → `.bak` → rename) → 다시 열기 | ✓ (세션 M: 한글 폴더·파일 이름, revision 1 → 2, `.bak` 생성) | 미확인 | ✓ (세션 I: 한글 폴더·파일 이름, revision 1 → 2, `.bak` 생성) |
+| `.bak` 복원(러스트 `restore_backup`) | ✓ (세션 M) | 미확인 | ✓ (세션 I) |
+| 원본 변경 감지(`E_ORIGINAL_CHANGED`) → 대화상자 → 취소 | ✓ (세션 M) | 미확인 | ✓ (세션 I: 대화상자의 "취소" 버튼 클릭까지) |
 | 파일 대화상자(dialog 플러그인 `pick_open`·`pick_save`) | 미확인 | 미확인 | 미확인(자동화 불가. E2E는 테스트 훅으로 경로를 넣는다) |
 | 내보내기 경로 싱크(`sink_write` raw 본문) | 미확인 | 미확인 | 미확인(WebView에서 실측하지 않음. Node `test:native`가 JSON 경로로 코어 싱크를 검사) |
-| IndexedDB(`known_revisions`·설정), BroadcastChannel | 미확인 | 미확인 | ✓ (세션 I: 테스트 훅 `idbAvailable()`·`tabLockAvailable()` 둘 다 true) |
+| IndexedDB(`known_revisions`·설정), BroadcastChannel | ✓ (세션 M: 둘 다 true) | 미확인 | ✓ (세션 I: 테스트 훅 `idbAvailable()`·`tabLockAvailable()` 둘 다 true) |
+| 비정상 종료로 남은 dirty 작업 사본: 시작 안내, 설정의 작업 사본 목록에서 키보드로 버리기·열어서 복구 | ✓ (세션 M) | 미확인 | ✓ (세션 L) |
 | 두 번째 인스턴스 실행(single-instance 플러그인) | 미확인 | 미확인 | 미확인 |
