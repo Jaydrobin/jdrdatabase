@@ -1,8 +1,8 @@
 name: desktop
 
 # 데스크톱(Step 11): 세 플랫폼에서 러스트 워크스페이스 검사(fmt·clippy·test), 실제 rusqlite 엔진에 대한 JS 적합성
-# 테스트(test:native), 타우리 빌드. Linux는 tauri-driver(WebKitWebDriver + Xvfb)로 데스크톱 E2E까지 돌린다.
-# Windows(Edge Driver) 단계는 갖춰 두었지만 꺼 두었고(아래 matrix), macOS는 tauri-driver가 지원하지 않는다.
+# 테스트(test:native), 타우리 빌드. Linux(WebKitWebDriver + Xvfb)와 Windows(Edge Driver)는 tauri-driver로 데스크톱
+# E2E까지 돌린다. macOS는 tauri-driver가 지원하지 않는다.
 # 브라우저 산출물 검사는 ci.yml이 맡는다. 러스트 빌드가 느리므로 PR과 main 푸시에서만 돈다.
 on:
   push:
@@ -83,11 +83,8 @@ jobs:
         include:
           - os: ubuntu-latest
             e2e: true
-          # Windows E2E는 꺼 둔다(세션 L): Edge Driver는 WebView2 런타임과 같은 버전으로 붙지만, 앱의 WebView2가
-          # WebDriver의 원격 디버깅 인자(WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS)를 받지 않아 세션을 만들지 못한다.
-          # wry가 브라우저 인자와 데이터 폴더를 API로 지정하기 때문으로 보인다. 아래 Windows 단계는 켜면 그대로 쓴다.
           - os: windows-latest
-            e2e: false
+            e2e: true
           - os: macos-latest
             e2e: false
     runs-on: ${{ matrix.os }}
@@ -184,26 +181,35 @@ jobs:
         if: matrix.e2e && runner.os == 'Windows'
         run: npm run test:desktop
 
-      # Windows E2E가 실패하면 원인을 가르는 정보를 남긴다: 테스트 앱을 직접 띄워 15초 뒤에도 살아 있는지(죽었으면
-      # 종료 코드와 출력), 그리고 WebDriver가 쓰는 원격 디버깅 포트가 WebView2에서 열리는지.
+      # Windows E2E가 실패하면 원인을 가르는 정보를 남긴다. 남은 앱·WebView2 프로세스를 먼저 정리하고(single-instance가
+      # 새 실행을 앞 인스턴스로 넘기면 진단이 흐려진다), tauri-driver와 같은 capability로 Edge Driver에 직접 세션을
+      # 요청해 드라이버의 상세 로그(앱을 띄운 방법과 기다린 파일)와 WebView2 프로세스가 실제로 받은 명령줄을 찍는다.
       - name: Windows app diagnostics (on E2E failure)
         if: failure() && matrix.e2e && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $app = 'src-tauri\target\debug\jdrdatabase-desktop.exe'
-          if (-not (Test-Path $app)) { Write-Host "no binary at $app"; exit 0 }
-          $env:RUST_BACKTRACE = '1'
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
-          $out = Join-Path $env:RUNNER_TEMP 'app-out.txt'
-          $err = Join-Path $env:RUNNER_TEMP 'app-err.txt'
-          $p = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-          Start-Sleep -Seconds 15
-          if ($p.HasExited) { Write-Host "app exited with code $($p.ExitCode)" } else { Write-Host 'app is still running after 15 s' }
-          try { (Invoke-WebRequest -Uri 'http://127.0.0.1:9222/json/version' -TimeoutSec 5).Content } catch { Write-Host "no DevTools endpoint: $($_.Exception.Message)" }
-          Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2|msedgedriver|tauri-driver' } | Format-Table ProcessName, Id -AutoSize | Out-String | Write-Host
-          Write-Host '--- stdout ---'; Get-Content $out -ErrorAction SilentlyContinue
-          Write-Host '--- stderr ---'; Get-Content $err -ErrorAction SilentlyContinue
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          $app = (Resolve-Path 'src-tauri\target\debug\jdrdatabase-desktop.exe' -ErrorAction SilentlyContinue).Path
+          if (-not $app) { Write-Host 'no debug binary'; exit 0 }
+          Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2|msedgedriver|tauri-driver' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          $driver = if ($env:JDR_NATIVE_DRIVER) { $env:JDR_NATIVE_DRIVER } else { Join-Path $env:EdgeWebDriver 'msedgedriver.exe' }
+          $log = Join-Path $env:RUNNER_TEMP 'msedgedriver.log'
+          $d = Start-Process -FilePath $driver -ArgumentList '--port=9515', '--verbose', "--log-path=$log" -PassThru
+          Start-Sleep -Seconds 2
+          $caps = @{ capabilities = @{ alwaysMatch = @{ browserName = 'webview2'; 'ms:edgeOptions' = @{ binary = $app; args = @() } } } } | ConvertTo-Json -Depth 6
+          try {
+            $r = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:9515/session' -Body $caps -ContentType 'application/json' -TimeoutSec 90
+            Write-Host "session created: $($r.value.sessionId)"
+          } catch {
+            Write-Host "session failed: $($_.Exception.Message)"
+            if ($_.ErrorDetails) { Write-Host $_.ErrorDetails.Message }
+          }
+          Write-Host '--- WebView2 / app processes and command lines ---'
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'jdrdatabase|msedgewebview2' } | ForEach-Object { Write-Host "$($_.ProcessId) $($_.Name): $($_.CommandLine)" }
+          Write-Host '--- msedgedriver log (launch, environment, DevTools) ---'
+          Get-Content $log -ErrorAction SilentlyContinue | Select-String -Pattern 'Launching|WEBVIEW2|user-data-dir|remote-debugging|DevToolsActivePort|environment|binary|Failed|ERROR' | Select-Object -First 80 | ForEach-Object { Write-Host $_.Line }
+          Stop-Process -Id $d.Id -Force -ErrorAction SilentlyContinue
+          Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2' } | Stop-Process -Force -ErrorAction SilentlyContinue
 
       - name: Tauri bundle (release)
         run: npx tauri build
