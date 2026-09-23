@@ -41,7 +41,7 @@ grep -n 미확인 docs/sessions.md
 | 설계 v2 | DESIGN.md 0.12(D-16~D-19, Step 12~14), CLAUDE.md 7.3·8 | 완료 |
 | N | 12 (기본 시트·빈 행·열 머리글) | 완료(완료 기준 전부 실측. 실제 한글 IME·스크린 리더·Firefox·Safari는 미확인) |
 | O | 13 (데이터베이스 정리·앱 데이터 비우기) | 완료(완료 기준 전부 실측. 데스크톱 E2E는 Linux만, 정리 대화상자의 취소·목록 다시 읽기·실패 문구 표시는 E2E 미확인) |
-| P | 14 (툴팁·도움말) | 대기 |
+| P | 14 (툴팁·도움말) | 완료(완료 기준 전부 실측. 데스크톱은 Linux만, Firefox·Safari·스크린 리더·실제 시크릿 창은 미확인) |
 
 ## 기록
 
@@ -1824,3 +1824,67 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - `navigator.storage.estimate`의 사용량 줄: Chromium `file://`에서 보이는 것을 E2E로 확인했습니다. Firefox·Safari는 **미확인**입니다.
 - 저널이 멈춘 상태(가져오기 뒤)에서 정리한 뒤의 복구 동작: v1 규칙 그대로이며 따로 확인하지 않았습니다(**미확인**).
 - 세션 N까지의 나머지 미확인 목록(실제 한글 IME, 스크린 리더, Firefox·Safari, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E, SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사, macOS WKWebView 등)은 그대로 **미확인**입니다.
+
+### 세션 P (Step 14: 툴팁·도움말) — 2026-09-23
+
+커밋: `16aff17` docs(design) → `7ee1646` feat(ui) → `0012f10` test → 이 커밋 docs(session).
+
+시작 상태: 로컬 작업 브랜치가 원격 `cd4cbe4`(세션 O의 마지막 커밋)와 같았습니다. 원격 실행 환경이 정해 준 브랜치도 `claude/busy-mayer-hv2g8x`라 따로 묻지 않았습니다. `npm ci` 뒤 `npm run check`(397개)가 초록이었고, `cd4cbe4`의 `ci` 실행(run 35898590891)도 초록이었습니다(선행 조건). 이어받은 미확인 가운데 이 세션의 몫은 설계 v2 절의 "F1 단축키와 비활성 버튼 툴팁의 브라우저별 동작, 시크릿 모드의 IDB 수명"이었습니다(아래).
+
+**설계에서 구현 중에 정한 것(`16aff17`, DESIGN.md D-19·Step 14에 반영)**
+
+- 툴팁 요소는 포인터 이벤트를 받지 않습니다(`pointer-events: none`). 받게 두면 툴팁이 그 아래의 버튼·머리글을 덮어 클릭을 가로채고, 포인터가 툴팁 위에 있는 한 닫히지 않아 덮인 버튼을 누를 길이 없어집니다(Playwright도 같은 이유로 "다른 요소가 포인터 이벤트를 가로챔"에서 멈춥니다). WCAG 1.4.13의 "가리킬 수 있음"은 좌표로 지킵니다: 보이는 동안만 `pointermove`로 대상과 툴팁을 감싼 사각형을 확인하고, 그 밖으로 나가면 닫습니다. 누르면(`pointerdown`) 닫고 포인터가 그 대상을 떠날 때까지 다시 띄우지 않으며, 스크롤하면 닫습니다.
+- 텍스트 입력칸(검색 상자)에는 툴팁을 달지 않습니다. 입력칸은 마우스로 눌러도 `:focus-visible`이라 입력하는 내내 툴팁이 떠 있게 되고, 레이블·예시가 이미 늘 보입니다. `conventions.test.js`에 예외 목록(`HINTLESS_ACTION_ELEMENTS`)으로 둡니다.
+- 툴팁 키는 `hint.<data-action>`이고, `data-action`이 없는 요소는 `hint.<요소 이름>`(머리글 `hint.header-sort`·`hint.header-menu`, `hint.frozen-select`), 상태에 따라 하는 일이 바뀌는 검색 인덱스 버튼은 상태마다 키(`hint.search-index`·`-disable`·`-stale`)를 둡니다. 설정의 작업 사본 줄의 "열기"·"버리기"에는 `data-action`(`workcopy-open`·`workcopy-discard`)을 새로 달았습니다.
+- `help.open({ topic?, persistence })`: 대화상자는 스토어를 모르므로 도구 모음이 `store.capabilities().persistence`를 넘깁니다. 저장 주제의 본문 키는 `help.saving.body` / `help.saving.bodyNative`입니다. 주제 목록은 세로 탭(로빙 tabindex, ↑↓·Home·End)이라 `dialog.js`에 `initialFocus`를 더하고, 포커스 트랩의 처음·끝 계산이 `tabindex="-1"` 버튼을 건너뛰게 했습니다(탭 정지가 아닌 버튼이 처음·끝이 되면 Shift+Tab이 대화상자 밖으로 나갑니다).
+- F1은 `SHORTCUTS`의 문서 범위 행동 `help`이고, `shortcuts.describe({ mac? })`가 표의 항목마다 표시용 키(`Ctrl+Shift+S`, macOS `⌘⇧S`, Escape는 `Esc`, ContextMenu는 `Menu`)와 `shortcut.<action>`을 돌려줍니다. 도움말은 같은 설명 키의 조합을 한 줄에 모읍니다(13줄).
+- 가져오기 미리보기 칸의 `title`(긴 값의 앞 500자)은 없앴습니다. 툴팁 문구는 i18n 키뿐이라 사용자 값을 담을 수 없습니다. 미리보기는 앞 80자와 말줄임을 보이고, 전체 값은 가져온 뒤 그리드·장문 편집기에서 봅니다.
+
+**한 일**
+
+1. **UI(`7ee1646`)**: `ui/tooltip.js`(`mount`/`unmount`, `main.js`가 `document.body`에 건다), `ui/dialogs/help.js`(`HELP_TOPICS` 열한 개, `bodyKey`, `paragraphs`, `open`), `app/shortcuts.js`(F1 `help`, `describe`), 도구 모음의 "도움말" 버튼과 F1, 도구 모음·사이드바·그리드(행 추가·삭제·고정 열·필터 지우기)·머리글(정렬·메뉴)·설정(정리·직전 저장본·작업 사본·확인 줄)·정렬/필터 대화상자(줄 추가·삭제)·장문 편집기(저장·취소)의 `data-hint`, 검색 인덱스 버튼의 `title` → 상태별 툴팁, `styles/app.css`(툴팁·도움말), 두 언어 문구(툴팁 50개, 단축키 13개, 도움말 제목·본문 23개와 목록·표 머리 4개. 쓰지 않게 된 `toolbar.searchIndexStaleHint`는 지움), `CLAUDE.md` 5.5의 툴팁 규칙.
+2. **테스트·실측(`0012f10`)**: `test/e2e/help.spec.js` 5개, `a11y.spec.js`의 툴팁·도움말 axe 1개, `test/desktop/run.mjs`의 7번 시나리오, `docs/support-matrix.md`의 브라우저 3행·데스크톱 4행. `view.spec.js`의 "오래됨" 테스트는 `title` 대신 `data-hint`와 호버로 보인 툴팁 문구를 보게 고쳤습니다(`7ee1646`, 건너뛴 테스트 없음).
+
+**완료 기준 (Step 14)**
+
+- [x] 단위(`conventions.test.js`): `src/ui`에 `.title =`과 `setAttribute('title'` 0건 — "src/ui에 HTML title 속성 쓰기가 없다". `data-action`을 가진 모든 버튼이 `data-hint`를 가지며 그 키가 `ko.js`·`en.js`에 있다 — `x.dataset.action =`을 하는 변수마다 같은 파일의 `x.dataset.hint =`을 요구하고, 리터럴 action·도우미(`makeButton`·`button`) 호출 인자·확인 줄 역할(`${role}-ok`)에서 만든 `hint.<action>`과 리터럴 `hint.*` 키 전부가 두 파일에 있는지 봅니다. 도우미의 `data-hint` 줄을 지우거나 `en.js`에서 키 하나를 지우면 실패하는 것을 손으로 확인했습니다. 모든 `help.<주제>.title`·`.body`(+ `help.saving.bodyNative`)와 `shortcut.<action>`이 두 파일에 있다 — "도움말 주제의 title·body와 단축키 설명…".
+- [x] 단위: `shortcuts.describe()`가 `SHORTCUTS`의 모든 항목을 표의 순서대로 `shortcut.<action>`과 함께 담는다 — `shortcuts.test.js`(표시용 키 조합의 PC·macOS 형태, F1 해석 포함). `help.test.js`: 주제 목록, 저장 주제의 모드별 본문 키, 문단 나누기.
+- [x] E2E: 마우스 호버 500 ms 뒤 툴팁 표시(250 ms에는 숨김, 표시까지 500 ms 이상), 키보드 Tab 포커스로 즉시 표시(300 ms 제한), Esc로 숨김, `aria-describedby` 연결과 해제 — `help.spec.js` 첫째·둘째 테스트. 툴팁 위로 옮겨도 유지, 벗어나면 숨김과 문구 비움, 누르면 닫히고 떠나기 전에는 다시 뜨지 않음, 마우스 클릭 포커스에는 뜨지 않음도 같은 테스트. 도움말 열기 → 열한 주제가 모두 제목·본문 문단을 가짐(↓로 차례로, Home·End·↑ 순환) → 저장 주제가 브라우저 모드 문구(저널, 200 MB, "작업 사본" 없음) → Esc로 닫고 포커스가 도움말 버튼으로 돌아옴 → F1로도 열림 — 다섯째 테스트. 넷째 테스트는 기본 화면·설정·필터 대화상자에 있는 모든 `button[data-action]`·`select[data-action]`이 `hint.*`를 가지는지 DOM에서 봅니다.
+- [x] 데스크톱 E2E(tauri-driver, Linux WebKitGTK 2.52, Xvfb): 도움말 버튼 → 저장 주제에 "작업 사본"과 ".bak"이 있고 "저널"이 없음 → Esc로 닫으면 포커스가 도움말 버튼 — `run.mjs` 7번. 기존 1~6번도 함께 통과했습니다(`webkit2gtk-driver`·`libwebkit2gtk-4.1-dev`·`xvfb`는 apt, `tauri-driver` 2.0.6은 cargo로 이 컨테이너에 설치).
+- [x] 접근성: 툴팁 표시 상태(키보드 포커스로 띄움)와 도움말 대화상자의 열한 주제 각각에서 axe `critical`·`serious` 0건(`moderate`·`minor`도 0건), 툴팁 명도 대비 4.5:1 이상(계산값: 글자 `#ffffff`·배경 `#1f2328`, 약 15.8:1) — `a11y.spec.js` 여섯째 테스트.
+- [x] `dist/jdrdatabase.html` 크기: **3,950,660 bytes**(세션 O 3,906,811에서 **+43,849 bytes**: 도움말·툴팁 두 언어 문구가 대부분이고 툴팁·도움말 모듈과 CSS). `verify` 통과(외부 참조 0, 예산 6 MiB 안).
+
+**예외 처리 (Step 14) 대응**
+
+- 비활성 버튼: Chromium 141은 꺼진 버튼에도 `pointerover`·`pointerenter`·`mouseover`를 대상 버튼으로 내므로 툴팁이 보입니다(`help.spec.js`의 "뷰 삭제"). WebKitGTK 2.52도 보였습니다(데스크톱 7번, 꺼진 "되돌리기"). 키보드로는 꺼진 버튼에 포커스가 가지 않으므로, "왜 꺼졌는지"를 도움말 "테이블·열·빈 행" 주제의 마지막 문단에 적었습니다. `disabled`는 그대로입니다. Firefox·Safari는 **미확인**입니다.
+- 툴팁을 띄운 요소가 DOM에서 사라짐: 보이는 동안만 `MutationObserver`로 연결 여부를 보고 숨깁니다. 500 ms 대기가 끝날 때도 확인합니다. E2E는 사이드바 버튼 위에 띄운 채 그 요소를 지워 확인했습니다.
+- 모달 대화상자 위의 툴팁: 툴팁은 `z-index: 2000`(대화상자 배경 100, 메뉴 1000 위)이고 포커스를 받지 않는 요소라 포커스 트랩의 대상이 아닙니다(`a11y.spec.js`의 기존 트랩 테스트가 그대로 통과). 대화상자 안 버튼의 툴팁이 대화상자 위에 그려지는지를 화면으로 확인하는 E2E는 두지 않았습니다(**미확인**. 쌓임 순서는 CSS 값으로만 확인).
+- 도움말 대화상자는 v1 `dialog.js`를 씁니다(포커스 트랩, Esc, 닫을 때 포커스 복귀) — E2E.
+- 누락된 문구 키: `conventions.test.js`가 먼저 잡습니다(위). 툴팁은 없는 키면 키 자체를 보입니다.
+- 터치 포인터: `pointerType: 'touch'`의 `pointerover`에는 띄우지 않습니다. E2E는 합성 `PointerEvent`로만 확인했고 실제 터치 기기는 **미확인**입니다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **406개** 통과(397 + 규약 3 + 단축키 3 + 도움말 3). 중간 커밋 `7ee1646`에 단위 테스트 변경이 모두 들어 있어 그 커밋의 상태가 이 수와 같습니다.
+- [x] `npm run build` → `npm run verify`: 통과(위 크기).
+- [x] `npm run test:e2e`: **86개** 통과(80 + `help.spec.js` 5 + `a11y.spec.js` 1). 툴팁이 새로 뜨는데도 기존 80개가 그대로 통과했습니다(툴팁이 포인터 이벤트를 받지 않으므로 다음 클릭을 가리지 않습니다).
+- [x] `npm run test:native`: **40개** 통과. 데스크톱 코드(`src-tauri/`, `engine-native.js`, `ipc-bridge.js`, `filesystem.js`)는 바꾸지 않았지만 돌렸습니다. 러스트 코드를 바꾸지 않아 `cargo fmt`·`clippy`·`cargo test`는 돌리지 않았습니다.
+- [x] `npm run test:desktop`(Linux WebKitGTK, Xvfb): 전 시나리오 통과(위).
+- [x] `npm run test:perf`: 8개 중 7개 통과. 앱 시작 481.7 ms, 300 MB 열기 874 ms, 렌더 p95 1 ms, 창 질의 최대 17.3 ms, 셀 편집 2.7 ms, 스냅샷 1,493 ms, 저장 시점 RSS 1,157,742,592 bytes, CSV 가져오기 18,002 ms, XLSX 7,933 ms, LIKE 834.8 ms, trigram 54.3 ms, 정리 1,299 ms(최고 수위 1,329,233,920 bytes). **LIKE 짧은 검색어 중앙값이 1,055.5 ms로 로컬 예산(1초)을 넘었습니다.** 이 세션의 회귀가 아닌 근거: 같은 컨테이너에서 기준 커밋 `cd4cbe4`(worktree)와 이 브랜치의 `search.perf.spec.js`만 번갈아 두 번씩 돌린 A/B에서 기준 1,064.7·1,069 ms, 이 브랜치 1,060.5·1,067.2 ms였습니다. 세션 N(1,083 ms)부터 기록된 예산 경계 항목이고, 이 세션은 질의 경로를 바꾸지 않았습니다. CI는 보정된 기준선 비교로 판정합니다.
+- [x] CLAUDE.md 7.1: 새 오류 코드 없음. 새 RPC op 없음. `src/db`·`src/import`는 바꾸지 않음. `innerHTML` 새 사용 없음(도움말 본문·단축키 표·툴팁 문구는 모두 `textContent`). 모드 문자열 비교 추가 없음(도움말은 `persistence !== 'snapshot'`로 고름, `conventions.test.js` 통과). `dist/` 커밋 없음.
+- CI(`ci` 워크플로): 이 기록을 담은 푸시 뒤에 확인해 적습니다(**미확인**).
+
+**이어받은 미확인 항목의 결과**
+
+- 설계 v2의 "F1 단축키와 비활성 버튼 툴팁의 브라우저별 동작": Chromium 141(headless)과 WebKitGTK 2.52(데스크톱)에서 둘 다 F1이 문서로 와서 도움말이 열리고, 꺼진 버튼에도 툴팁이 보였습니다(`docs/support-matrix.md`). 헤드리스라 Chrome 자체의 F1 도움말 탭이 함께 열리는지는 볼 수 없었고, Firefox·Safari·Windows WebView2·macOS WKWebView는 **미확인**입니다.
+- 설계 v2의 "시크릿 모드의 IDB 수명": Chromium의 off-the-record 컨텍스트(Playwright `browser.newContext()`)에서 같은 컨텍스트의 다른 탭에는 IDB 값이 보이고, 컨텍스트를 닫은 뒤 새 컨텍스트에는 스토어가 없음을 쟀습니다. 도움말 "이 기기에 남는 데이터" 주제가 이 동작을 설명합니다. 실제 Chrome·Edge의 시크릿 창을 손으로 열어 확인하지는 않았습니다(**미확인**).
+
+**미확인 (후속에서 이어받음)**
+
+- **툴팁·도움말의 스크린 리더 낭독**(NVDA·VoiceOver가 `aria-describedby`의 툴팁 문구와 세로 탭을 읽는지): **미확인**입니다. axe는 정적 검사입니다.
+- **Firefox·Safari**에서 툴팁(`:focus-visible`, 꺼진 버튼의 포인터 이벤트)과 F1: **미확인**. **Windows WebView2**는 `desktop` 워크플로를 수동 실행하면 7번 시나리오가 돕니다(돌리지 않음, **미확인**). macOS WKWebView는 tauri-driver가 지원하지 않아 **미확인**.
+- **실제 터치 기기**에서 툴팁이 뜨지 않는 것: 합성 이벤트로만 확인(**미확인**).
+- **실제 시크릿 창**의 IDB 수명: 위(**미확인**).
+- **도움말 문구의 내용 검토**: 두 언어 본문은 DESIGN.md·`docs/cloud-sync.md`·`docs/desktop.md`와 코드의 동작에 맞춰 썼고 E2E는 주제마다 본문이 있는지만 봅니다. 사람이 읽고 정확성·어조를 확인하는 것은 리뷰어의 몫입니다(**미확인**).
+- LIKE 짧은 검색어의 로컬 예산 초과: 기준 커밋도 같은 값이라 이 세션의 회귀는 아니지만 이 컨테이너에서 예산을 넘는 상태입니다. 8장 측정 환경(4코어 노트북)에서의 값은 **미확인**입니다.
+- 세션 O까지의 나머지 미확인 목록(실제 한글 IME, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E, 정리 대화상자의 취소·목록 다시 읽기·실패 문구 UI, native 재작성 중 `E_DISK_FULL`, 700 MB DB의 정리 메모리, 모두 버리기의 Windows·macOS 동작, SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사 등)은 그대로 **미확인**입니다.
