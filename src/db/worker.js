@@ -39,6 +39,7 @@ import {
 /** @typedef {import('./command.js').ApplyResult} ApplyResult */
 /** @typedef {import('./schema.js').Meta} Meta */
 /** @typedef {import('./tables.js').TableInfo} TableInfo */
+/** @typedef {import('./tables.js').NewColumn} NewColumn */
 /** @typedef {import('./values.js').LogicalType} LogicalType */
 /** @typedef {import('./values.js').ColumnOptions} ColumnOptions */
 /** @typedef {import('./values.js').CoercePolicy} CoercePolicy */
@@ -90,7 +91,7 @@ import {
  *   'db.close': { args: { discardWorkcopy?: boolean } | undefined, result: null },
  *   'schema.adopt': { args: undefined, result: OpenResult },
  *   'schema.list': { args: undefined, result: { tables: TableInfo[] } },
- *   'schema.create': { args: { name: string }, result: { tableId: string, cmd: Command } },
+ *   'schema.create': { args: { name: string, columns?: NewColumn[] }, result: { tableId: string, cmd: Command } },
  *   'schema.rename': { args: { tableId: string, name: string }, result: { cmd: Command } },
  *   'schema.drop': { args: { tableId: string }, result: { cmd: Command } },
  *   'schema.addColumn': { args: { tableId: string, name: string, type: LogicalType, options?: ColumnOptions | null }, result: { columnId: string, columnCount: number, cmd: Command } },
@@ -439,7 +440,11 @@ export function createDispatcher(options) {
 
     'schema.list': async () => ({ tables: tables.list(requireEngine()) }),
 
-    'schema.create': async (args) => tables.create(requireEngine(), { name: args.name }),
+    'schema.create': async (args) =>
+      tables.create(requireEngine(), {
+        name: args.name,
+        ...(Array.isArray(args.columns) ? { columns: args.columns } : {}),
+      }),
 
     'schema.rename': async (args) =>
       tables.rename(requireEngine(), args.tableId, { name: args.name }),

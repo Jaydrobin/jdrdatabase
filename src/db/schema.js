@@ -64,12 +64,15 @@ export function isSystemColumn(name) {
 }
 
 /**
- * 사용자 테이블의 DDL(D-03). 시스템 열만 가진 STRICT 테이블이다.
+ * 사용자 테이블의 DDL(D-03). 시스템 열 뒤에 `columns`를 주어진 순서로 선언한 STRICT 테이블이다.
+ * 기본 열(D-16)을 한 문장에 함께 만든다. 열마다 `ALTER TABLE … ADD COLUMN`을 부르면 30열에서 30문장이 된다.
  * @param {string} tableId
+ * @param {ReadonlyArray<{ id: string, type: LogicalType }>} [columns]
  * @returns {string}
  */
-export function userTableDdl(tableId) {
-  return `CREATE TABLE ${quoteIdent(tableId)} ("id" INTEGER PRIMARY KEY, "_created_at" TEXT, "_updated_at" TEXT) STRICT`;
+export function userTableDdl(tableId, columns = []) {
+  const defs = columns.map((c) => `, ${quoteIdent(c.id)} ${physicalType(c.type)}`).join('');
+  return `CREATE TABLE ${quoteIdent(tableId)} ("id" INTEGER PRIMARY KEY, "_created_at" TEXT, "_updated_at" TEXT${defs}) STRICT`;
 }
 
 /**

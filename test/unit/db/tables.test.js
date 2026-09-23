@@ -12,6 +12,7 @@ import { applyCommand } from '../../../src/db/command.js';
 import { adoptExternal, MAX_COLUMNS, migrate, SYSTEM_COLUMNS } from '../../../src/db/schema.js';
 import * as tables from '../../../src/db/tables.js';
 import { AppError } from '../../../src/util/errors.js';
+import { nextNames } from '../../../src/util/names.js';
 import { dumpDb } from './command.test.js';
 import { openWasmEngine } from './helpers.js';
 
@@ -473,5 +474,101 @@ test('addColumn: select 항목 수 상한을 넘으면 거부한다', async () =
     options: { choices: tooMany.slice(0, tables.MAX_SELECT_CHOICES) },
   });
   assert.ok(ok.columnId);
+  await engine.close();
+});
+
+test('create + columns: 기본 열 30개를 한 문장으로 선언하고, 되돌리면 완전 복원 → 다시 적용(D-16)', async () => {
+  const engine = await freshDb();
+  const before = dumpDb(engine);
+  const names = nextNames('열 {n}', new Set(), 30);
+  const { tableId, cmd } = await tables.create(engine, {
+    name: '테이블 1',
+    columns: names.map((name) => ({ name, type: 'text' })),
+  });
+  const table = tables.requireTable(engine, tableId);
+  assert.deepEqual(
+    table.columns.map((c) => [c.name, c.type, c.position, c.width, c.deletedAt]),
+    names.map((name, i) => [name, 'text', i, 160, null]),
+  );
+  const ids = table.columns.map((c) => c.id);
+  assert.equal(new Set(ids).size, 30, '물리 id는 서로 겹치지 않는다');
+  for (const id of ids) assert.match(id, /^c_[0-9a-f]{8}$/);
+  const info = engine.exec('SELECT name, type FROM pragma_table_info(?) ORDER BY cid', [
+    tableId,
+  ]).rows;
+  assert.deepEqual(info, [
+    ['id', 'INTEGER'],
+    ['_created_at', 'TEXT'],
+    ['_updated_at', 'TEXT'],
+    ...ids.map((id) => [id, 'TEXT']),
+  ]);
+  assert.match(
+    String(engine.exec('SELECT sql FROM sqlite_master WHERE name = ?', [tableId]).rows[0]?.[0]),
+    /STRICT$/,
+  );
+  // 테이블 DDL 한 문장 + 메타 한 문장 + 열 메타 배치 한 단계.
+  assert.equal(cmd.do.length, 3);
+  await assertUndoRestores(engine, before, cmd);
+  assert.equal(tables.requireTable(engine, tableId).columns.length, 30, '다시 적용하면 같은 열');
+  await engine.close();
+});
+
+test('create + columns: 타입·select 항목, 이름 중복·빈 이름·알 수 없는 타입·열 상한은 거부', async () => {
+  const engine = await freshDb();
+  const { tableId } = await tables.create(engine, {
+    name: '혼합',
+    columns: [
+      { name: '수', type: 'integer' },
+      { name: '상태', type: 'select', options: { choices: ['진행 중', '완료'] } },
+      { name: '실', type: 'real' },
+    ],
+  });
+  const table = tables.requireTable(engine, tableId);
+  assert.deepEqual(
+    table.columns.map((c) => [c.name, c.type, c.options]),
+    [
+      ['수', 'integer', null],
+      ['상태', 'select', { choices: ['진행 중', '완료'] }],
+      ['실', 'real', null],
+    ],
+  );
+  assert.deepEqual(
+    engine
+      .exec('SELECT type FROM pragma_table_info(?) ORDER BY cid', [tableId])
+      .rows.map((r) => r[0]),
+    ['INTEGER', 'TEXT', 'TEXT', 'INTEGER', 'TEXT', 'REAL'],
+  );
+  const count = () => tables.list(engine).length;
+  const n = count();
+  /** @type {Array<[string, Array<{ name: string, type: any, options?: any }>, string]>} */
+  const cases = [
+    [
+      '중복',
+      [
+        { name: 'a', type: 'text' },
+        { name: 'a', type: 'text' },
+      ],
+      'E_NAME_INVALID',
+    ],
+    ['빈 이름', [{ name: ' ', type: 'text' }], 'E_NAME_INVALID'],
+    ['타입', [{ name: 'a', type: 'nope' }], 'E_VALUE_INVALID'],
+    ['항목 없음', [{ name: 'a', type: 'select' }], 'E_VALUE_INVALID'],
+    [
+      '상한',
+      Array.from({ length: MAX_COLUMNS - SYSTEM_COLUMNS.length + 1 }, (_, i) => ({
+        name: `c${i}`,
+        type: 'text',
+      })),
+      'E_DB_QUERY',
+    ],
+  ];
+  for (const [label, columns, code] of cases) {
+    await assert.rejects(
+      tables.create(engine, { name: `거부 ${label}`, columns }),
+      (e) => e instanceof AppError && e.code === code,
+      label,
+    );
+  }
+  assert.equal(count(), n, '거부된 생성은 아무것도 남기지 않는다');
   await engine.close();
 });

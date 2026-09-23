@@ -299,9 +299,18 @@ function deleteMetaStatements(tableId) {
 }
 
 /**
- * 테이블을 만든다.
+ * `create`가 테이블과 함께 만드는 열.
+ * @typedef {object} NewColumn
+ * @property {string} name
+ * @property {LogicalType} type
+ * @property {ColumnOptions | null} [options]
+ */
+
+/**
+ * 테이블을 만든다. `columns`가 있으면 그 열을 `CREATE TABLE` 한 문장에 함께 선언하고
+ * `_jdr_columns` 행은 배치 단계 하나로 넣는다(D-16의 기본 열). 되돌리면 메타와 테이블이 함께 사라진다.
  * @param {Engine} engine
- * @param {{ name: string, now?: string }} input
+ * @param {{ name: string, columns?: NewColumn[], now?: string }} input
  * @returns {Promise<{ tableId: string, cmd: Command }>}
  */
 export async function create(engine, input) {
@@ -310,20 +319,68 @@ export async function create(engine, input) {
     input.name,
     tables.map((t) => t.name),
   );
+  const requested = Array.isArray(input.columns) ? input.columns : [];
+  const physicalCount = requested.length + SYSTEM_COLUMNS.length;
+  if (physicalCount > MAX_COLUMNS) {
+    throw new AppError('E_DB_QUERY', `column limit ${MAX_COLUMNS} exceeded`, {
+      detail: { reason: 'column_limit', limit: MAX_COLUMNS, count: physicalCount },
+    });
+  }
+  /** @type {string[]} */
+  const names = [];
+  /** @type {string[]} */
+  const ids = [];
+  /** @type {import('./engine.js').SqlParams[]} */
+  const columnRows = [];
+  /** @type {Array<{ id: string, type: LogicalType }>} */
+  const physical = [];
   const tableId = newTableId(tables.map((t) => t.id));
+  requested.forEach((column, position) => {
+    if (!isLogicalType(column.type)) {
+      throw new AppError('E_VALUE_INVALID', `unknown column type ${String(column.type)}`, {
+        detail: { type: column.type },
+      });
+    }
+    const columnName = normalizeName(column.name, names);
+    const options = normalizeOptions(column.options, column.type);
+    const columnId = newColumnId(ids);
+    names.push(columnName);
+    ids.push(columnId);
+    physical.push({ id: columnId, type: column.type });
+    columnRows.push([
+      columnId,
+      tableId,
+      columnName,
+      column.type,
+      position,
+      DEFAULT_COLUMN_WIDTH,
+      options ? JSON.stringify(options) : null,
+    ]);
+  });
   const position = tables.reduce((max, t) => Math.max(max, t.position), -1) + 1;
   const now = input.now ?? nowIso();
+  /** @type {Statement[]} */
+  const doList = [
+    { sql: userTableDdl(tableId, physical) },
+    {
+      sql: 'INSERT INTO _jdr_tables (id, name, position, created_at, fts_enabled, strict) VALUES (?, ?, ?, ?, 0, 1)',
+      params: [tableId, name, position, now],
+    },
+  ];
+  if (columnRows.length > 0) {
+    // 열은 SQLite 상한(2,000) 아래이므로 `runBatch` 상한(1만 건) 안의 배치 하나로 충분하다.
+    doList.push({
+      batch: {
+        sql: 'INSERT INTO _jdr_columns (id, table_id, name, type, position, width, options) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        paramsList: columnRows,
+      },
+    });
+  }
   /** @type {Command} */
   const cmd = {
     type: 'table.create',
     tableId,
-    do: [
-      { sql: userTableDdl(tableId) },
-      {
-        sql: 'INSERT INTO _jdr_tables (id, name, position, created_at, fts_enabled, strict) VALUES (?, ?, ?, ?, 0, 1)',
-        params: [tableId, name, position, now],
-      },
-    ],
+    do: doList,
     undo: [...deleteMetaStatements(tableId), { sql: `DROP TABLE ${quoteIdent(tableId)}` }],
     summary: `table.create ${name}`,
   };

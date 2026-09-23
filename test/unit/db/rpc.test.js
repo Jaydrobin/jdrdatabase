@@ -475,6 +475,19 @@ test('schema.*: 테이블 생성·열 추가가 커맨드를 돌려주고 db.ope
     client.call('schema.renameColumn', { tableId: created.tableId, columnId: 'id', name: 'x' }),
     (err) => err instanceof AppError && err.code === 'E_SYSTEM_COLUMN',
   );
+  // 기본 열(D-16): `columns`가 RPC 경계를 넘어 테이블과 함께 만들어진다.
+  const sheet = await client.call('schema.create', {
+    name: '시트',
+    columns: [
+      { name: '열 1', type: 'text' },
+      { name: '열 2', type: 'text' },
+    ],
+  });
+  const withColumns = (await client.call('schema.list')).tables.find((t) => t.id === sheet.tableId);
+  assert.deepEqual(
+    withColumns?.columns.map((c) => c.name),
+    ['열 1', '열 2'],
+  );
   client.close();
 });
 
