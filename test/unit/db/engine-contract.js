@@ -42,6 +42,8 @@ export function defineEngineContract(label, open) {
       assert.ok(['snapshot', 'native'].includes(caps.persistence));
       assert.equal(typeof caps.cancellable, 'boolean');
       assert.equal(caps.fts5, true, 'FTS5가 있어야 한다(D-07)');
+      // 저장이 빈 페이지를 없애는가(D-15, D-17): native의 저장은 `VACUUM INTO`, wasm의 스냅샷은 페이지를 그대로 담는다.
+      assert.equal(caps.compactsOnSave, caps.persistence === 'native');
 
       const version = String(engine.exec('SELECT sqlite_version()').rows[0]?.[0]);
       const [major = 0, minor = 0] = version.split('.').map(Number);
@@ -348,6 +350,36 @@ export function defineEngineContract(label, open) {
       assert.deepEqual(engine.exec("SELECT count(*) FROM sqlite_master WHERE name = 't'").rows, [
         [0],
       ]);
+      await engine.close();
+    });
+
+    test('vacuum: 저장이 빈 공간을 없애지 않는 엔진은 트랜잭션 밖에서만 돌고 빈 페이지를 없앤다, 아니면 E_UNSUPPORTED', async () => {
+      const engine = await open();
+      if (engine.capabilities().compactsOnSave) {
+        await expectAppError(() => engine.vacuum(), 'E_UNSUPPORTED');
+        await engine.close();
+        return;
+      }
+      await engine.transaction(async () => {
+        engine.run('CREATE TABLE t (id INTEGER PRIMARY KEY, s TEXT) STRICT');
+        await engine.runBatch(
+          'INSERT INTO t (s) VALUES (?)',
+          Array.from({ length: 100 }, () => ['가'.repeat(10_000)]),
+        );
+      });
+      await engine.transaction(() => engine.run('DELETE FROM t'));
+      const free = Number(engine.exec('PRAGMA freelist_count').rows[0]?.[0]);
+      assert.ok(free > 100, `삭제 뒤 빈 페이지: ${free}`);
+      const cached = engine.prepareCached('SELECT count(*) FROM t');
+      await expectAppError(
+        engine.transaction(() => engine.vacuum()),
+        'E_DB_QUERY',
+      );
+      engine.vacuum();
+      assert.deepEqual(engine.exec('PRAGMA freelist_count').rows, [[0]]);
+      // VACUUM 뒤에도 캐시 핸들과 PRAGMA는 계속 쓸 수 있다.
+      assert.deepEqual(engine.exec(cached).rows, [[0]]);
+      assert.deepEqual(engine.exec('PRAGMA foreign_keys').rows, [[1]]);
       await engine.close();
     });
 

@@ -428,6 +428,7 @@ export function createNativeEngine(options = {}) {
         persistence: 'native',
         cancellable: true,
         fts5: info?.compileOptions.includes('ENABLE_FTS5') ?? false,
+        compactsOnSave: true,
       };
     },
 
@@ -570,6 +571,12 @@ export function createNativeEngine(options = {}) {
       caller.call('interrupt', {}).catch((/** @type {unknown} */ err) => {
         console.warn(`interrupt: ${serializeError(err).message}`);
       });
+    },
+
+    vacuum() {
+      // 저장이 `VACUUM INTO`라 저장한 파일에는 빈 페이지가 없다(`compactsOnSave`). 작업 사본을 줄이려고
+      // 파일 크기에 비례하는 시간을 쓰지 않으며, 러스트 명령도 늘리지 않는다(D-17).
+      throw new AppError('E_UNSUPPORTED', 'vacuum is not needed in native mode (compactsOnSave)');
     },
 
     applyPragmas() {

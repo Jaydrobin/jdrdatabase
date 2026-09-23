@@ -272,10 +272,11 @@ function liveColumnNames(table) {
  * 검색 인덱스(D-07)를 지우는 문장. 원본 테이블을 지우면 트리거는 함께 사라지지만 FTS5 가상 테이블과
  * 그림자 테이블은 남는다. 메타 행이 사라진 뒤에는 UI가 손잡이를 잃어 영영 지울 수 없으므로 여기서 지운다.
  * 인덱스가 없는 테이블에서도 안전하도록 `IF EXISTS`를 쓴다(`search.js`의 삭제는 인덱스가 있음을 확인한 뒤다).
+ * 데이터베이스 정리(`cleanup.js`)도 테이블을 다시 쓰기 전에 이 문장으로 인덱스를 지운다.
  * @param {string} tableId
  * @returns {Statement[]}
  */
-function dropSearchIndexStatements(tableId) {
+export function dropSearchIndexStatements(tableId) {
   const triggers = ftsTriggersFor(tableId);
   return [
     { sql: `DROP TRIGGER IF EXISTS ${quoteIdent(triggers.insert)}` },

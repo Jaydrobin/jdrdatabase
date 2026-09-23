@@ -85,6 +85,16 @@ export function ftsTableFor(tableId) {
 }
 
 /**
+ * 데이터베이스 정리(D-17)가 테이블을 다시 쓸 때의 임시 테이블 이름. 메타 접두사를 쓰므로 재작성 도중에도
+ * 사용자 테이블 목록(`listPhysicalTables`)에 나타나지 않는다. 재작성은 트랜잭션 하나라 커밋된 DB에는 남지 않는다.
+ * @param {string} tableId
+ * @returns {string}
+ */
+export function tmpTableFor(tableId) {
+  return `${META_PREFIX}tmp_${tableId}`;
+}
+
+/**
  * 검색 인덱스가 만들어진 뒤에 열 구성이 바뀌었는가(D-07). FTS 테이블은 만든 시점의 열 집합에
  * 고정되므로, 그 뒤 추가된 텍스트 열은 검색되지 않고 타입이 바뀌어 소프트 삭제된 열은 인덱스에
  * 남아 "결과에 행은 나오는데 화면에 일치하는 칸이 없는" 상태가 된다. 다시 만들면 맞춰지지만

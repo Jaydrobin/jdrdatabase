@@ -7,6 +7,7 @@
  * Worker는 "열린 DB 하나"만 상태로 가진다.
  */
 import { AppError, serializeError } from '../util/errors.js';
+import * as cleanup from './cleanup.js';
 import { applyCommand, assertCommand } from './command.js';
 import { selectEngine } from './engine.js';
 import { exportCsv } from '../export/csv.js';
@@ -57,6 +58,8 @@ import {
 /** @typedef {import('../import/pipeline.js').PreviewResult} PreviewResult */
 /** @typedef {import('../export/csv.js').CsvExportOptions} CsvExportOptions */
 /** @typedef {import('../export/csv.js').ExportResult} ExportResult */
+/** @typedef {import('./cleanup.js').CleanupPlan} CleanupPlan */
+/** @typedef {import('./cleanup.js').CleanupResult} CleanupResult */
 
 /**
  * `db.open`·`schema.adopt`의 결과.
@@ -114,6 +117,8 @@ import {
  *   'import.preview': { args: { file: Blob, options: ImportOptions }, result: PreviewResult },
  *   'import.run': { args: { file: Blob, options: ImportOptions, mapping: ImportMapping, target: ImportTarget, policy?: ImportPolicy }, result: { report: ImportReport } },
  *   'export.stream': { args: { tableId: string, viewSpec: ViewSpec, format: 'csv' | 'xlsx', options?: CsvExportOptions }, result: ExportResult },
+ *   'cleanup.plan': { args: undefined, result: CleanupPlan },
+ *   'cleanup.run': { args: { columns: Array<{ tableId: string, columnId: string }> }, result: CleanupResult },
  * }} OpMap
  */
 /** @typedef {keyof OpMap} OpName */
@@ -177,6 +182,7 @@ export const EXCLUSIVE_OPS = new Set([
   'db.save',
   'db.close',
   'export.stream',
+  'cleanup.run',
 ]);
 
 /**
@@ -600,6 +606,15 @@ export function createDispatcher(options) {
       });
     },
 
+    'cleanup.plan': async () => cleanup.plan(requireEngine()),
+
+    'cleanup.run': async (args, ctx) =>
+      cleanup.run(
+        requireEngine(),
+        { columns: args?.columns },
+        { signal: ctx.signal, progress: ctx.progress },
+      ),
+
     'db.close': async (args) => {
       await requireEngine().close({ discard: args?.discardWorkcopy === true });
       return null;
@@ -628,6 +643,7 @@ export function createDispatcher(options) {
     'db.snapshot',
     'db.save',
     'export.stream',
+    'cleanup.plan',
   ]);
 
   /**

@@ -34,6 +34,7 @@ export const MAX_BATCH_BYTES = 64 * MB;
  * @property {'snapshot' | 'native'} persistence 저장 방식: `snapshot()` 바이트 쓰기 / `saveTo()` 네이티브 저장
  * @property {boolean} cancellable 긴 op(가져오기 등)를 배치 사이에서 취소할 수 있는가
  * @property {boolean} fts5 FTS5 모듈 사용 가능 여부
+ * @property {boolean} compactsOnSave 저장이 파일의 빈 페이지를 없애는가(D-15). native는 `VACUUM INTO`라 참, wasm은 `snapshot()`이 빈 페이지까지 직렬화하므로 거짓. 데이터베이스 정리(D-17)가 이 값으로 `vacuum()`을 부를지 정한다
  */
 
 /**
@@ -96,6 +97,7 @@ export const MAX_BATCH_BYTES = 64 * MB;
  * @property {() => Uint8Array<ArrayBuffer>} snapshot wasm: DB 바이트(statement 캐시 무효화·PRAGMA 재적용 포함) / native: `E_UNSUPPORTED`
  * @property {(originalPath: string, expected?: { mtime: number, size: number }, options?: { force?: boolean, onProgress?: (progress: unknown) => void }) => Promise<NativeSaveInfo | undefined>} saveTo native 전용. wasm은 `E_UNSUPPORTED`. `expected`가 없으면 러스트가 열 때 본 값과 비교하고, `force`면 비교를 건너뛴다
  * @property {() => void} interrupt 진행 중 문장 중단
+ * @property {() => void} vacuum 트랜잭션 밖에서 `VACUUM`(데이터베이스 정리, D-17). 트랜잭션 안이면 `E_DB_QUERY`. `compactsOnSave`가 참인 엔진(native)은 `E_UNSUPPORTED`
  * @property {() => void} applyPragmas 새 PRAGMA는 이곳에만 추가한다(export 후 재적용되는 유일한 장소)
  */
 

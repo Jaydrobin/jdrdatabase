@@ -23,6 +23,7 @@ test('capabilities: D-15의 wasm 상한과 저장 방식', async () => {
     persistence: 'snapshot',
     cancellable: true,
     fts5: true,
+    compactsOnSave: false,
   });
   assert.equal(WASM_MAX_FILE_BYTES, 1.5 * GB);
   assert.equal(WASM_WARN_FILE_BYTES, 700 * MB);
