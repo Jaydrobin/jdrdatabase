@@ -40,7 +40,7 @@ grep -n 미확인 docs/sessions.md
 | M | 세션 L이 남긴 결정 세 건(작업 사본 복사 Linux 적용, `E_MEM` 안내 분리와 크기 경고, Windows 데스크톱 E2E) | 완료(Windows 데스크톱 E2E 전 시나리오 통과. 앱 안의 5 GB 복사는 여전히 예산 초과, Windows·macOS 복사 속도 미확인) |
 | 설계 v2 | DESIGN.md 0.12(D-16~D-19, Step 12~14), CLAUDE.md 7.3·8 | 완료 |
 | N | 12 (기본 시트·빈 행·열 머리글) | 완료(완료 기준 전부 실측. 실제 한글 IME·스크린 리더·Firefox·Safari는 미확인) |
-| O | 13 (데이터베이스 정리·앱 데이터 비우기) | 대기 |
+| O | 13 (데이터베이스 정리·앱 데이터 비우기) | 완료(완료 기준 전부 실측. 데스크톱 E2E는 Linux만, 정리 대화상자의 취소·목록 다시 읽기·실패 문구 표시는 E2E 미확인) |
 | P | 14 (툴팁·도움말) | 대기 |
 
 ## 기록
@@ -1753,3 +1753,74 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - 열 메뉴·빈 행의 스크린 리더 낭독(NVDA·VoiceOver), Firefox·Safari에서의 우클릭·Shift+F10 동작: **미확인**.
 - LIKE 검색 로컬 예산 초과: 기준 커밋도 같은 값이라 이 세션의 회귀는 아니지만, 8장 예산 경계 항목으로 **이 컨테이너에서 예산을 넘는 상태**입니다. 8장 측정 환경(4코어 노트북)에서의 값은 **미확인**입니다.
 - 세션 M까지의 나머지 미확인 목록(SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사, macOS WKWebView 등)은 그대로 **미확인**입니다.
+
+### 세션 O (Step 13: 데이터베이스 정리·앱 데이터 비우기) — 2026-09-23
+
+커밋: `b455b6e` docs(design) → `bd09d76` feat(db) → `ea8862c` feat(ui) → `bf71c53` test → 이 커밋 docs(session).
+
+시작 상태: 로컬 작업 브랜치가 원격보다 뒤(`ca22c21`)여서 원격 `59aae7c`(세션 N의 마지막 커밋)로 fast-forward 했습니다. 원격 실행 환경이 정해 준 브랜치도 `claude/busy-mayer-hv2g8x`라 따로 묻지 않았습니다. 그 상태에서 `npm run check`(379개)가 초록이었고, `59aae7c`의 `ci` 실행(run 35892429415)도 초록이었습니다(선행 조건). 이어받은 미확인 가운데 이 세션의 몫은 설계 v2 절의 "정리의 메모리 최고 수위(R10)"였습니다(아래 성능).
+
+**설계에서 구현 중에 정한 것(`b455b6e`, DESIGN.md D-15·Step 13·6장에 반영)**
+
+- 엔진 인터페이스에 `vacuum()`을 더했습니다. `VACUUM`은 트랜잭션 안에서 돌 수 없는데 `run()`은 트랜잭션 밖의 쓰기를 거부하므로 입구가 따로 있어야 했습니다. native는 `compactsOnSave`가 참이라 부를 일이 없어 `E_UNSUPPORTED`이고, 러스트 명령은 늘지 않았습니다.
+- `purgeCommand(target, columnIds)`의 `target`은 `TableInfo`에 `physical`(`physicalColumns`가 `pragma_table_info`로 읽은 cid 순서)을 더한 값입니다. 재작성이 지키는 "원래 순서"는 물리 순서인데, `_jdr_columns.position`은 표시 순서라 타입 변경 뒤에는 물리 순서와 다릅니다. 물리 타입은 STRICT가 허용하는 이름만 받고, 기본값·복합 기본 키가 있는 테이블(이 앱이 만들지 않은 형태)은 `E_DB_QUERY`로 거부합니다.
+- 지운 열 때문에 검색 대상 열이 하나도 남지 않으면 FTS5 테이블을 다시 만들 수 없으므로 `fts_enabled = 0`으로 둡니다.
+- `VACUUM` 실패는 재작성이 커밋된 뒤라 던지지 않고 결과의 `vacuumError`로 알립니다(던지면 메인이 커맨드를 저널에 넣지 못합니다).
+- 스토어는 커맨드를 히스토리를 거치지 않고 저널에 기록한 뒤 `cleanup:done`을 내고, 히스토리가 그 이벤트로 스택을 비웁니다(가져오기의 `import:done`과 같은 방식). 고른 열이 없어 `VACUUM`만 했으면 히스토리를 비우지 않고 dirty만 표시합니다.
+- 대화상자는 한 번에 하나만 열리므로 모두 지우기·모두 버리기의 확인은 설정 대화상자 안의 확인 줄로 받습니다. 정리 버튼은 기기 이름 검사를 거쳐 설정을 저장하는 것과 같이 닫고 정리 대화상자를 엽니다. 이를 위해 `dialog.js`의 `body` 콜백이 두 번째 인자 `{ submit(value) }`를 받습니다.
+
+**한 일**
+
+1. **Worker(`bd09d76`)**: `db/cleanup.js`(`plan`·`physicalColumns`·`purgeCommand`·`run`), `schema.tmpTableFor`(`_jdr_tmp_<id>`), `tables.dropSearchIndexStatements` export, 두 엔진의 `capabilities().compactsOnSave`와 `vacuum()`, RPC `cleanup.plan`(읽기)·`cleanup.run`(배타 쓰기, 진행률 `purge`·`index`·`vacuum`, 취소), DESIGN.md 6장 표.
+2. **UI(`ea8862c`)**: 스토어 `planCleanup`·`runCleanup`·`discardAllWorkcopies`·`backupCount`·`clearBackups`, `io/idb.js`의 `keys`, `ui/dialogs/cleanup.js`, 설정 대화상자의 "데이터베이스" 절·직전 저장본 "모두 지우기"(개수는 IDB 키, 사용량은 `navigator.storage.estimate`의 기능 감지)·작업 사본 "모두 버리기", 두 언어 문구 39개와 `column.delete.message`(정리 위치), `docs/cloud-sync.md`·`docs/desktop.md`(정리 뒤 저장해야 작아짐, 남는 사본, 모두 지우기·버리기).
+3. **측정·데스크톱 E2E(`bf71c53`)**: `test/perf/cleanup.perf.spec.js`(기록만), `test/desktop/run.mjs`의 6번 시나리오.
+
+**완료 기준 (Step 13)**
+
+- [x] 단위(wasm, 실제 DB): 정리 뒤 `pragma_table_info`에 지운 열이 없고, 남은 열과 시스템 열의 값이 정리 전과 같다(물리 순서까지). 검색 인덱스가 있던 테이블은 트리거 셋이 다시 있고 검색 결과가 같으며, 넣은 행·고친 행이 검색에 반영된다. 타입 변경으로 낡은 인덱스는 `ftsStale`이 거짓이 되고 새 텍스트 열이 인덱스에 들어간다 — `test/unit/db/cleanup-contract.js`의 "run: 지운 열이…", "run: 검색 인덱스는…".
+- [x] 단위: 두 번째 테이블의 재작성(`INSERT INTO "_jdr_tmp_<둘째>"`)에 `E_MEM`을 주입하면 DB 덤프(`_jdr_meta` 제외)가 정리 전과 같고 이어서 다시 정리할 수 있다. 테이블 사이 취소(`purge` 진행률 1/2에서 abort)도 `E_IMPORT_CANCELLED`와 같은 덤프.
+- [x] 단위: 20 KB × 200행 장문 열을 지운 뒤 정리하면 wasm에서 크기가 3 MB 넘게 줄고 `freelist_count`가 0이다. `compactsOnSave`가 참인 엔진(native, 또는 참이라고 보고하게 감싼 wasm)에서는 `vacuum()`을 부르지 않는다. `VACUUM` 실패를 주입하면 재작성은 커밋되고 `vacuumError`로 알린다.
+- [x] 단위: 시드의 모든 변경(테이블 생성·행 넣기·검색 인덱스·타입 변경·소프트 삭제)과 정리의 `column.purge`를 구조화 복제해 새 DB에 `do` 방향으로 재생하면 덤프(FTS 그림자 테이블 포함)가 같다.
+- [x] 네이티브: 같은 계약 9개를 `npm run test:native`가 rusqlite 엔진에 대해 통과(엔진 적합성의 `vacuum` 검사, 스토어의 모두 버리기 포함 40개).
+- [x] E2E(브라우저): 열 삭제(확인 문구가 설정의 "데이터베이스 정리…"를 가리킴) → 설정 → 정리 → 저장(다운로드) → 새 DB → 다시 열기 → 물리 열이 `id`·`_created_at`·`_updated_at`·남긴 열뿐이고 값이 그대로. 히스토리 0. 직전 저장본 모두 지우기(IDB에 두 파일의 보관본을 넣어 둠) → 확인 줄에 "2개(모든 파일)"와 사용량 → 취소하면 그대로 → 지우면 설정에 "직전 저장본이 없습니다", 다시 열어도 같음 — `test/e2e/cleanup.spec.js` 3개. 셋째 테스트는 체크를 푼 열이 남아 복원되는 것과, 빈 기기 이름이면 정리 버튼이 설정에 머무는 것.
+- [x] 데스크톱 E2E(tauri-driver, Linux): 원본이 있는 dirty 사본 두 개(`둘째.db`, `셋째.db`)를 남기고 앱을 다시 띄워 설정 → "모두 버리기" → 확인 줄 "작업 사본 2개" → 확인 → 목록이 비고 두 원본이 바이트 단위로 그대로, 설정을 다시 열어도 목록 없음. 이 컨테이너에 `webkit2gtk-driver`·`libwebkit2gtk-4.1-dev`·`xvfb`(apt)와 `tauri-driver` 2.0.6(cargo)을 설치해 `xvfb-run npm run test:desktop`으로 돌렸고, 기존 시나리오 1~5도 모두 통과했습니다(2분 13초).
+- [x] 성능(기록만): 30만 행 픽스처(314,286,080 bytes)에서 장문 열 하나를 지운 뒤 `cleanup.run` **3,618 ms**(`test:perf` 전체 실행에서는 1,329 ms), 렌더러 메모리 최고 수위 **1,265 MiB**(VmHWM, 연 직후 805 MiB), 크기 314,286,080 → 176,160,768 bytes. `cleanup-300k.cleanupMs`로 남기고 최고 수위는 기준선 비교의 바이트 항목이 되지 않게 `info.cleanupHwm`에 두었습니다.
+
+**예외 처리 (Step 13) 대응**
+
+- 요청한 열이 이미 복원되었거나 없음 → `E_DB_QUERY`, 아무것도 바뀌지 않음: 계약 테스트(복원된 열, 살아 있는 열, 없는 열, 없는 테이블, 섞인 요청). 대화상자는 그 오류에서 계획을 다시 읽고 `cleanup.stale` 문구를 보입니다. 이 다시 읽기는 **E2E로 확인하지 않았습니다(미확인)**.
+- 재작성 중 실패(`E_MEM` 등) → 롤백, "정리 전 상태 그대로이며 원본 파일도 바뀌지 않았다": 롤백은 계약 테스트, 문구는 `cleanup.failed`. `E_DISK_FULL`(native 재작성 중 디스크 부족)은 주입하지 않았습니다(**미확인**).
+- 취소 → 같은 롤백, `cleanup.cancelled`: Worker 쪽은 계약 테스트. 대화상자의 취소 버튼(실행 중 신호만 당기고, `vacuum` 단계에서는 닫히지 않음)은 **E2E 미확인**입니다. 작은 픽스처에서는 정리가 취소보다 먼저 끝나 재현이 어렵습니다.
+- `VACUUM` 실패 → 재작성은 커밋, `cleanup.vacuumFailed` 경고: 결과는 계약 테스트, 토스트는 **UI 미확인**.
+- 배타 op: 가져오기가 도는 동안 `cleanup.run`은 `E_DB_BUSY`, `cleanup.plan`은 허용 — `rpc.test.js`.
+- 읽기 전용·외부 테이블: 계획에 비STRICT 테이블은 없고, 스토어의 `runCleanup`은 읽기 전용이면 `file.readOnlyBlocked`로 거부(새 스키마 파일로 단위 테스트). 설정의 정리 버튼이 읽기 전용에서 꺼지는 것은 코드 경로만 있고 **E2E 미확인**.
+- 저널이 멈춘 상태: `recordCommand`가 v1 규칙대로 기록하지 않습니다. 정리와의 조합을 따로 테스트하지는 않았습니다(**미확인**, v1 경로 그대로).
+- 작업 사본 버리기 실패 → 그 항목만 남기고 나머지 계속, 원본 무손상: `store-native.test.js`(한 키에 `E_FILE_LOCKED` 주입). 설정 줄에 원인 문구가 붙는 것은 **UI 미확인**.
+- IDB 없음 → 백업 개수·지우기 null, 버튼 숨김; `clear` 실패 → `E_UNKNOWN`과 `backup.clearFailed`("보관본은 그대로"), 보관본 유지 — `store.test.js`.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **397개** 통과(379 + 정리 계약 9 + 순수 함수 3 + 엔진 적합성 `vacuum` 1 + RPC 2 + 스토어 3. 기존 테스트는 `capabilities`와 배타 op 목록의 기대값만 고쳤습니다). 중간 커밋 `bd09d76`(394)도 따로 초록.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,906,811 bytes**(세션 N 3,879,996에서 **+26,815 bytes**: 정리 모듈·대화상자와 두 언어 문구). 외부 참조 0, vendor 체크섬 OK.
+- [x] `npm run test:e2e`: **80개** 통과(77 + `cleanup.spec.js` 3).
+- [x] `npm run test:native`: **40개** 통과(29 + 정리 계약 9 + 엔진 `vacuum` 1 + 스토어 모두 버리기 1).
+- [x] `npm run test:desktop`(Linux WebKitGTK, Xvfb): 전 시나리오 통과(위).
+- [x] `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`(27개): 통과. 러스트 코드는 바꾸지 않았지만 `engine-native.js`를 바꿨으므로 CLAUDE.md 7.1대로 돌렸습니다.
+- [x] `npm run test:perf`: **8개 모두 통과**(예산 안). 앱 시작 384 ms, 300 MB 열기 1,881 ms, 렌더 p95 1.3 ms, 창 질의 최대 20.5 ms, 셀 편집 2.2 ms, 스냅샷 1,759 ms, 저장 시점 RSS 1,156,333,568 bytes, LIKE 812 ms(짧은 검색어 중앙값 993 ms), trigram 61 ms. 세션 N 기록의 LIKE 예산 초과는 이번 실행에서는 재현되지 않았습니다.
+- [x] CLAUDE.md 7.1: 새 오류 코드 없음. 새 RPC op `cleanup.plan`·`cleanup.run`은 6장 표에 있음(`conventions.test.js` 통과). `src/db`의 `${`는 `quoteIdent`를 거친 식별자와 검증한 물리 타입뿐. `innerHTML` 새 사용 없음(사용자 데이터는 `textContent`). 모드 문자열 비교 추가 없음(`persistence` 값만 읽음). `dist/` 커밋 없음.
+- 미확인: 이 기록을 담은 푸시의 CI 결과(푸시 뒤 확인해 적습니다). `desktop` 워크플로(세 OS)는 수동 실행 전용이라 돌리지 않았습니다.
+
+**이어받은 미확인 항목의 결과**
+
+- 설계 v2의 "정리의 메모리 최고 수위(R10)": 300 MB DB에서 렌더러 1,265 MiB(연 직후보다 약 460 MiB, DB 크기의 1.5배쯤 늘어남)로 쟀습니다. 대화상자의 메모리 경고는 설계대로 `dbBytes × 2 > maxFileBytes`(1.5 GB), 즉 750 MB 넘는 DB에서 켜집니다. 이 비율대로라면 700 MB 안팎의 DB는 wasm 메모리 상한(2 GB)에 가까워 경고 없이 `E_MEM`으로 실패할 수 있습니다. 실패해도 전체 롤백이라 데이터는 안전하지만, 700 MB 픽스처로는 **재지 않았습니다(미확인)**. 문턱을 낮출지는 실측 뒤 정할 일로 남깁니다.
+- 세션 N의 나머지(실제 한글 IME, 스크린 리더, Firefox·Safari, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E)는 이 세션의 몫이 아니라 그대로입니다.
+
+**미확인 (후속에서 이어받음)**
+
+- 정리 대화상자의 취소 버튼, 그사이 복원된 열로 인한 목록 다시 읽기, `VACUUM` 실패 경고, 작업 사본 한 개를 버리지 못했을 때 설정 줄의 원인 문구, 읽기 전용에서 정리 버튼이 꺼지는 것: 각각 Worker·스토어 단위 테스트는 있으나 UI는 **E2E 미확인**입니다.
+- native 재작성 중 `E_DISK_FULL`: **미확인**.
+- 700 MB 안팎 DB의 정리 메모리와 경고 문턱(위): **미확인**.
+- 모두 버리기의 Windows·macOS 데스크톱 동작: Linux에서만 쟀습니다(**미확인**). Windows는 `desktop` 워크플로를 수동 실행하면 같은 시나리오가 돕니다.
+- `navigator.storage.estimate`의 사용량 줄: Chromium `file://`에서 보이는 것을 E2E로 확인했습니다. Firefox·Safari는 **미확인**입니다.
+- 저널이 멈춘 상태(가져오기 뒤)에서 정리한 뒤의 복구 동작: v1 규칙 그대로이며 따로 확인하지 않았습니다(**미확인**).
+- 세션 N까지의 나머지 미확인 목록(실제 한글 IME, 스크린 리더, Firefox·Safari, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E, SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사, macOS WKWebView 등)은 그대로 **미확인**입니다.
