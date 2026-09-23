@@ -360,7 +360,7 @@ src-tauri/                       워크스페이스 루트이자 타우리 앱 �
   icons/                         앱 아이콘(tauri.conf.json bundle.icon)
   src/
     main.rs                      타우리 진입점(`lib.rs`의 run 호출)
-    lib.rs                       빌더: 플러그인(dialog, single-instance), 관리 상태(Backend), 패닉 훅, 명령 등록
+    lib.rs                       빌더: 플러그인(dialog, single-instance), 관리 상태(Backend), 패닉 훅, 명령 등록, 메인 창 생성(WebView2 환경 변수)
     commands.rs                  `#[tauri::command]`: engine_call(코어 Backend::call + 진행률 Channel), pick_open·pick_save(dialog), sink_write(raw 본문), app_info
     protocol.rs                  `jdr://localhost/call` 커스텀 프로토콜(Worker의 엔진이 동기 XHR·fetch로 부른다. 토큰 검사, 별도 스레드, CORS)
   core/                          jdr-core 크레이트(타우리 의존 없음. WebView·GTK 없이 cargo test)
@@ -389,7 +389,7 @@ scripts/
   serve-dist.mjs                 dist/를 http://localhost로 서빙하는 정적 서버(지원 매트릭스의 http 열 실측용. 런타임 코드 아님)
 .github/workflows/
   ci.yml                         푸시·PR마다 check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정)
-  desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux는 tauri-driver E2E까지(Step 11)
+  desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux·Windows는 tauri-driver E2E까지(Step 11)
   release.yml                    `v*` 태그에서 build·verify 뒤 dist/jdrdatabase.html을 GitHub 릴리스에 첨부(CLAUDE.md 7.1: dist/는 릴리스 태그에서만 배포)
 ```
 
@@ -904,7 +904,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **선행 조건**: Step 10까지 완료된 브라우저 경로. Step 1의 엔진 인터페이스와 적합성 테스트, Step 2의 `capabilities()` 기반 상한 검사가 이미 있어야 한다.
 
-**산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/native/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux tauri-driver E2E), `docs/desktop.md`
+**산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/native/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux·Windows tauri-driver E2E), `docs/desktop.md`
 
 **주요 함수 (JS)**
 - `engine-native.js`: 인터페이스 전체 구현. `createNativeEngine({ caller })`. `caller`는 `{ callSync(op, args) → result, call(op, args, onProgress) → Promise }`이며 `createHttpCaller({ url, token })`(엔진 프로토콜, 기본)이나 Worker 전역(`self`)·Node `parentPort` 위의 `createPortCaller(port)`(공유 버퍼 중계, 폴백·테스트)로 만든다. `init({ native })`가 주소를 받는다. 메인 컨텍스트(인라인 전송)에서는 만들 수 없어 `E_NATIVE_IPC`. `capabilities()` → `{ mode: 'native', warnFileBytes: Infinity, maxFileBytes: Infinity, persistence: 'native', cancellable: true, fts5 }`. `snapshot()`은 `E_UNSUPPORTED`. `prepareCached(sql)`은 `{ sql }`만 돌려준다
@@ -919,7 +919,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `save.rs`: `save_to(original_path, expected, force) -> SaveInfo`(원본이 열 때 경로와 같으면 mtime·크기 검사 → `wal_checkpoint(TRUNCATE)` → `VACUUM INTO` 임시 → 그 자리에 있던 파일을 `.bak`으로 → 임시를 원본으로 rename → 부모 폴더 동기화 → 임시 정리. 다른 경로에 파일이 없으면 새로 만들기만 한다), `restore_backup(original_path, target_path)`, `backup_info(original_path)`
 - `workcopy.rs`: `workcopy_key(original_path) -> String`(db_id 또는 경로 해시), `workcopy_dir(app_data, key)`, `prepare(original_path, discard) -> Prepared`(복사, 남은 사본이 dirty면 그대로 두고 알림. 복사는 64 MB마다 진행률을 보고하고 끝에 `sync_all`한다. Linux는 64 MB 조각을 `std::io::copy`로 넘겨 커널 복사(`copy_file_range`)를 쓰고, Windows·macOS는 8 MB 버퍼로 읽고 쓴다. 5 GB 실측(Linux ext4)에서 8 MB 버퍼는 6~20초, 조각 `io::copy`는 3.1~3.7초였고, 다른 두 OS의 `io::copy`는 커널 복사 없이 작은 버퍼로 내려가 이득이 없다), `new_temp(app_data)`, `list(app_data)`, `purge(app_data, older_than)`
 - `error.rs`: `AppError { code, message, detail }` + `serde::Serialize`. rusqlite 오류 매핑: `SQLITE_FULL` → `E_DISK_FULL`, `SQLITE_BUSY`·`SQLITE_LOCKED` → `E_FILE_LOCKED`, `SQLITE_INTERRUPT` → `E_IMPORT_CANCELLED`, `SQLITE_NOTADB` → `E_FILE_NOT_SQLITE`, `SQLITE_NOMEM` → `E_MEM`, 그 외 → `E_DB_QUERY`. `std::io` 오류: `ENOSPC` → `E_DISK_FULL`, `PermissionDenied` → `E_FILE_PERMISSION`, `NotFound` → `E_FILE_WRITE`
-- 앱 크레이트 `protocol.rs`: `jdr` 커스텀 프로토콜 핸들러(`POST …/call?t=<토큰>`, 본문 `{ cmd, args }` → 별도 스레드에서 `Backend::call` → `{ ok, result | error }` + CORS 헤더). `commands.rs`: `engine_call(cmd, args, progress: Channel)`(메인 스레드의 파일 명령용. 코어 `Backend::call`을 `spawn_blocking`에서 부르고 진행률은 채널로), `pick_open`·`pick_save(suggestedName, kind)`(dialog 플러그인을 감싸 경로 문자열만), `sink_write`(요청 본문 raw + `jdr-sink` 헤더로 내보내기 조각), `app_info()`(앱 데이터 폴더·버전·프로토콜 토큰). `lib.rs`는 플러그인(single-instance, dialog) 등록, 앱 데이터 폴더의 `Backend` 관리 상태, 토큰, 패닉 훅(`panic.log`), 시작 때 깨끗한 사본 정리
+- 앱 크레이트 `protocol.rs`: `jdr` 커스텀 프로토콜 핸들러(`POST …/call?t=<토큰>`, 본문 `{ cmd, args }` → 별도 스레드에서 `Backend::call` → `{ ok, result | error }` + CORS 헤더). `commands.rs`: `engine_call(cmd, args, progress: Channel)`(메인 스레드의 파일 명령용. 코어 `Backend::call`을 `spawn_blocking`에서 부르고 진행률은 채널로), `pick_open`·`pick_save(suggestedName, kind)`(dialog 플러그인을 감싸 경로 문자열만), `sink_write`(요청 본문 raw + `jdr-sink` 헤더로 내보내기 조각), `app_info()`(앱 데이터 폴더·버전·프로토콜 토큰). `lib.rs`는 플러그인(single-instance, dialog) 등록, 앱 데이터 폴더의 `Backend` 관리 상태, 토큰, 패닉 훅(`panic.log`), 시작 때 깨끗한 사본 정리, 메인 창 생성(`create_main_window`. 설정의 창은 `create: false`이고 여기서 만든다. Windows에서 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`가 있으면 wry 기본 인자 뒤에 붙여 넘기고, `WEBVIEW2_USER_DATA_FOLDER`나 그 인자의 `--user-data-dir=`을 데이터 폴더로 넘긴다. wry는 브라우저 인자와 데이터 폴더를 늘 API로 정하므로, Edge Driver가 이 환경 변수로 켜는 원격 디버깅을 창이 직접 받아야 데스크톱 E2E가 붙는다)
 - 코어 `sink.rs`: `sink_open(path) -> id` → `sink_write(id, bytes)` → `sink_close(id)`(fsync 뒤 원자적 교체) / `sink_abort(id)`. 내보내기 조각 스트림의 데스크톱 판(브라우저 모드의 `createWritable()`에 해당)
 
 **예외 처리**
