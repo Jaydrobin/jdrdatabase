@@ -1,7 +1,8 @@
 name: desktop
 
 # 데스크톱(Step 11): 세 플랫폼에서 러스트 워크스페이스 검사(fmt·clippy·test), 실제 rusqlite 엔진에 대한 JS 적합성
-# 테스트(test:native), 타우리 빌드. Linux는 tauri-driver(WebKitWebDriver + Xvfb)로 데스크톱 E2E까지 돌린다.
+# 테스트(test:native), 타우리 빌드. Linux(WebKitWebDriver + Xvfb)와 Windows(Edge Driver)는 tauri-driver로 데스크톱
+# E2E까지 돌린다. macOS는 tauri-driver가 지원하지 않는다(WKWebView용 WebDriver가 없다).
 # 브라우저 산출물 검사는 ci.yml이 맡는다. 러스트 빌드가 느리므로 PR과 main 푸시에서만 돈다.
 on:
   push:
@@ -83,7 +84,7 @@ jobs:
           - os: ubuntu-latest
             e2e: true
           - os: windows-latest
-            e2e: false
+            e2e: true
           - os: macos-latest
             e2e: false
     runs-on: ${{ matrix.os }}
@@ -142,11 +143,43 @@ jobs:
         run: cargo install tauri-driver --locked
 
       - name: Desktop E2E (tauri-driver + Xvfb)
-        if: matrix.e2e
+        if: matrix.e2e && runner.os == 'Linux'
         run: xvfb-run -a -s "-screen 0 1400x900x24" npm run test:desktop
         env:
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+
+      # tauri-driver는 Windows에서 msedgedriver를 쓰고, 드라이버는 WebView2 런타임과 버전이 같아야 한다.
+      # 러너에 미리 깔린 드라이버는 Edge 브라우저 버전을 따르므로 런타임 버전의 드라이버를 먼저 받는다.
+      - name: Edge Driver matching the WebView2 runtime (Windows)
+        if: matrix.e2e && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+          Write-Host "WebView2 runtime: $version"
+          $dir = Join-Path $env:RUNNER_TEMP 'edgedriver'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $driver = $null
+          if ($version) {
+            try {
+              Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile (Join-Path $dir 'edgedriver.zip')
+              Expand-Archive (Join-Path $dir 'edgedriver.zip') -DestinationPath $dir -Force
+              $driver = Join-Path $dir 'msedgedriver.exe'
+            } catch {
+              Write-Host "download failed: $($_.Exception.Message)"
+            }
+          }
+          if (-not $driver -or -not (Test-Path $driver)) {
+            $driver = Join-Path $env:EdgeWebDriver 'msedgedriver.exe'
+            Write-Host "falling back to the runner's Edge Driver"
+          }
+          & $driver --version
+          "JDR_NATIVE_DRIVER=$driver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Desktop E2E (tauri-driver + Edge Driver)
+        if: matrix.e2e && runner.os == 'Windows'
+        run: npm run test:desktop
 
       - name: Tauri bundle (release)
         run: npx tauri build

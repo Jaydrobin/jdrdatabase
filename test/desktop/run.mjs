@@ -2,8 +2,9 @@
 /**
  * 데스크톱 E2E(Step 11): tauri-driver(WebDriver)로 테스트 빌드 앱을 띄워 브라우저 E2E와 같은 시나리오를 검사한다.
  *
- * 준비물: Linux는 `WebKitWebDriver`(webkit2gtk-driver)와 `Xvfb`(또는 실제 디스플레이), Windows는 Microsoft Edge Driver.
- * `tauri-driver`는 `cargo install tauri-driver`. 파일 대화상자는 자동화할 수 없으므로 테스트 훅
+ * 준비물: Linux는 `WebKitWebDriver`(webkit2gtk-driver)와 `Xvfb`(또는 실제 디스플레이), Windows는 WebView2 런타임과
+ * 같은 버전의 Microsoft Edge Driver(`msedgedriver.exe`, 경로를 `JDR_NATIVE_DRIVER`로 준다. 없으면 tauri-driver가
+ * PATH에서 찾는다). `tauri-driver`는 `cargo install tauri-driver`. 파일 대화상자는 자동화할 수 없으므로 테스트 훅
  * `__jdrTest.setPickedPath()`로 경로를 넣는다(DESIGN.md Step 11 완료 기준).
  *
  * 흐름: `npm run build -- --test`(dist/test/tauri/index.html) → `tauri build --debug --no-bundle`(그 변형을 담은 바이너리)
@@ -12,7 +13,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -214,9 +215,14 @@ async function pressKey(sessionId, key) {
 async function main() {
   if (!process.env.JDR_DESKTOP_BINARY) await buildTestApp();
   const binary = binaryPath();
-  const scratch = await mkdtemp(path.join(os.tmpdir(), 'jdr-desktop-'));
+  // Windows 러너의 임시 폴더는 8.3 짧은 이름(RUNNER~1)일 수 있다. 앱이 돌려주는 경로와 비교하므로 긴 이름으로 둔다.
+  const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'jdr-desktop-')));
   step(`tauri-driver on ${DRIVER_PORT} for ${binary}`);
-  const driver = spawn('tauri-driver', ['--port', String(DRIVER_PORT)], { stdio: 'inherit' });
+  // Windows는 WebView2 런타임과 같은 버전의 msedgedriver가 필요하다. CI는 그 경로를 JDR_NATIVE_DRIVER로 준다.
+  const nativeDriver = process.env.JDR_NATIVE_DRIVER;
+  const driverArgs = ['--port', String(DRIVER_PORT)];
+  if (nativeDriver) driverArgs.push('--native-driver', nativeDriver);
+  const driver = spawn('tauri-driver', driverArgs, { stdio: 'inherit' });
   driver.on('error', (err) => {
     console.error(`tauri-driver failed to start: ${err.message}`);
     process.exit(2);
