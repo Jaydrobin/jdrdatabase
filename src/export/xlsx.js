@@ -143,8 +143,10 @@ export async function exportXlsx(engine, table, viewSpec, sink, ctx = {}) {
     });
   }
   // dense 시트: 행 배열의 셀 객체를 그대로 쓴다(aoa_to_sheet는 값에서 셀을 다시 만들어 서식을 잃는다).
+  // SheetJS 0.20의 dense 시트는 행 배열을 `!data`에 둔다. 배열 자체를 시트로 넘기면(0.18 형식) 쓰기가
+  // sparse 시트로 보고 `A1` 같은 키만 찾아 빈 시트가 된다.
   /** @type {WorkSheet} */
-  const ws = /** @type {WorkSheet} */ (/** @type {unknown} */ (data));
+  const ws = { '!data': /** @type {CellObject[][]} */ (data) };
   ws['!ref'] = XLSX.utils.encode_range({
     s: { r: 0, c: 0 },
     e: { r: data.length - 1, c: Math.max(0, columns.length - 1) },
