@@ -389,7 +389,7 @@ scripts/
   serve-dist.mjs                 dist/를 http://localhost로 서빙하는 정적 서버(지원 매트릭스의 http 열 실측용. 런타임 코드 아님)
 .github/workflows/
   ci.yml                         푸시·PR마다 check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정)
-  desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux·Windows는 tauri-driver E2E까지(Step 11)
+  desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux는 tauri-driver E2E까지(Step 11)
   release.yml                    `v*` 태그에서 build·verify 뒤 dist/jdrdatabase.html을 GitHub 릴리스에 첨부(CLAUDE.md 7.1: dist/는 릴리스 태그에서만 배포)
 ```
 
@@ -904,7 +904,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 
 **선행 조건**: Step 10까지 완료된 브라우저 경로. Step 1의 엔진 인터페이스와 적합성 테스트, Step 2의 `capabilities()` 기반 상한 검사가 이미 있어야 한다.
 
-**산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/native/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux·Windows tauri-driver E2E), `docs/desktop.md`
+**산출물**: `src-tauri/` 전체(앱 크레이트와 `core/`), `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`(타우리 분기 구현), `app/store.js`(네이티브 열기·저장·복구·`.bak` 복원), `main.js`(데스크톱 모드 기동), `package.json` scripts `tauri:dev`·`tauri:build`·`test:native`, `test/native/engine-native.test.js`(worker_threads + `jdr-ipc-stdio`로 적합성 테스트), `test/desktop/`(tauri-driver E2E), CI `desktop` 잡(Windows·macOS·Linux `cargo fmt`·`clippy`·`test`·`tauri build`, Linux tauri-driver E2E), `docs/desktop.md`
 
 **주요 함수 (JS)**
 - `engine-native.js`: 인터페이스 전체 구현. `createNativeEngine({ caller })`. `caller`는 `{ callSync(op, args) → result, call(op, args, onProgress) → Promise }`이며 `createHttpCaller({ url, token })`(엔진 프로토콜, 기본)이나 Worker 전역(`self`)·Node `parentPort` 위의 `createPortCaller(port)`(공유 버퍼 중계, 폴백·테스트)로 만든다. `init({ native })`가 주소를 받는다. 메인 컨텍스트(인라인 전송)에서는 만들 수 없어 `E_NATIVE_IPC`. `capabilities()` → `{ mode: 'native', warnFileBytes: Infinity, maxFileBytes: Infinity, persistence: 'native', cancellable: true, fts5 }`. `snapshot()`은 `E_UNSUPPORTED`. `prepareCached(sql)`은 `{ sql }`만 돌려준다

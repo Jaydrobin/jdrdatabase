@@ -53,11 +53,11 @@ npm run tauri:dev                     # 개발 실행(먼저 npm run build로 di
 npm run tauri:build                   # 설치본(src-tauri/target/release/bundle)
 cargo test --manifest-path src-tauri/Cargo.toml --workspace   # 러스트 테스트(코어 + 앱)
 npm run test:native                   # 실제 rusqlite 엔진에 대한 JS 엔진 적합성 테스트
-npm run test:desktop                  # tauri-driver E2E(Linux: WebKitWebDriver + Xvfb, Windows: Edge Driver)
+npm run test:desktop                  # tauri-driver E2E(Linux: WebKitWebDriver + Xvfb)
 node test/desktop/perf.mjs <경로>       # 5 GB(500만 행) 데스크톱 성능. DESIGN.md 8장 데스크톱 표를 로컬에서 판정한다. 경로에 파일이 없으면 만든다(디스크는 그 크기의 약 3배)
 ```
 
-필요한 것: Rust stable, Tauri 2 CLI(`devDependencies`의 `@tauri-apps/cli`), Linux는 `libwebkit2gtk-4.1-dev`·`libgtk-3-dev`(E2E는 `webkit2gtk-driver`·`xvfb`·`cargo install tauri-driver`), Windows는 WebView2(기본 설치. E2E는 WebView2 런타임과 같은 버전의 `msedgedriver.exe`를 받아 경로를 `JDR_NATIVE_DRIVER`로 주고 `cargo install tauri-driver`), macOS는 Xcode 명령줄 도구(tauri-driver가 macOS를 지원하지 않아 데스크톱 E2E가 없다). WebKitGTK 개발 라이브러리가 없는 환경에서는 `cargo test --manifest-path src-tauri/Cargo.toml -p jdr-core`로 코어만 검사할 수 있다.
+필요한 것: Rust stable, Tauri 2 CLI(`devDependencies`의 `@tauri-apps/cli`), Linux는 `libwebkit2gtk-4.1-dev`·`libgtk-3-dev`(E2E는 `webkit2gtk-driver`·`xvfb`·`cargo install tauri-driver`), Windows는 WebView2(기본 설치), macOS는 Xcode 명령줄 도구. Windows 데스크톱 E2E는 아직 돌지 않는다: WebView2 런타임과 같은 버전의 `msedgedriver.exe`(경로는 `JDR_NATIVE_DRIVER`)로 tauri-driver가 붙지만, 앱의 WebView2가 WebDriver의 원격 디버깅 인자를 받지 않아 세션이 만들어지지 않는다(`docs/sessions.md` 세션 L). macOS는 tauri-driver가 지원하지 않는다. WebKitGTK 개발 라이브러리가 없는 환경에서는 `cargo test --manifest-path src-tauri/Cargo.toml -p jdr-core`로 코어만 검사할 수 있다.
 
 데스크톱 E2E는 파일 대화상자를 자동화할 수 없으므로 테스트 빌드의 훅(`window.__jdrTest.setPickedPath`)으로 경로를 넣는다. 테스트 빌드는 `npm run build -- --test`가 만드는 `dist/test/tauri/index.html`을 `tauri build --debug --no-bundle --config '{"build":{"frontendDist":"../dist/test/tauri"}}'`로 담아 만든다. 릴리스 빌드에는 훅이 없다.
 

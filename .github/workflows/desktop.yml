@@ -1,8 +1,8 @@
 name: desktop
 
 # 데스크톱(Step 11): 세 플랫폼에서 러스트 워크스페이스 검사(fmt·clippy·test), 실제 rusqlite 엔진에 대한 JS 적합성
-# 테스트(test:native), 타우리 빌드. Linux(WebKitWebDriver + Xvfb)와 Windows(Edge Driver)는 tauri-driver로 데스크톱
-# E2E까지 돌린다. macOS는 tauri-driver가 지원하지 않는다(WKWebView용 WebDriver가 없다).
+# 테스트(test:native), 타우리 빌드. Linux는 tauri-driver(WebKitWebDriver + Xvfb)로 데스크톱 E2E까지 돌린다.
+# Windows(Edge Driver) 단계는 갖춰 두었지만 꺼 두었고(아래 matrix), macOS는 tauri-driver가 지원하지 않는다.
 # 브라우저 산출물 검사는 ci.yml이 맡는다. 러스트 빌드가 느리므로 PR과 main 푸시에서만 돈다.
 on:
   push:
@@ -83,8 +83,11 @@ jobs:
         include:
           - os: ubuntu-latest
             e2e: true
+          # Windows E2E는 꺼 둔다(세션 L): Edge Driver는 WebView2 런타임과 같은 버전으로 붙지만, 앱의 WebView2가
+          # WebDriver의 원격 디버깅 인자(WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS)를 받지 않아 세션을 만들지 못한다.
+          # wry가 브라우저 인자와 데이터 폴더를 API로 지정하기 때문으로 보인다. 아래 Windows 단계는 켜면 그대로 쓴다.
           - os: windows-latest
-            e2e: true
+            e2e: false
           - os: macos-latest
             e2e: false
     runs-on: ${{ matrix.os }}
