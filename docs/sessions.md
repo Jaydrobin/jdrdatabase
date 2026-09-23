@@ -1808,7 +1808,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - [x] `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`(27개): 통과. 러스트 코드는 바꾸지 않았지만 `engine-native.js`를 바꿨으므로 CLAUDE.md 7.1대로 돌렸습니다.
 - [x] `npm run test:perf`: **8개 모두 통과**(예산 안). 앱 시작 384 ms, 300 MB 열기 1,881 ms, 렌더 p95 1.3 ms, 창 질의 최대 20.5 ms, 셀 편집 2.2 ms, 스냅샷 1,759 ms, 저장 시점 RSS 1,156,333,568 bytes, LIKE 812 ms(짧은 검색어 중앙값 993 ms), trigram 61 ms. 세션 N 기록의 LIKE 예산 초과는 이번 실행에서는 재현되지 않았습니다.
 - [x] CLAUDE.md 7.1: 새 오류 코드 없음. 새 RPC op `cleanup.plan`·`cleanup.run`은 6장 표에 있음(`conventions.test.js` 통과). `src/db`의 `${`는 `quoteIdent`를 거친 식별자와 검증한 물리 타입뿐. `innerHTML` 새 사용 없음(사용자 데이터는 `textContent`). 모드 문자열 비교 추가 없음(`persistence` 값만 읽음). `dist/` 커밋 없음.
-- 미확인: 이 기록을 담은 푸시의 CI 결과(푸시 뒤 확인해 적습니다). `desktop` 워크플로(세 OS)는 수동 실행 전용이라 돌리지 않았습니다.
+- [x] CI(`ci` 워크플로): `8b4c973`(run 35898042476)에서 `check-build-e2e`와 `perf`(보정된 기준선 비교, 새 `cleanup-300k` 항목은 기록만) 모두 **초록**. `desktop` 워크플로(세 OS)는 수동 실행 전용이라 돌리지 않았습니다(Windows·macOS는 아래 미확인).
 
 **이어받은 미확인 항목의 결과**
 
