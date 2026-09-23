@@ -16,7 +16,7 @@ const ROWS = 200;
 
 /**
  * @typedef {object} TestHook
- * @property {() => { tables: Array<{ id: string, name: string, ftsEnabled: boolean, columns: Array<{ id: string, name: string }> }>, dirty: boolean } | null} state
+ * @property {() => { tables: Array<{ id: string, name: string, ftsEnabled: boolean, ftsStale: boolean, columns: Array<{ id: string, name: string }> }>, dirty: boolean } | null} state
  * @property {(cmd: unknown) => Promise<{ affected: number }>} apply
  * @property {(sql: string) => Promise<{ columns: string[], rows: unknown[][] }>} query
  * @property {() => { undo: number, redo: number, busy: boolean } | null} history
@@ -310,6 +310,40 @@ test('검색: LIKE 폴백과 와일드카드 이스케이프, 검색 인덱스 �
     page.locator('.jdr-toast--info', { hasText: '검색 인덱스를 삭제했습니다' }),
   ).toBeVisible();
   await expect(page.locator('[data-action="search-index"]')).toHaveText('검색 인덱스 만들기');
+});
+
+test('검색 인덱스를 만든 뒤 열을 추가하면 버튼과 툴팁이 "오래됨"을 알리고, 껐다가 다시 만들면 풀린다', async ({
+  page,
+}) => {
+  await seed(page);
+  const indexButton = page.locator('[data-action="search-index"]');
+  await indexButton.click();
+  await expect(
+    page.locator('.jdr-toast--info', { hasText: '검색 인덱스를 만들었습니다' }),
+  ).toBeVisible();
+  await expect(indexButton).toHaveText('검색 인덱스 삭제');
+  await expect(indexButton).toHaveAttribute('title', '');
+
+  // 열 구성이 바뀌면 인덱스는 만든 시점의 열 집합에 남는다(D-07).
+  await addColumn(page, '메모', '텍스트');
+  await expect(indexButton).toHaveText('검색 인덱스 (오래됨)');
+  await expect(indexButton).toHaveAttribute(
+    'title',
+    '인덱스를 만든 뒤 열 구성이 바뀌었습니다. 새 열은 검색되지 않고 지운 열은 아직 인덱스에 남아 있습니다. 인덱스를 껐다가 다시 만들면 맞춰집니다.',
+  );
+  expect((await hook(page).state())?.tables[0]?.ftsStale).toBe(true);
+
+  // 툴팁이 안내하는 대로 껐다가 다시 만들면 새 열 집합에 맞춰진다.
+  await indexButton.click();
+  await expect(
+    page.locator('.jdr-toast--info', { hasText: '검색 인덱스를 삭제했습니다' }),
+  ).toBeVisible();
+  await expect(indexButton).toHaveText('검색 인덱스 만들기');
+  await expect(indexButton).toHaveAttribute('title', '');
+  await indexButton.click();
+  await expect(indexButton).toHaveText('검색 인덱스 삭제');
+  await expect(indexButton).toHaveAttribute('title', '');
+  expect((await hook(page).state())?.tables[0]?.ftsStale).toBe(false);
 });
 
 test('정렬·필터·검색·숨김·너비 조합을 뷰로 저장 → 파일 저장 → 다시 열기 → 뷰 선택 → 복원', async ({
