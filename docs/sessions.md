@@ -32,11 +32,12 @@ grep -n 미확인 docs/sessions.md
 | G 점검 | 세션 G 산출물 코드 점검과 수정 | 완료 |
 | H | 10 (성능·하드닝·접근성) | 완료 |
 | H 점검 | 세션 H 산출물 코드 점검과 수정 | 완료 |
-| I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
+| I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인. Windows는 세션 M에서 실측) |
 | I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI 다섯 잡 초록. Windows·macOS WebView 실측은 미확인) |
 | J | 누적 미수정 항목 정리(세션 A~I의 "점검했지만 고치지 않은 것" 12건) | 완료(CI 다섯 잡 초록) |
 | K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(코드 푸시·문서 전용 푸시 양쪽 실측. main 푸시 경로는 미확인. PR 실행의 concurrency 취소는 세션 L에서 실측) |
-| L | 누적 미확인 항목 정리(SheetJS 0.20.3, 두 탭·인덱스 배지·작업 사본 목록 E2E, `E_MEM`·concurrency 실측, 5 GB 데스크톱 성능, Windows E2E 시도) | 완료(작업 사본 목록의 데이터 유실 버그 수정. Windows E2E는 WebView2 인자 문제로 되돌림, 작업 사본 복사는 성능 예산 초과로 제안 대기) |
+| L | 누적 미확인 항목 정리(SheetJS 0.20.3, 두 탭·인덱스 배지·작업 사본 목록 E2E, `E_MEM`·concurrency 실측, 5 GB 데스크톱 성능, Windows E2E 시도) | 완료(작업 사본 목록의 데이터 유실 버그 수정. Windows E2E는 WebView2 인자 문제로 되돌림, 작업 사본 복사는 성능 예산 초과로 제안 대기. 둘 다 세션 M에서 처리) |
+| M | 세션 L이 남긴 결정 세 건(작업 사본 복사 Linux 적용, `E_MEM` 안내 분리와 크기 경고, Windows 데스크톱 E2E) | 완료(Windows 데스크톱 E2E 전 시나리오 통과. 앱 안의 5 GB 복사는 여전히 예산 초과, Windows·macOS 복사 속도 미확인) |
 
 ## 기록
 
@@ -1341,7 +1342,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 **미확인 (후속 세션에서 이어받음)**
 
 - ~~5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 위 완료 기준 참고.~~ → 세션 L에서 측정.
-- Windows(WebView2)·macOS(WKWebView)에서의 데스크톱 모드 전부: `http://jdr.localhost/call` 형태의 프로토콜에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream. CI `desktop` 잡(세 OS)의 첫 실행 결과도 미확인입니다(이 푸시가 첫 실행).
+- Windows(WebView2)·macOS(WKWebView)에서의 데스크톱 모드 전부: `http://jdr.localhost/call` 형태의 프로토콜에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream. CI `desktop` 잡(세 OS)의 첫 실행 결과도 미확인입니다(이 푸시가 첫 실행). → 세션 M: Windows는 데스크톱 E2E 시나리오 전부(Worker 동기 XHR, IndexedDB·BroadcastChannel, 저장·`.bak`·복원 등)가 통과했습니다. 파일 대화상자, `sink_write` raw 본문, single-instance, CompressionStream과 macOS 전부는 여전히 미확인입니다.
 - 실제 파일 대화상자(`pick_open`·`pick_save`)와 내보내기 경로 싱크(`sink_write`)의 WebView 실측(E2E는 훅으로 경로를 넣고, 싱크는 Node `test:native`의 JSON 경로로만 검사).
 - CI에서의 `tauri build`(릴리스 번들) 성공 여부와 번들 크기.
 - 세션 H 점검이 남긴 항목(실제 브라우저의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등)은 그대로 남습니다.
@@ -1400,7 +1401,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
 - ~~이 푸시의 CI `desktop` 잡 결과.~~ 위 검증 절에 적었습니다. 세 OS 전부 초록이고 설치본까지 나왔습니다.
 - ~~5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리.~~ → 세션 L에서 측정. 세션 I에서 이어받아 그대로 남습니다(이 환경의 디스크·시간 예산으로 500만 행 픽스처를 만들지 못했습니다).
-- **Windows(WebView2)·macOS(WKWebView)에서 앱이 실제로 도는 것**은 여전히 미확인입니다. 이번에 확인된 것은 러스트 쪽(`cargo test`가 저장·사본·싱크를 세 OS에서 검증)과 빌드·번들까지이고, WebView 안에서 도는 부분 — `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream — 은 데스크톱 E2E가 Linux에서만 돌기 때문에 확인되지 않습니다. 8번(Windows의 `sync_all`)이 러스트 단위 테스트에서만 드러난 것처럼, WebView 쪽에도 같은 종류의 플랫폼 차이가 남아 있을 수 있습니다. Windows E2E는 Microsoft Edge Driver로 붙일 수 있으므로 후속 세션에서 `desktop` 잡의 `e2e` 행렬 값을 Windows에도 켜는 것을 제안합니다.
+- **Windows(WebView2)·macOS(WKWebView)에서 앱이 실제로 도는 것**은 여전히 미확인입니다. 이번에 확인된 것은 러스트 쪽(`cargo test`가 저장·사본·싱크를 세 OS에서 검증)과 빌드·번들까지이고, WebView 안에서 도는 부분 — `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream — 은 데스크톱 E2E가 Linux에서만 돌기 때문에 확인되지 않습니다. 8번(Windows의 `sync_all`)이 러스트 단위 테스트에서만 드러난 것처럼, WebView 쪽에도 같은 종류의 플랫폼 차이가 남아 있을 수 있습니다. Windows E2E는 Microsoft Edge Driver로 붙일 수 있으므로 후속 세션에서 `desktop` 잡의 `e2e` 행렬 값을 Windows에도 켜는 것을 제안합니다. → 세션 M에서 Windows E2E를 켰고 통과합니다. macOS와 대화상자·싱크·single-instance는 미확인으로 남습니다.
 - 실제 파일 대화상자(`pick_open`·`pick_save`)의 WebView 실측. E2E는 `__jdrTest.setPickedPath`로 경로를 넣습니다.
 - 위 "고치지 않고 남긴 것"의 다섯 항목(열기·저장 진행률, 남은 dirty 사본 접근, 외부 파일의 핫 WAL, `run()`의 `expect`, `writeSync` 예외)은 판단이 필요한 채로 남습니다.
 - 세션 I와 세션 H 점검이 남긴 항목(실제 브라우저의 Worker 사망·FSA 쓰기 실패, Firefox·Safari와 `https://` 원점, 스크린 리더·실제 한글 IME, 30만 행 내보내기 메모리·XLSX 30만 행, SheetJS 0.20.3 갱신(CVE 2건), 저장 중 파일 열기 등)은 그대로 남습니다.
@@ -1590,10 +1591,68 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
 **미확인 (후속에서 이어받음)**
 
-- **Windows(WebView2)의 데스크톱 E2E**: 위 6번의 WebView2 인자 문제로 세션을 만들지 못합니다. Windows에서 WebView 안의 동작(엔진 프로토콜 `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 저장·`.bak`·복원, 작업 사본 목록)은 여전히 **미확인**입니다.
-- **작업 사본 복사 예산 초과와 저장의 경계 판정**: 위 제안을 적용할지 결정이 필요합니다. 성능은 이 컨테이너의 Linux VM(ext4)에서만 쟀고, 8장의 측정 환경(4코어 노트북)·Windows·macOS에서는 **미확인**입니다(macOS APFS의 `fs::copy`는 클론이라 결과가 크게 다를 수 있습니다).
+- ~~**Windows(WebView2)의 데스크톱 E2E**: 위 6번의 WebView2 인자 문제로 세션을 만들지 못합니다. Windows에서 WebView 안의 동작(엔진 프로토콜 `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 저장·`.bak`·복원, 작업 사본 목록)은 여전히 **미확인**입니다.~~ → 세션 M에서 해소(전 시나리오 통과).
+- **작업 사본 복사 예산 초과와 저장의 경계 판정**: 위 제안을 적용할지 결정이 필요합니다. 성능은 이 컨테이너의 Linux VM(ext4)에서만 쟀고, 8장의 측정 환경(4코어 노트북)·Windows·macOS에서는 **미확인**입니다(macOS APFS의 `fs::copy`는 클론이라 결과가 크게 다를 수 있습니다). → 세션 M: 사용자 결정대로 Linux에만 적용했습니다. A/B에서는 빨라졌지만 앱 안의 측정은 여전히 예산 초과이고, Windows·macOS 복사와 저장 경계는 그대로 미확인입니다(세션 M 절).
 - **SheetJS 파일 무결성**: 공식 배포본의 해시와 대조하지 못했습니다(**미확인**). `cdn.sheetjs.com`에 닿는 환경에서 `sha256sum`을 `vendor/CHECKSUMS`의 값과 견주면 끝납니다.
 - **`E_MEM`의 다른 브라우저**: Firefox·Safari에서 NOMEM보다 탭 종료가 먼저 오는지는 **미확인**입니다(Chromium은 약 2 GB에서 NOMEM이 먼저였습니다).
 - ~~**이 기록을 담은 푸시(기준선 `d98dd27` 포함)의 CI 결과**: **미확인**(이 커밋 뒤에 확인해 적습니다).~~ → `e4f22cf`에서 **다섯 잡 전부 초록**: `ci` run 35812017973(`check-build-e2e`, `perf`는 10개 항목 비교·건너뜀 0개·회귀 없음으로 새 `saveHwmBytes` 기준선까지 판정), `desktop` run 35812018006(Linux 데스크톱 E2E 포함 세 OS).
 - `push`(main) 경로: 병합 때 처음 돕니다(세션 K의 항목 그대로, **미확인**).
 - 이번에 고르지 않은 항목(30만 행 내보내기 메모리, File System Access 실측, 한글 파일 이름의 `<a download>`, Firefox·Safari, macOS WKWebView, 스크린 리더·실제 한글 IME 등)은 세션 K까지의 목록 그대로 **미확인**입니다.
+
+### 세션 M (세션 L이 남긴 결정 세 건) — 2026-09-23
+
+커밋: `55031f1` perf(workcopy) → `8c752ff` feat(desktop) → `f8bcc96` ci(desktop) → `f24a118` feat(store) → `4f2bd94` fix(desktop) → `ef73443` fix(test) → `2f05654` docs(support) → 이 커밋 docs(session).
+
+시작 상태: 브랜치가 원격 `d8c2577`과 같았고 `npm run check`(362개)가 초록이었습니다. 이 세션은 `DESIGN.md` 5.0의 Step을 구현하지 않고, 세션 L이 "점검했지만 고치지 않은 것"으로 남긴 세 건을 사용자 결정대로 처리합니다. 결정: (1) 작업 사본 복사 개선은 Linux에만 적용, (2) `E_MEM`은 저장 실패 문구 분리와 커진 DB의 크기 경고를 둘 다, (3) Windows 데스크톱 E2E를 진행. 사용자가 주로 쓰는 OS는 Windows라서, (1)은 Windows 복사 속도를 바꾸지 않습니다.
+
+**한 일**
+
+1. **Linux 작업 사본 복사를 64 MB 조각 `io::copy`로**(`55031f1`). `copy_original`의 본문을 `copy_body`로 나누고, Linux는 진행률 단위(64 MB)마다 `std::io::copy(&mut src.take(64 MB), dst)`로 넘깁니다. 표준 라이브러리가 파일 사이에서 `copy_file_range`를 쓰므로 사용자 공간 버퍼를 거치지 않습니다(strace로 `copy_file_range` 호출 확인). Windows·macOS는 기존 8 MB 버퍼 루프입니다. 두 경로 모두 "사본이 원본과 바이트 단위로 같고 진행률이 조각마다 오르며 마지막 보고가 파일 크기"인지 통합 테스트(약 140 MB, 64 MB 조각 경계에 맞지 않는 크기)로 고정했습니다. 비Linux 분기는 cfg를 잠시 뒤집어 이 컨테이너에서 clippy·테스트를 돌려 확인했습니다(Windows 교차 컴파일은 C 크로스 컴파일러가 없어 못 함). CI의 Windows·macOS `cargo test`도 이 테스트를 돌려 통과했습니다.
+   - **측정**: 같은 5 GB 파일을 두 방식으로 번갈아 복사한 A/B(릴리스, 끝에 `sync_all`)에서 8 MB 루프 5.9~30.6초, 조각 `io::copy` 2.9~5.2초였습니다(대상이 스크래치 폴더일 때와 앱 데이터 폴더일 때 모두).
+   - **앱 안의 측정(`test/desktop/perf.mjs`)은 여전히 예산 초과**입니다. 작업 사본 복사 8.1·8.4·11.0·11.6초(예산은 같은 실행의 "복사 + fsync" 기준 × 1.2 = 3.9~7.9초). 같은 실행에서 바꾸지 않은 저장도 9.4~13.7초로 세션 L(5.6~6.8초)의 두 배였고 창 질의도 느려, 이 VM의 디스크가 이날 전반적으로 느렸습니다. 앱 측정과 A/B가 어긋나는 이유로는, 측정 스크립트가 앱 복사 직전에 5 GB 복사 두 번(기준 측정)을 해서 원본이 페이지 캐시에서 밀려나는 순서를 의심하지만 확인하지 않았습니다(**미확인**).
+
+2. **Windows 데스크톱 E2E를 켰고 전 시나리오가 통과합니다**(`8c752ff`·`f8bcc96`·`4f2bd94`·`ef73443`).
+   - 메인 창을 설정 대신 코드로 만듭니다(`tauri.conf.json`의 창은 `create: false`, `lib.rs`의 `create_main_window`). Windows에서 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`가 있으면 wry 기본 인자와 합쳐 넘기고, `WEBVIEW2_USER_DATA_FOLDER`(또는 인자 속 `--user-data-dir=`)를 데이터 폴더로 넘깁니다. 환경 변수가 없으면 이전과 같은 창입니다. 순수 함수 `webview2_overrides`는 러스트 단위 테스트로 고정했습니다.
+   - 첫 CI(run 35816926373)에서 **세션이 처음으로 만들어졌고** 저장·`.bak`·복원까지 통과했습니다. 새 진단 단계의 Edge Driver 상세 로그를 보면, 드라이버는 원격 디버깅 인자를 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`로 주고, WebView2 프로세스는 드라이버의 임시 데이터 폴더(`C:\Windows\SystemTemp\scoped_dir…\EBWebView`)와 `--remote-debugging-port=0`을 받았습니다. Tauri 기본 데이터 폴더였다면 이 경로가 아니므로, 창에 넘긴 값이 적용된 것입니다.
+   - 같은 로그에서 드라이버의 `--disable-features=IgnoreDuplicateNavs,Prewarm`이 wry 기본 `--disable-features=…` 뒤에 따로 붙어, E2E에서만 wry가 끈 기능(미니 메뉴·SmartScreen)이 켜지는 것을 보고 두 목록을 한 인자로 합쳤습니다(`4f2bd94`).
+   - 첫 CI는 이어서 "원본 변경 → 취소" 시나리오에서 스크립트 시간 초과로 멈췄습니다. 저장을 기다리는 비동기 스크립트를 걸어 둔 채 대화상자를 찾는 스크립트를 보냈는데, Edge Driver는 세션의 명령을 하나씩 처리합니다(WebKitWebDriver는 동시에 받습니다). 저장은 페이지 안에서 시작만 하고 Promise를 창에 둔 뒤, 대화상자를 누르고 나서 기다리게 바꿨습니다(`ef73443`, 테스트만 변경).
+   - 두 번째 CI(run 35817668602)에서 Windows 데스크톱 E2E가 **전부 통과**했습니다(44초). 확인된 것: 상태바 "데스크톱 모드", `crossOriginIsolated: true`·`SharedArrayBuffer` 있음(Linux WebKitGTK는 없음), Worker 안 엔진 프로토콜(`http://jdr.localhost/call`)로 `SELECT 1`·FTS5, 다른 이름으로 저장(revision 1) → 저장(`.bak`, revision 2) → 다시 열기 → `.bak` 복원, 원본 변경 감지 → 대화상자 "취소", 세 번의 앱 실행에 걸친 작업 사본 목록(시작 안내, 키보드로 버리기, 열어서 복구, 저장 뒤 남지 않음). 결과를 `docs/support-matrix.md` Windows 열에 옮겼습니다(`2f05654`).
+
+3. **`E_MEM` 안내를 저장 실패와 나누고, 편집으로 커진 DB에 크기 경고를 넣었습니다**(`f24a118`). 먼저 Chromium 141 headless에서 크기별 한계를 쟀습니다(커밋하지 않은 스크래치 스크립트).
+   - 새로 만든 DB는 약 2 GB에서 삽입이 NOMEM이지만, 직렬화가 wasm 안에 사본을 하나 더 만들어 **저장은 약 1.1 GB부터 실패**합니다(100 MB 간격: 1,001 MB 성공, 1,101 MB부터 `E_MEM`).
+   - 파일에서 연 DB(memdb)는 NOCOPY 직렬화라 저장은 되지만 **약 760 MB에서 삽입이 NOMEM**입니다.
+   - 저장이 실패하는 1,271 MB 새 DB에서 **CSV 내보내기는 끝까지 됩니다**(1,237 MB 다운로드, 27.6초. 그 뒤에도 앱 사용 가능).
+   - 그래서 스냅샷 저장의 `E_MEM`은 `file.saveMemFailed`로 알립니다: 파일에 쓴 것이 없고 변경은 창에 남았으며, 표를 CSV로 내보내 두고 이 크기는 데스크톱 앱에서 다루라는 안내입니다. 토스트의 `error()`가 문구 키를 받을 수 있게 했습니다. 저장 밖의 `E_MEM`은 기존 문구(저장 유도) 그대로입니다.
+   - 새 op `db.size`(`page_count × page_size`, 배타 op 아님)로 스토어가 열기 직후(기준 단계)와 커맨드 기록·가져오기 뒤에 크기를 재어, `warnFileBytes`·`maxFileBytes`를 처음 넘을 때 경고 토스트(`file.sizeWarn`·`file.sizeOver`, 새 `warn` 종류, `role="alert"`)를 한 번씩 냅니다. 상한이 `Infinity`(native)면 재지 않습니다. UI에 숫자는 두지 않았습니다(상한은 `capabilities()`에서).
+   - `DESIGN.md` 6장(`db.size`), 7장(`E_MEM` 처리), Step 10(크기별 한계와 경고)을 같은 커밋에서 고쳤습니다.
+   - 빌드한 앱을 Chromium에 띄워 확인: 10 MB씩 편집하자 700.6 MB에서 경고 토스트("…브라우저 권장 크기(700.0 MB)를 넘었습니다…")가 떴고, 1.2 GB에서 저장을 누르자 새 저장 실패 문구와 `(E_MEM)`이 떴습니다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **365개** 통과(362 + `db.size` + 크기 경고 두 개). 기존 "스냅샷의 메모리 부족" 테스트는 새 코드에서 옛 단언(`error.E_MEM` 문구)으로 빨강인 것을 본 뒤 새 문구 키를 기대하도록 바꿨습니다. 크기 경고 테스트는 `checkDbSize`를 끈 코드에서 빨강인 것을 확인했습니다.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,860,804 bytes**(세션 L 3,858,000에서 **+2,804 bytes**: 문구 세 개와 크기 경고). 외부 참조 0, vendor 체크섬 OK.
+- [x] `npm run test:e2e`: **70개** 통과.
+- [x] `npm run test:native`: **29개** 통과.
+- [x] `npm run test:desktop`: Linux(WebKitGTK + Xvfb) 통과. 창을 코드로 만든 뒤와 저장 대기 방식을 바꾼 뒤 각각 돌렸습니다.
+- [x] `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`: 통과. 비Linux 복사 분기는 cfg를 뒤집어 따로 돌렸습니다.
+- [x] CI: `ef73443`에서 `ci` run 35817668492(`check-build-e2e`·`perf`)와 `desktop` run 35817668602(Linux·Windows 데스크톱 E2E, macOS 빌드)가 모두 초록입니다. Windows 설치본 두 개(`.msi`, `-setup.exe`, 업로드 6,957,517 bytes)도 만들어졌습니다.
+- [x] `CLAUDE.md` 7.1: 새 오류 코드 없음. 새 RPC op `db.size`는 `DESIGN.md` 6장·`worker.js` 핸들러와 타입·단위 테스트를 같은 커밋에 넣었습니다. `innerHTML`에 사용자 데이터가 닿는 곳, 모드 문자열 비교, `src/db`·`src/import`의 SQL 값 문자열 연결을 더하지 않았습니다.
+
+**이어받은 미확인 항목의 결과**
+
+- Windows(WebView2)의 데스크톱 E2E: **해소**(위 2번).
+- 작업 사본 복사 예산 초과: **Linux만 적용**(사용자 결정). A/B로는 빨라졌지만 앱 안의 측정은 여전히 초과입니다(아래 미확인).
+- `E_MEM` 문구 모순: **해소**(위 3번). 편집으로 커지는 DB의 무경고도 해소했습니다.
+
+**점검했지만 고치지 않은 것**
+
+- **새 DB는 저장 한계가 파일에서 연 DB보다 낮습니다**(약 1.1 GB 대 NOCOPY). 새 DB를 `:memory:` 대신 빈 이미지를 `sqlite3_deserialize`한 memdb로 열면 저장도 NOCOPY로 가서 한계가 올라갈 수 있습니다. 다만 memdb는 약 760 MB에서 삽입이 먼저 막히므로 어느 쪽이 나은지는 재야 합니다. 엔진의 새 DB 경로를 바꾸는 일이라 이번 결정 범위 밖으로 두었습니다.
+- **`docs/desktop.md`의 "구조" 절**(세션 L이 적은 Worker ↔ 메인 공유 버퍼 설명의 어긋남)은 이번에도 고치지 않았습니다.
+
+**미확인 (후속에서 이어받음)**
+
+- **앱 안의 5 GB 작업 사본 복사**: Linux에 적용한 뒤에도 `perf.mjs`로 8.1~11.6초, 예산 초과입니다. 측정 순서(기준 복사가 캐시를 밀어냄) 탓인지는 **미확인**이고, 같은 날 바꾸지 않은 저장까지 두 배로 느려 이 VM의 측정이 흔들렸습니다. 8장의 측정 환경(4코어 노트북)에서 다시 재야 합니다.
+- **Windows·macOS의 5 GB 복사·저장 시간**: 재지 않았습니다(**미확인**). 사용자가 주로 쓰는 Windows는 복사 경로가 8 MB 루프 그대로입니다. Windows에서 `node test/desktop/perf.mjs <경로>`를 돌리면 잴 수 있지만, 상주 메모리는 Linux `/proc`로만 재므로 그 항목은 빠집니다.
+- **Windows 데스크톱에서 E2E가 닿지 않는 것**: 파일 대화상자(자동화 불가), 내보내기 경로 싱크(`sink_write` raw 본문), single-instance, CompressionStream은 **미확인**입니다. macOS WKWebView는 tauri-driver가 지원하지 않아 전부 **미확인**입니다.
+- **크기 경고와 저장 실패 문구의 다른 브라우저 동작**: 한계 수치는 Chromium 실측입니다. Firefox·Safari에서 NOMEM과 탭 종료 중 어느 것이 먼저 오는지는 세션 L의 항목 그대로 **미확인**입니다.
+- 세션 L까지의 나머지 미확인 목록(SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, 한글 파일 이름의 `<a download>`, Firefox·Safari, 스크린 리더·실제 한글 IME 등)은 그대로 **미확인**입니다.
