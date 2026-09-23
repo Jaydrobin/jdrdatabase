@@ -605,9 +605,10 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - 세션 도중 컨텍스트가 부족해지면 완료된 Step까지만 커밋·푸시하고 PR 설명에 기록한 뒤, 남은 Step은 같은 세션 이름의 후속 세션(예: B-2)으로 이어 간다. 완료 기준을 낮추어 끝내지 않는다.
 
 v2 묶음(N~P)의 브랜치와 PR:
-- A~I는 브랜치 하나와 PR 하나를 모든 세션이 나눠 썼다. v2 묶음은 **묶음마다** `main`의 최신 상태에서 새 작업 브랜치와 새 PR을 만든다. 사유: 이 설계(문서 0.12)가 먼저 `main`에 들어가 있어 묶음마다 독립적으로 검토·병합할 수 있고, 묶음 하나의 diff가 v1 전체보다 훨씬 작다. 원격 실행 환경은 세션마다 작업 브랜치 이름을 정해 주므로, 세션을 나눠도 브랜치를 맞추는 지시가 필요 없다.
-- 순서는 N → O → P이며, 앞 묶음의 PR이 병합된 뒤에 다음 묶음을 시작한다. P의 도움말은 N·O의 동작을 설명하고, O의 정리 대화상자는 N이 바꾼 열 삭제 경로를 전제로 한다.
-- 병합 조건은 A~I와 같다: CI 초록, 리뷰어 1명 승인, `docs/sessions.md`의 그 묶음 절에 미확인 항목이 남지 않음. 묶음 안에서 해소하지 못한 항목은 같은 묶음의 후속 세션(예: N-2)이 같은 PR에서 이어 받는다.
+- A~I처럼 브랜치 하나와 PR 하나를 세 묶음이 함께 쓴다. 이 설계(문서 0.12)를 올린 작업 브랜치 `claude/busy-mayer-hv2g8x`와 그 PR이다. 사유: 세 묶음을 한 번에 검토하고 반영하기로 했고(사용자 결정), 설계와 구현이 한 PR에 있으면 리뷰어가 D-16~D-19와 코드를 함께 대조할 수 있다. 대가로 N이 끝나도 P까지 끝나야 `main`과 릴리스에 들어간다.
+- 원격 실행 환경은 세션마다 새 작업 브랜치 이름을 정해 주므로, 세션을 시작할 때 위 브랜치에서 이어 작업하라고 지시한다. 세션은 코드를 쓰기 전에 자기 작업 브랜치가 위 브랜치인지 확인하고, 다르면 사용자에게 먼저 묻는다. 다른 브랜치에 푸시하면 그 세션만 따로 PR이 생긴다.
+- 순서는 N → O → P이며, 앞 세션이 푸시되고 그 커밋의 CI가 초록인 뒤에 다음 세션을 시작한다. P의 도움말은 N·O의 동작을 설명하고, O의 정리 대화상자는 N이 바꾼 열 삭제 경로를 전제로 한다.
+- 병합은 세션 P까지 끝난 뒤 한 번이다. 조건은 A~I와 같다: CI 초록, 리뷰어 1명 승인, `docs/sessions.md`의 v2 절(설계 v2, N, O, P와 그 후속·점검 세션)에서 미확인 항목이 모두 해소됨.
 
 ### Step 0. 저장소 골격과 빌드·테스트 기반
 
@@ -1015,7 +1016,7 @@ v2 묶음(N~P)의 브랜치와 PR:
 
 **목표**: 새 테이블을 만들면 열 30개와 빈 행 30줄이 있는 시트가 바로 보이고, 빈 행에 입력하면 그 자리에 행이 생긴다. 열은 대화상자 없이 추가하고, 이름·타입·정렬은 머리글에서 바꾼다(D-16).
 
-**선행 조건**: 문서 0.12가 `main`에 병합됨.
+**선행 조건**: 문서 0.12(같은 작업 브랜치의 첫 커밋들).
 
 **산출물**: `util/names.js`, `db/tables.js`(`create`의 `columns`), `db/schema.js`(열이 든 사용자 테이블 DDL), `ui/grid/grid.js`(빈 행, 머리글 배치), `ui/grid/header.js`, `ui/menu.js`, `ui/grid/editing.js`(빈 행 확정·붙여넣기), `ui/grid/selection.js`(빈 행까지의 이동 범위), `ui/sidebar.js`(+ 테이블·+ 열), `ui/dialogs/table.js`(이름 미리 채움), `ui/dialogs/column.js`(열 추가 대화상자 제거, 선택 항목 예시), `app/shortcuts.js`(열 메뉴 단축키), `app/store.js`, `i18n/ko.js`·`en.js`, `styles/grid.css`
 
@@ -1056,7 +1057,7 @@ v2 묶음(N~P)의 브랜치와 PR:
 
 **목표**: 삭제한 열을 파일에서 완전히 지우고 브라우저 모드에서는 빈 공간을 줄인다(D-17). 데스크톱의 작업 사본과 브라우저의 직전 저장본을 설정에서 한 번에 비운다(D-18).
 
-**선행 조건**: 세션 N의 PR이 병합됨.
+**선행 조건**: 세션 N이 같은 브랜치에 푸시되고 그 커밋의 CI가 초록.
 
 **산출물**: `db/cleanup.js`, `db/schema.js`(임시 테이블 이름 `_jdr_tmp_<id>`), `db/engine-wasm.js`·`db/engine-native.js`·`db/engine.js`(`capabilities().compactsOnSave`), `db/worker.js`·`db/client.js`(`cleanup.plan`·`cleanup.run`), `app/store.js`(`planCleanup`·`runCleanup`·`discardAllWorkcopies`·`clearBackups`), `io/idb.js`(`keys`), `ui/dialogs/cleanup.js`, `ui/dialogs/settings.js`, `i18n/ko.js`·`en.js`(`column.delete.message`를 정리 위치로 고침), `docs/desktop.md`·`docs/cloud-sync.md`(정리 뒤 저장해야 파일이 줄어듦, 남는 사본), 테스트
 
@@ -1099,7 +1100,7 @@ v2 묶음(N~P)의 브랜치와 PR:
 
 **목표**: 모든 버튼·선택 상자에 한 문장 설명이 키보드로도 보이고, 개념은 도움말 대화상자에서 찾을 수 있다(D-19).
 
-**선행 조건**: 세션 O의 PR이 병합됨.
+**선행 조건**: 세션 O가 같은 브랜치에 푸시되고 그 커밋의 CI가 초록.
 
 **산출물**: `ui/tooltip.js`, `ui/dialogs/help.js`, `ui/toolbar.js`(도움말 버튼, 기존 `title` 제거), `ui/sidebar.js`·`ui/grid/grid.js`·`ui/grid/header.js`·`ui/dialogs/settings.js`(툴팁 연결), `app/shortcuts.js`(단축키 표에 설명 키), `i18n/ko.js`·`en.js`(`hint.*`, `help.*`, `shortcut.*`), `styles/app.css`, `test/unit/conventions.test.js`(툴팁 규칙), `CLAUDE.md` 5.5(툴팁 규칙), `docs/support-matrix.md`(F1, 비활성 버튼의 포인터 이벤트, 시크릿 모드의 IDB 수명)
 
