@@ -308,16 +308,19 @@ export function createGrid(deps) {
   frozenText.textContent = t('grid.frozenLabel');
   const frozenSelect = document.createElement('select');
   frozenSelect.className = 'jdr-grid__frozen-select';
+  frozenSelect.dataset.hint = 'hint.frozen-select';
   frozenLabel.append(frozenText, frozenSelect);
   const rowInsertButton = document.createElement('button');
   rowInsertButton.type = 'button';
   rowInsertButton.className = 'jdr-grid__button';
   rowInsertButton.dataset.action = 'row-insert';
+  rowInsertButton.dataset.hint = 'hint.row-insert';
   rowInsertButton.textContent = t('grid.rowInsert');
   const rowDeleteButton = document.createElement('button');
   rowDeleteButton.type = 'button';
   rowDeleteButton.className = 'jdr-grid__button';
   rowDeleteButton.dataset.action = 'row-delete';
+  rowDeleteButton.dataset.hint = 'hint.row-delete';
   rowDeleteButton.textContent = t('grid.rowDelete');
   bar.append(rowCountLabel, frozenLabel, rowInsertButton, rowDeleteButton);
 
@@ -346,6 +349,7 @@ export function createGrid(deps) {
   clearFiltersButton.type = 'button';
   clearFiltersButton.className = 'jdr-grid__button';
   clearFiltersButton.dataset.action = 'clear-filters';
+  clearFiltersButton.dataset.hint = 'hint.clear-filters';
   clearFiltersButton.textContent = t('grid.clearFilters');
   noMatch.append(noMatchText, clearFiltersButton);
   noMatch.hidden = true;

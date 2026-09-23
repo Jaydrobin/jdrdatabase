@@ -313,32 +313,37 @@ test('검색 인덱스를 만든 뒤 열을 추가하면 버튼과 툴팁이 "�
 }) => {
   await seed(page);
   const indexButton = page.locator('[data-action="search-index"]');
+  const tooltip = page.locator('#jdr-tooltip');
   await indexButton.click();
   await expect(
     page.locator('.jdr-toast--info', { hasText: '검색 인덱스를 만들었습니다' }),
   ).toBeVisible();
   await expect(indexButton).toHaveText('검색 인덱스 삭제');
-  await expect(indexButton).toHaveAttribute('title', '');
+  await expect(indexButton).toHaveAttribute('data-hint', 'hint.search-index-disable');
 
   // 열 구성이 바뀌면 인덱스는 만든 시점의 열 집합에 남는다(D-07).
   await addColumnUi(page, '메모');
   await expect(indexButton).toHaveText('검색 인덱스 (오래됨)');
-  await expect(indexButton).toHaveAttribute(
-    'title',
+  await expect(indexButton).toHaveAttribute('data-hint', 'hint.search-index-stale');
+  // 툴팁(D-19)이 상태별 문구를 보인다. 누른 뒤에는 포인터가 떠날 때까지 다시 뜨지 않으므로 옮겼다가 올린다.
+  await page.mouse.move(0, 400);
+  await indexButton.hover();
+  await expect(tooltip).toHaveText(
     '인덱스를 만든 뒤 열 구성이 바뀌었습니다. 새 열은 검색되지 않고 지운 열은 아직 인덱스에 남아 있습니다. 인덱스를 껐다가 다시 만들면 맞춰집니다.',
   );
   expect((await hook(page).state())?.tables[0]?.ftsStale).toBe(true);
 
   // 툴팁이 안내하는 대로 껐다가 다시 만들면 새 열 집합에 맞춰진다.
   await indexButton.click();
+  await expect(tooltip).toBeHidden();
   await expect(
     page.locator('.jdr-toast--info', { hasText: '검색 인덱스를 삭제했습니다' }),
   ).toBeVisible();
   await expect(indexButton).toHaveText('검색 인덱스 만들기');
-  await expect(indexButton).toHaveAttribute('title', '');
+  await expect(indexButton).toHaveAttribute('data-hint', 'hint.search-index');
   await indexButton.click();
   await expect(indexButton).toHaveText('검색 인덱스 삭제');
-  await expect(indexButton).toHaveAttribute('title', '');
+  await expect(indexButton).toHaveAttribute('data-hint', 'hint.search-index-disable');
   expect((await hook(page).state())?.tables[0]?.ftsStale).toBe(false);
 });
 

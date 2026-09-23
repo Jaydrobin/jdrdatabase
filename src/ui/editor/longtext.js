@@ -86,11 +86,13 @@ export function mountLongtextPanel(parent, deps) {
   saveButton.type = 'button';
   saveButton.className = 'jdr-dialog__button jdr-dialog__button--primary';
   saveButton.dataset.action = 'longtext-save';
+  saveButton.dataset.hint = 'hint.longtext-save';
   saveButton.textContent = t('longtext.save');
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
   cancelButton.className = 'jdr-dialog__button';
   cancelButton.dataset.action = 'longtext-cancel';
+  cancelButton.dataset.hint = 'hint.longtext-cancel';
   cancelButton.textContent = t('dialog.cancel');
   buttons.append(saveButton, cancelButton);
 

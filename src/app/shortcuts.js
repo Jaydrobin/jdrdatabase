@@ -5,10 +5,11 @@
  * - 조합 중(`isComposing`)의 키는 어떤 행동에도 대응하지 않는다(CLAUDE.md 5.5).
  * - 저장·되돌리기 같은 문서 수준 단축키는 모달이 떠 있으면 무시하고, 입력 요소 안에서는 브라우저의
  *   기본 동작(input의 되돌리기)을 빼앗지 않는다. 그리드 수준 단축키(편집·삭제·복사)는 그리드가 처리한다.
+ * - 도움말의 단축키 주제는 이 표를 `describe()`로 읽어 그린다(D-19). 설명 문구는 `shortcut.<action>` 키다.
  */
 
 /**
- * @typedef {'save' | 'saveAs' | 'undo' | 'redo' | 'edit' | 'cancel' | 'clear' | 'copy' | 'selectAll' | 'rowInsert' | 'rowDelete' | 'columnMenu'} ShortcutAction
+ * @typedef {'save' | 'saveAs' | 'undo' | 'redo' | 'edit' | 'cancel' | 'clear' | 'copy' | 'selectAll' | 'rowInsert' | 'rowDelete' | 'columnMenu' | 'help'} ShortcutAction
  */
 
 /**
@@ -29,6 +30,8 @@ export const SHORTCUTS = Object.freeze(
     { action: 'redo', key: 'z', ctrl: true, shift: true, scope: 'document' },
     { action: 'redo', key: 'y', ctrl: true, scope: 'document' },
     { action: 'undo', key: 'z', ctrl: true, scope: 'document' },
+    // 도움말(D-19). 브라우저·WebView가 F1을 먼저 가로채면 도구 모음의 버튼만 남는다(docs/support-matrix.md).
+    { action: 'help', key: 'F1', scope: 'document' },
     { action: 'rowInsert', key: 'Enter', ctrl: true, shift: true, scope: 'grid' },
     { action: 'rowDelete', key: 'Delete', ctrl: true, shift: true, scope: 'grid' },
     { action: 'selectAll', key: 'a', ctrl: true, scope: 'grid' },
@@ -109,4 +112,57 @@ export function mountShortcuts(handlers, options = {}) {
   };
   document.addEventListener('keydown', onKeydown);
   return () => document.removeEventListener('keydown', onKeydown);
+}
+
+/**
+ * 도움말에 보이는 키 이름. 여기 없는 키는 `KeyboardEvent.key` 그대로(글자 키는 대문자)다.
+ * @type {Readonly<Record<string, string>>}
+ */
+const KEY_NAMES = Object.freeze({ Escape: 'Esc', ContextMenu: 'Menu' });
+
+/**
+ * 도움말 단축키 주제의 한 줄.
+ * @typedef {object} ShortcutDescription
+ * @property {string} keys 표시용 키 조합(`Ctrl+Shift+S`, macOS는 `⌘⇧S`)
+ * @property {`shortcut.${ShortcutAction}`} labelKey 설명 문구의 i18n 키
+ * @property {ShortcutAction} action
+ * @property {'document' | 'grid'} scope
+ */
+
+/**
+ * macOS인가. `navigator`가 없거나(Node) 읽을 수 없으면 아니라고 본다(기능 감지, CLAUDE.md 5.6).
+ * @returns {boolean}
+ */
+function detectMac() {
+  try {
+    return /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 단축키 표의 항목마다 표시용 키 조합과 설명 키를 돌려준다. 표의 순서를 지킨다.
+ * @param {{ mac?: boolean }} [options] `mac`이 없으면 `navigator.platform`으로 정한다
+ * @returns {ShortcutDescription[]}
+ */
+export function describe(options = {}) {
+  const mac = options.mac ?? detectMac();
+  return SHORTCUTS.map((shortcut) => {
+    const key =
+      KEY_NAMES[shortcut.key] ??
+      (shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key);
+    /** @type {string[]} */
+    const parts = [];
+    if (shortcut.ctrl) parts.push(mac ? '⌘' : 'Ctrl');
+    if (shortcut.alt) parts.push(mac ? '⌥' : 'Alt');
+    if (shortcut.shift) parts.push(mac ? '⇧' : 'Shift');
+    parts.push(key);
+    return {
+      keys: parts.join(mac ? '' : '+'),
+      labelKey: /** @type {const} */ (`shortcut.${shortcut.action}`),
+      action: shortcut.action,
+      scope: shortcut.scope,
+    };
+  });
 }

@@ -54,6 +54,7 @@ function button(label, action) {
   el.type = 'button';
   el.className = 'jdr-dialog__button jdr-dialog__button--small';
   el.dataset.action = action;
+  el.dataset.hint = `hint.${action}`;
   el.textContent = label;
   return el;
 }

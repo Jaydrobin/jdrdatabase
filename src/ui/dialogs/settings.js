@@ -71,6 +71,7 @@ function confirmRow(options) {
   ok.type = 'button';
   ok.className = 'jdr-dialog__button jdr-dialog__button--small jdr-dialog__button--danger';
   ok.dataset.action = `${options.role}-ok`;
+  ok.dataset.hint = `hint.${options.role}-ok`;
   ok.textContent = options.okLabel;
   const hide = () => {
     el.hidden = true;
@@ -192,6 +193,7 @@ export async function openSettingsDialog(deps) {
       cleanupButton.type = 'button';
       cleanupButton.className = 'jdr-dialog__button jdr-dialog__button--small';
       cleanupButton.dataset.action = 'cleanup-open';
+      cleanupButton.dataset.hint = 'hint.cleanup-open';
       cleanupButton.textContent = t('settings.cleanup');
       cleanupButton.disabled = true;
       cleanupButton.addEventListener('click', () => {
@@ -219,6 +221,7 @@ export async function openSettingsDialog(deps) {
       restoreButton.type = 'button';
       restoreButton.className = 'jdr-dialog__button jdr-dialog__button--small';
       restoreButton.dataset.action = 'backup-restore';
+      restoreButton.dataset.hint = 'hint.backup-restore';
       restoreButton.textContent = t('settings.backupRestore');
       restoreButton.disabled = true;
       restoreButton.addEventListener('click', () => {
@@ -238,6 +241,7 @@ export async function openSettingsDialog(deps) {
       clearButton.type = 'button';
       clearButton.className = 'jdr-dialog__button jdr-dialog__button--small';
       clearButton.dataset.action = 'backup-clear-all';
+      clearButton.dataset.hint = 'hint.backup-clear-all';
       clearButton.textContent = t('settings.backupClearAll');
       clearButton.hidden = true;
       const clearConfirm = confirmRow({
@@ -295,6 +299,7 @@ export async function openSettingsDialog(deps) {
       discardAllButton.type = 'button';
       discardAllButton.className = 'jdr-dialog__button jdr-dialog__button--small';
       discardAllButton.dataset.action = 'workcopy-discard-all';
+      discardAllButton.dataset.hint = 'hint.workcopy-discard-all';
       discardAllButton.textContent = t('settings.workcopyDiscardAll');
       discardAllButton.hidden = true;
       /** @type {Map<string, HTMLElement>} */
@@ -358,6 +363,8 @@ export async function openSettingsDialog(deps) {
           const open = document.createElement('button');
           open.type = 'button';
           open.className = 'jdr-dialog__button jdr-dialog__button--small';
+          open.dataset.action = 'workcopy-open';
+          open.dataset.hint = 'hint.workcopy-open';
           open.textContent = t('settings.workcopyOpen');
           // 연 사본은 더 이상 복구를 기다리지 않는다. 행을 남겨 두면 대화상자가 열린 채로 그 사본의 "버리기"가
           // 눌릴 수 있다(스토어가 막지만 누를 수 있는 버튼을 두지 않는다).
@@ -371,6 +378,8 @@ export async function openSettingsDialog(deps) {
           const drop = document.createElement('button');
           drop.type = 'button';
           drop.className = 'jdr-dialog__button jdr-dialog__button--small';
+          drop.dataset.action = 'workcopy-discard';
+          drop.dataset.hint = 'hint.workcopy-discard';
           drop.textContent = t('settings.workcopyDiscard');
           drop.addEventListener('click', () => {
             drop.disabled = true;

@@ -100,6 +100,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 - 이벤트 리스너는 마운트 시 등록하고 언마운트 시 해제한다. 익명 함수를 `addEventListener`에 넘기고 해제하지 못하는 패턴 금지.
 - 키보드 처리에서 `event.isComposing`을 확인하지 않고 Enter/Esc를 처리하면 한글 입력이 깨진다. 편집기 코드는 반드시 확인한다.
 - UI 문자열은 `i18n/ko.js`의 키를 통해서만 쓴다. 코드에 한국어·영어 리터럴 문구 금지(로그·오류 `detail`은 예외).
+- 버튼·선택 상자의 설명(툴팁)은 `data-hint` 속성에 i18n 키를 달고 `ui/tooltip.js`가 보인다. 키는 `hint.<data-action>`이고, `data-action`이 없는 요소는 `hint.<요소 이름>`이다. HTML `title` 속성은 쓰지 않는다(키보드·터치에서 보이지 않는다). 텍스트 입력칸에는 툴팁을 달지 않는다. `data-action`을 단 버튼에 `data-hint`가 없거나 키가 `ko.js`·`en.js`에 없으면 `conventions.test.js`가 실패한다. 한 문장으로 설명되지 않는 개념은 도움말 주제(`help.<주제>.title`·`.body`)에 쓰고, 새 단축키를 `app/shortcuts.js`에 넣으면 `shortcut.<action>` 문구도 함께 넣는다(도움말의 단축키 표가 그 표로 그려진다).
 - CSS는 `styles/*.css`에 두고 클래스 이름은 `jdr-<블록>__<요소>--<변형>` 형태. 인라인 스타일은 가상화 위치 계산(`transform`, `width`, `height`)에만 허용.
 
 ### 5.6 오류 처리

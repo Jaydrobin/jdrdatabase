@@ -34,6 +34,7 @@ import { mountSidebar } from './ui/sidebar.js';
 import { mountStatusbar } from './ui/statusbar.js';
 import { mountToasts } from './ui/toast.js';
 import { mountToolbar } from './ui/toolbar.js';
+import * as tooltip from './ui/tooltip.js';
 import { base64ToBytes, formatBytes } from './util/bytes.js';
 import { AppError, toAppError } from './util/errors.js';
 import { formatInteger } from './util/format.js';
@@ -631,6 +632,8 @@ async function boot() {
   if (!root) throw new AppError('E_UNKNOWN', 'root element #app is missing');
   document.title = t('app.title');
   const shell = mount(root);
+  // 툴팁(D-19)은 대화상자까지 덮도록 body에 위임한다. 앱이 사는 동안 하나다.
+  tooltip.mount(document.body);
   // 셸을 띄운 뒤의 실패는 모두 잠금 화면으로 간다. 기능 감지·임베드 블록 읽기처럼
   // 엔진 기동 전에 던지는 것도 포함된다.
   try {

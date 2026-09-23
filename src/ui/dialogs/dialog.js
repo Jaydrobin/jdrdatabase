@@ -23,6 +23,7 @@ import { t } from '../../i18n/index.js';
  * @property {() => string | null | Promise<string | null>} [validate] 확인(primary) 전에 검사. 오류 문구를 돌려주면 닫지 않고 표시. Promise면 끝날 때까지 버튼을 잠근다(가져오기 실행처럼 긴 작업)
  * @property {() => boolean} [beforeCancel] 취소(취소 버튼·Esc·배경)를 가로챈다. false를 돌려주면 닫지 않는다(진행 중인 작업을 먼저 멈출 때)
  * @property {boolean} [wide] 넓은 대화상자(미리보기 표 등)
+ * @property {() => HTMLElement | null} [initialFocus] 열린 뒤 포커스를 받을 요소. 없거나 null이면 첫 입력칸, 확인 버튼, 첫 버튼 순이다
  */
 
 /**
@@ -48,8 +49,9 @@ export function isDialogOpen() {
   return openBackdrop !== null;
 }
 
+// 로빙 tabindex(도움말의 주제 탭)의 `tabindex="-1"` 버튼은 탭 순서에 없으므로 트랩의 처음·끝이 될 수 없다.
 const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
 /**
  * 대화상자를 열고 사용자의 선택 값을 돌려준다. 한 번에 하나만 열린다(열려 있으면 먼저 닫힌 것으로 처리).
@@ -255,7 +257,8 @@ export function openDialog(options) {
     const firstInput = /** @type {HTMLElement | null} */ (
       body.querySelector('input, select, textarea')
     );
-    (firstInput ?? primaryButton ?? row.querySelector('button'))?.focus();
+    const initial = options.initialFocus?.() ?? null;
+    (initial ?? firstInput ?? primaryButton ?? row.querySelector('button'))?.focus();
     // 미리 채운 이름(새 테이블의 `테이블 n`, 이름 바꾸기의 옛 이름)은 전체 선택해 둔다. Enter 한 번으로
     // 그대로 받거나 바로 타이핑해 바꾼다(D-16).
     if (firstInput instanceof HTMLInputElement && firstInput.type === 'text') firstInput.select();

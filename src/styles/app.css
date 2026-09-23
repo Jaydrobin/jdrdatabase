@@ -790,3 +790,108 @@ body {
 .jdr-menu__item--danger:not(:disabled) {
   color: var(--jdr-danger);
 }
+
+/* 공용 툴팁(ui/tooltip.js, D-19). 문서에 하나이고 모든 것(대화상자·메뉴) 위에 있다. 포인터 이벤트를 받지 않아
+   아래의 버튼을 가리지 않는다. 위치는 보일 때 transform 한 번으로 정한다. 글자와 배경의 명도 대비는 약 15:1. */
+.jdr-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+  max-width: 320px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--jdr-fg);
+  color: var(--jdr-bg);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
+}
+
+.jdr-tooltip[hidden] {
+  display: none;
+}
+
+/* 도움말 대화상자(ui/dialogs/help.js): 왼쪽 세로 탭, 오른쪽 본문. */
+.jdr-help {
+  display: flex;
+  gap: 16px;
+  height: min(60vh, 520px);
+}
+
+.jdr-help__topics {
+  display: flex;
+  flex: 0 0 180px;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.jdr-help__topic {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--jdr-fg);
+  cursor: pointer;
+}
+
+.jdr-help__topic:hover {
+  background: var(--jdr-bg-muted);
+}
+
+.jdr-help__topic[aria-selected='true'] {
+  background: var(--jdr-selection-bg);
+  font-weight: 600;
+}
+
+.jdr-help__topic:focus-visible,
+.jdr-help__panel:focus-visible {
+  outline: 2px solid var(--jdr-accent);
+  outline-offset: -2px;
+}
+
+.jdr-help__panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+
+.jdr-help__heading {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.jdr-help__paragraph {
+  margin: 0 0 10px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.jdr-help__keys {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.jdr-help__keys th,
+.jdr-help__keys td {
+  padding: 4px 12px 4px 0;
+  border-bottom: 1px solid var(--jdr-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.jdr-help__keys kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 3px;
+  background: var(--jdr-bg-muted);
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}

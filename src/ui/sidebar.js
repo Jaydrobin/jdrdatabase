@@ -35,7 +35,7 @@ export const NEW_TABLE_COLUMNS = 30;
 
 /**
  * @param {string} label
- * @param {string} action
+ * @param {string} action data-action 값. 툴팁 키는 `hint.<action>`이다(D-19)
  * @param {Record<string, string>} [data]
  * @returns {HTMLButtonElement}
  */
@@ -44,6 +44,7 @@ function makeButton(label, action, data = {}) {
   button.type = 'button';
   button.className = 'jdr-sidebar__button';
   button.dataset.action = action;
+  button.dataset.hint = `hint.${action}`;
   for (const [k, v] of Object.entries(data)) button.dataset[k] = v;
   button.textContent = label;
   return button;

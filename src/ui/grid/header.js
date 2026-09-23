@@ -339,6 +339,7 @@ export function createHeader(deps) {
       sortButton.tabIndex = -1;
       sortButton.className = 'jdr-grid__hbtn jdr-grid__hbtn--sort';
       sortButton.dataset.hbtn = 'sort';
+      sortButton.dataset.hint = 'hint.header-sort';
       let sortLabel = t('grid.sortButton', { name: column.name });
       if (sortEntry) {
         // 정렬 표시(Step 6): 방향 기호와, 다중 정렬이면 순번. `aria-sort`는 첫 정렬 열에만 둔다(ARIA 규칙).
@@ -362,6 +363,7 @@ export function createHeader(deps) {
       menuButton.tabIndex = -1;
       menuButton.className = 'jdr-grid__hbtn jdr-grid__hbtn--menu';
       menuButton.dataset.hbtn = 'menu';
+      menuButton.dataset.hint = 'hint.header-menu';
       menuButton.setAttribute('aria-haspopup', 'menu');
       menuButton.setAttribute('aria-label', t('grid.menuButton', { name: column.name }));
 
