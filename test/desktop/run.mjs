@@ -133,6 +133,84 @@ async function waitFor(predicate, what, timeoutMs = 20_000) {
   }
 }
 
+/**
+ * 앱을 띄워 상태바가 "준비됨"이 될 때까지 기다린다.
+ * @param {string} binary
+ * @returns {Promise<string>} 세션 id
+ */
+async function startApp(binary) {
+  const created = /** @type {{ sessionId: string }} */ (
+    await wd('POST', '/session', {
+      capabilities: { alwaysMatch: { 'tauri:options': { application: binary } } },
+    })
+  );
+  const id = created.sessionId;
+  step('session created; waiting for app ready');
+  await waitFor(
+    async () => (await text(id, '.jdr-statusbar__item')) === '준비됨',
+    'status ready',
+    60_000,
+  );
+  return id;
+}
+
+/**
+ * 세션을 지운다. tauri-driver가 앱 프로세스를 끝내므로 저장하지 않은 변경은 dirty 작업 사본으로 남는다.
+ * @param {string} sessionId
+ */
+async function stopApp(sessionId) {
+  await wd('DELETE', `/session/${sessionId}`);
+}
+
+/**
+ * 설정 대화상자의 작업 사본 목록 행: 표시 문구와 행 순번.
+ * @param {string} sessionId
+ * @returns {Promise<string[]>}
+ */
+async function workcopyRows(sessionId) {
+  return /** @type {string[]} */ (
+    await execute(
+      sessionId,
+      'const list = document.querySelector(\'[data-role="workcopy-list"]\'); if (!list || list.hidden) return []; return Array.from(list.querySelectorAll("p")).map((p) => p.querySelector("span")?.textContent ?? "");',
+    )
+  );
+}
+
+/**
+ * 작업 사본 목록에서 이름이 `name`으로 시작하는 행의 버튼(`열기`/`버리기`)을 포커스한다. 찾으면 true.
+ * @param {string} sessionId
+ * @param {string} name
+ * @param {string} label
+ */
+async function focusWorkcopyButton(sessionId, name, label) {
+  return execute(
+    sessionId,
+    'const rows = Array.from(document.querySelectorAll(\'[data-role="workcopy-list"] p\')); const row = rows.find((p) => (p.querySelector("span")?.textContent ?? "").startsWith(arguments[0] + " · ")); const b = row ? Array.from(row.querySelectorAll("button")).find((x) => x.textContent === arguments[1]) : null; if (!b) return false; b.focus(); return document.activeElement === b;',
+    [name, label],
+  );
+}
+
+/**
+ * 포커스된 요소에 실제 키 입력(WebDriver Actions)을 보낸다.
+ * @param {string} sessionId
+ * @param {string} key WebDriver 키 코드(예: Enter는 '\uE007')
+ */
+async function pressKey(sessionId, key) {
+  await wd('POST', `/session/${sessionId}/actions`, {
+    actions: [
+      {
+        type: 'key',
+        id: 'keyboard',
+        actions: [
+          { type: 'keyDown', value: key },
+          { type: 'keyUp', value: key },
+        ],
+      },
+    ],
+  });
+  await wd('DELETE', `/session/${sessionId}/actions`);
+}
+
 async function main() {
   if (!process.env.JDR_DESKTOP_BINARY) await buildTestApp();
   const binary = binaryPath();
@@ -155,18 +233,7 @@ async function main() {
         return false;
       }
     }, 'tauri-driver');
-    const created = /** @type {{ sessionId: string }} */ (
-      await wd('POST', '/session', {
-        capabilities: { alwaysMatch: { 'tauri:options': { application: binary } } },
-      })
-    );
-    sessionId = created.sessionId;
-    step('session created; waiting for app ready');
-    await waitFor(
-      async () => (await text(sessionId ?? '', '.jdr-statusbar__item')) === '준비됨',
-      'status ready',
-      60_000,
-    );
+    sessionId = await startApp(binary);
 
     // 1. 데스크톱 모드 기동: 상태바 모드, SharedArrayBuffer, Worker 안 네이티브 엔진.
     const modes = /** @type {string[]} */ (
@@ -274,6 +341,115 @@ async function main() {
       'cancel keeps the changed original',
     );
     step('original changed: save stopped and cancelled');
+
+    // 5. 작업 사본 목록(설정 대화상자). 4번이 저장을 취소해 이 파일의 dirty 사본이 남은 채 앱을 끝낸다.
+    await stopApp(sessionId);
+    sessionId = null;
+    sessionId = await startApp(binary);
+    // 원본이 있는 dirty 사본은 대화상자 없이 "그 파일을 열면 복구" 안내만 한다(store.recoverWorkcopies).
+    await waitFor(
+      async () =>
+        String(
+          await execute(
+            sessionId ?? '',
+            'return Array.from(document.querySelectorAll(".jdr-toast")).map((e) => e.textContent).join("\\n");',
+          ),
+        ).includes('데스크톱 검사.db의 저장되지 않은 변경이 작업 사본에 남아 있습니다'),
+      'pending workcopy notice',
+    );
+    // 두 번째 dirty 사본: 새 파일을 저장한 뒤 편집하고 저장하지 않은 채 끝낸다.
+    const second = path.join(scratch, '둘째.db');
+    const created3 = await hook(sessionId, "hook.call('schema.create', { name: '둘' })");
+    const tableId2 = /** @type {{ tableId: string }} */ (created3).tableId;
+    await hook(
+      sessionId,
+      "hook.call('schema.addColumn', { tableId: a[0], name: '값', type: 'text' })",
+      [tableId2],
+    );
+    const cmd2 = {
+      type: 'row.insert',
+      tableId: tableId2,
+      do: [{ sql: `INSERT INTO "${tableId2}" ("_created_at") VALUES ('now')` }],
+      undo: [{ sql: `DELETE FROM "${tableId2}"` }],
+      summary: 'insert',
+    };
+    await hook(sessionId, 'hook.apply(a[0])', [cmd2]);
+    await hook(sessionId, 'hook.setPickedPath(a[0])', [second]);
+    assert.equal(await hook(sessionId, 'hook.saveAs()'), true);
+    await hook(sessionId, 'hook.apply(a[0])', [cmd2]);
+    state = /** @type {typeof state} */ (await hook(sessionId, 'hook.state()'));
+    assert.equal(state.dirty, true);
+    await stopApp(sessionId);
+    sessionId = null;
+    step('workcopies: two dirty copies left behind');
+
+    sessionId = await startApp(binary);
+    await execute(sessionId, 'document.querySelector(\'[data-action="settings"]\').click();');
+    await waitFor(
+      async () => (await workcopyRows(sessionId ?? '')).length >= 2,
+      'workcopy list in settings',
+    );
+    const rows = await workcopyRows(sessionId);
+    step(`settings workcopy rows: ${JSON.stringify(rows)}`);
+    assert.ok(rows.some((r) => r.startsWith('데스크톱 검사.db · ')));
+    assert.ok(rows.some((r) => r.startsWith('둘째.db · ')));
+    assert.equal(
+      await text(sessionId, '.jdr-dialog h3.jdr-import__section:last-of-type'),
+      '복구를 기다리는 작업 사본',
+    );
+    // 키보드: 버리기 버튼에 포커스가 가고 Enter로 누를 수 있다.
+    assert.equal(await focusWorkcopyButton(sessionId, '데스크톱 검사.db', '버리기'), true);
+    await pressKey(sessionId, '\uE007');
+    await waitFor(
+      async () =>
+        !(await workcopyRows(sessionId ?? '')).some((r) => r.startsWith('데스크톱 검사.db · ')),
+      'discarded row removed',
+    );
+    step('workcopy discarded with the keyboard');
+    // 열기: 둘째.db의 사본을 연다.
+    assert.equal(await focusWorkcopyButton(sessionId, '둘째.db', '열기'), true);
+    await pressKey(sessionId, '\uE007');
+    await waitFor(
+      async () =>
+        /** @type {typeof state} */ (await hook(sessionId ?? '', 'hook.state()')).file.path ===
+        second,
+      'workcopy opened',
+    );
+    state = /** @type {typeof state} */ (await hook(sessionId, 'hook.state()'));
+    assert.equal(state.dirty, true, '복구한 사본의 변경은 아직 파일에 없다');
+    // 연 사본의 행은 목록에서 빠진다. 남겨 두면 열린 채로 그 사본의 "버리기"를 누를 수 있었고, 러스트가
+    // 열린 DB를 닫고 지워 복구한 변경이 사라진 채 모든 질의가 E_DB_QUERY로 실패했다.
+    await waitFor(
+      async () => !(await workcopyRows(sessionId ?? '')).some((r) => r.startsWith('둘째.db · ')),
+      'opened row removed',
+    );
+    const count2 = await hook(sessionId, 'hook.query(a[0])', [
+      `SELECT count(*) FROM "${tableId2}"`,
+    ]);
+    assert.deepEqual(/** @type {{ rows: unknown[][] }} */ (count2).rows, [[2]]);
+    await execute(
+      sessionId,
+      'const b = Array.from(document.querySelectorAll(".jdr-dialog button")).find((x) => x.textContent === "취소"); if (b) b.click();',
+    );
+    step('workcopy opened from settings: row removed, changes recovered');
+    // 저장하면 dirty가 풀려 목록에 다시 나오지 않는다.
+    assert.equal(await hook(sessionId, 'hook.save()'), true);
+    await execute(sessionId, 'document.querySelector(\'[data-action="settings"]\').click();');
+    await waitFor(
+      async () =>
+        (await execute(
+          sessionId ?? '',
+          'return document.querySelector(".jdr-dialog") !== null;',
+        )) === true,
+      'settings reopened',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const leftover = await workcopyRows(sessionId);
+    assert.ok(
+      !leftover.some((r) => r.startsWith('둘째.db · ') || r.startsWith('데스크톱 검사.db · ')),
+      `saved copies are not pending: ${JSON.stringify(leftover)}`,
+    );
+    step('saved: no pending workcopies left from this run');
     console.log('[desktop] all checks passed');
   } catch (err) {
     failed = true;
