@@ -30,6 +30,9 @@ export const ALLOWED_URL_LITERALS = new Set([
   'https://emscripten.org:',
   'https://emscripten.org/docs/introducing_emscripten/emscripten_license.html',
   'https://sqlite.org:',
+  // vendor/xlsx.full.min.js(SheetJS 0.20.3): Apple Numbers 쓰기 템플릿의 리치 텍스트 하이퍼링크 자리표시자.
+  // 요청을 만들지 않는 문자열이고, 앱은 bookType 'xlsx'만 쓰므로 이 템플릿을 쓰지도 않는다
+  'https://sheetjs.com/',
 ]);
 
 /**
