@@ -118,7 +118,8 @@ export function cellToText(column, value) {
  * @property {number} cols 실제로 쓰는 열 수(그리드 끝에서 잘린 뒤)
  * @property {number} droppedColumns 그리드 오른쪽 경계를 넘어 버리는 열 수
  * @property {number} existingRows 기존 행에 덮어쓰는 수
- * @property {number} newRows 새로 만드는 행 수
+ * @property {number} newRows 새로 만드는 행 수(값이 든 행)
+ * @property {number} gapRows 빈 행에서 시작한 붙여넣기(D-16)가 마지막 실제 행과 시작 행 사이에 더 만드는 빈 행 수
  * @property {number} cells `rows × cols`(잘린 뒤)
  */
 
@@ -139,6 +140,7 @@ export function planPaste(input) {
   }
   const existingRows = Math.max(0, Math.min(rows, input.rowCount - input.anchor.row));
   return {
+    gapRows: Math.max(0, input.anchor.row - input.rowCount),
     rows,
     cols,
     droppedColumns: Math.max(0, width - available),

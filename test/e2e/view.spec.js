@@ -10,6 +10,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PAGE_URL } from './page-url.js';
+import { addColumnUi, createTableWith } from './schema-ui.js';
 
 const FILE_INPUT_CLASS = 'jdr-file-input';
 const ROWS = 200;
@@ -47,34 +48,16 @@ function hook(page) {
 }
 
 /**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- * @param {string} typeLabel
- */
-async function addColumn(page, name, typeLabel) {
-  await page.click('[data-action="column-add"]');
-  const dialog = page.locator('.jdr-dialog');
-  await dialog.locator('input').fill(name);
-  await dialog.locator('select').selectOption({ label: typeLabel });
-  await dialog.getByRole('button', { name: '추가' }).click();
-  await expect(page.locator('.jdr-sidebar__column-name', { hasText: name })).toBeVisible();
-}
-
-/**
  * 텍스트·정수·장문·불리언 열과 행 200개(+ 와일드카드가 든 이름 1개).
  * @param {import('@playwright/test').Page} page
  */
 async function seed(page) {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('고객');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await expect(page.locator('.jdr-grid__empty')).toHaveText(
-    '열이 없습니다. 사이드바의 "+ 열"로 추가하세요.',
-  );
-  await addColumn(page, '이름', '텍스트');
-  await addColumn(page, '나이', '정수');
-  await addColumn(page, '본문', '장문');
-  await addColumn(page, '활성', '참/거짓');
+  await createTableWith(page, '고객', [
+    { name: '이름', type: 'text' },
+    { name: '나이', type: 'integer' },
+    { name: '본문', type: 'longtext' },
+    { name: '활성', type: 'boolean' },
+  ]);
   const state = await hook(page).state();
   const table = state?.tables[0];
   if (!table) throw new Error('table missing');
@@ -117,6 +100,15 @@ function header(page, name) {
 }
 
 /**
+ * 머리글의 정렬 버튼(D-16). 머리글 칸 클릭은 정렬하지 않는다.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} name
+ */
+function sortButton(page, name) {
+  return header(page, name).locator('[data-hbtn="sort"]');
+}
+
+/**
  * 필터 대화상자에 조건 하나를 넣고 적용한다. 대화상자는 열려 있어야 한다.
  * @param {import('@playwright/test').Page} page
  * @param {{ column: string, op: string, value?: string, logic?: string }} cond
@@ -147,31 +139,35 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
 });
 
-test('정렬: 머리글 클릭은 오름 → 내림 → 없음, Shift+클릭은 보조 정렬, 대화상자로도 바꾼다', async ({
+test('정렬: 정렬 버튼 클릭은 오름 → 내림 → 없음, Shift+클릭은 보조 정렬, 대화상자로도 바꾼다', async ({
   page,
 }) => {
   await seed(page);
   const age = header(page, '나이');
-  await age.click();
+  // 머리글 이름을 눌러도 정렬되지 않는다(D-16: 이름 더블클릭이 이름 편집이다).
+  await age.locator('.jdr-grid__hname').click();
+  await expect(age).not.toHaveAttribute('aria-sort', /.+/);
+  expect((await hook(page).view())?.sort).toEqual([]);
+  await sortButton(page, '나이').click();
   await expect(age).toHaveAttribute('aria-sort', 'ascending');
   await expect(age.locator('.jdr-grid__hsort')).toHaveText('▲');
   // 빈 값(50%_특가 행)은 오름차순에서도 마지막이다.
   await expect(cell(page, 0, 1)).toHaveText('3');
   await expect(page.locator('[data-action="sort"]')).toHaveText('정렬 (1)…');
 
-  await age.click();
+  await sortButton(page, '나이').click();
   await expect(age).toHaveAttribute('aria-sort', 'descending');
   await expect(cell(page, 0, 1)).toHaveText(String(ROWS * 3));
   await expect(cell(page, 0, 0)).toHaveText(`이름${ROWS}`);
 
   // Shift+클릭: 활성 열이 보조 정렬로 붙고 순번이 보인다.
-  await header(page, '활성').click({ modifiers: ['Shift'] });
+  await sortButton(page, '활성').click({ modifiers: ['Shift'] });
   await expect(age.locator('.jdr-grid__hsort')).toHaveText('▼1');
   await expect(header(page, '활성').locator('.jdr-grid__hsort')).toHaveText('▲2');
   await expect(page.locator('[data-action="sort"]')).toHaveText('정렬 (2)…');
   expect((await hook(page).view())?.sort.map((s) => s.dir)).toEqual(['desc', 'asc']);
 
-  await age.click();
+  await sortButton(page, '나이').click();
   await expect(age.locator('.jdr-grid__hsort')).toHaveCount(0);
   await expect(header(page, '활성').locator('.jdr-grid__hsort')).toHaveCount(0);
   await expect(cell(page, 0, 0)).toHaveText('이름1');
@@ -325,7 +321,7 @@ test('검색 인덱스를 만든 뒤 열을 추가하면 버튼과 툴팁이 "�
   await expect(indexButton).toHaveAttribute('title', '');
 
   // 열 구성이 바뀌면 인덱스는 만든 시점의 열 집합에 남는다(D-07).
-  await addColumn(page, '메모', '텍스트');
+  await addColumnUi(page, '메모');
   await expect(indexButton).toHaveText('검색 인덱스 (오래됨)');
   await expect(indexButton).toHaveAttribute(
     'title',
@@ -351,8 +347,8 @@ test('정렬·필터·검색·숨김·너비 조합을 뷰로 저장 → 파일 
 }) => {
   const { name, body } = await seed(page);
   // 정렬: 나이 내림차순. 필터: 나이 > 300(i > 100). 검색: '이름19' → 190~199(이름19는 필터에 걸림).
-  await header(page, '나이').click();
-  await header(page, '나이').click();
+  await sortButton(page, '나이').click();
+  await sortButton(page, '나이').click();
   await page.click('[data-action="filter"]');
   await addCondition(page, { column: '나이', op: '보다 큼', value: '300' });
   const search = page.locator('[data-action="search"]');
@@ -432,7 +428,7 @@ test('정렬·필터·검색·숨김·너비 조합을 뷰로 저장 → 파일 
 
 test('정렬 대상 열을 삭제하면 뷰에서 그 정렬 항목이 빠지고 안내한다', async ({ page }) => {
   const { age } = await seed(page);
-  await header(page, '나이').click();
+  await sortButton(page, '나이').click();
   await expect(page.locator('[data-action="sort"]')).toHaveText('정렬 (1)…');
   await page.locator('.jdr-sidebar__column-name', { hasText: '나이' }).click();
   await page.locator(`button[data-action="column-delete"][data-column-id="${age}"]`).click();
@@ -445,14 +441,14 @@ test('정렬 대상 열을 삭제하면 뷰에서 그 정렬 항목이 빠지고
   await expect(cell(page, 0, 0)).toHaveText('이름1');
 });
 
-test('편집 중 머리글 클릭(정렬): 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
+test('편집 중 정렬 버튼 클릭: 입력은 blur로 확정된 뒤 정렬이 걸린다', async ({ page }) => {
   const { table, name } = await seed(page);
   // 그리드가 다시 마운트되며 편집기를 닫는 경로다. 닫히기 전에 blur 확정이 먼저 일어나야
   // Step 5의 "다른 곳 클릭 → 확정 시도"가 지켜진다(입력이 조용히 사라지지 않는다).
   await cell(page, 0, 0).dblclick();
   await expect(page.locator('.jdr-editor input')).toBeVisible();
   await page.locator('.jdr-editor input').fill('머리글클릭확정');
-  await header(page, '나이').click();
+  await sortButton(page, '나이').click();
   await expect(header(page, '나이')).toHaveAttribute('aria-sort', 'ascending');
   await expect(page.locator('.jdr-editor')).toBeHidden();
   // 편집기가 닫힌 것은 확정이 끝났다는 뜻이 아니다. 정렬이 그리드를 다시 마운트하며 부르는

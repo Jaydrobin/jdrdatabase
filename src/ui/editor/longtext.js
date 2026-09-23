@@ -6,6 +6,8 @@
  * - 자동 저장은 없다. "확정" 버튼(또는 Ctrl+Enter)이 `onSave`를 부르고 성공하면 닫힌다.
  * - 입력값이 5 MB를 넘으면 경고만 하고 저장은 허용한다.
  * - 편집 중인 행이 사라지면(`refresh()`가 null을 받으면) 편집기를 닫고 알린다.
+ * - 빈 행(D-16)은 DB에 없으므로 `rowId`가 null이고 빈 값으로 연다. 확정은 대상의 `commit`이 맡는다
+ *   (그 줄까지 행을 만드는 커맨드. 편집 컨트롤러가 준다).
  */
 import { t } from '../../i18n/index.js';
 import { formatBytes, MB } from '../../util/bytes.js';
@@ -24,9 +26,10 @@ export const LONGTEXT_WARN_BYTES = 5 * MB;
  * @typedef {object} LongtextTarget
  * @property {string} tableId
  * @property {string} tableName
- * @property {number} rowId
+ * @property {number | null} rowId 빈 행(D-16)이면 null
  * @property {number} rowIndex 그리드 행 번호 표시용(0부터)
  * @property {ColumnInfo} column
+ * @property {(newValue: string | null) => Promise<boolean>} [commit] 있으면 `onSave` 대신 부른다(빈 행의 확정)
  */
 
 /**
@@ -130,11 +133,34 @@ export function mountLongtextPanel(parent, deps) {
   saveButton.addEventListener('click', onSave);
   cancelButton.addEventListener('click', onCancel);
 
+  /**
+   * @param {LongtextTarget} target
+   * @param {string} text
+   */
+  function showTarget(target, text) {
+    where.textContent = t('longtext.where', {
+      table: target.tableName,
+      column: target.column.name,
+      row: target.rowIndex + 1,
+    });
+    textarea.value = text;
+    updateWarning();
+    el.hidden = false;
+    textarea.focus();
+  }
+
   /** @type {LongtextPanel} */
   const panel = {
     el,
 
     async open(target) {
+      if (target.rowId === null) {
+        current = target;
+        oldValue = null;
+        oldUpdatedAt = null;
+        showTarget(target, '');
+        return;
+      }
       /** @type {import('../../db/query.js').FullRow | null} */
       let row;
       try {
@@ -156,15 +182,7 @@ export function mountLongtextPanel(parent, deps) {
       current = target;
       oldValue = row.cells[target.column.id] ?? null;
       oldUpdatedAt = row.updatedAt;
-      where.textContent = t('longtext.where', {
-        table: target.tableName,
-        column: target.column.name,
-        row: target.rowIndex + 1,
-      });
-      textarea.value = oldValue === null || oldValue === undefined ? '' : String(oldValue);
-      updateWarning();
-      el.hidden = false;
-      textarea.focus();
+      showTarget(target, oldValue === null || oldValue === undefined ? '' : String(oldValue));
     },
 
     async save() {
@@ -175,7 +193,9 @@ export function mountLongtextPanel(parent, deps) {
       /** @type {boolean} */
       let ok;
       try {
-        ok = await deps.onSave({ target: current, oldValue, oldUpdatedAt, newValue });
+        ok = current.commit
+          ? await current.commit(newValue)
+          : await deps.onSave({ target: current, oldValue, oldUpdatedAt, newValue });
       } finally {
         saving = false;
       }
@@ -198,15 +218,17 @@ export function mountLongtextPanel(parent, deps) {
     target: () => current,
 
     async refresh() {
-      if (!current) return;
+      // 빈 행에는 다시 읽을 행이 없다. 빈 행이 꺼지는 전환은 편집 컨트롤러가 닫는다.
+      if (!current || current.rowId === null) return;
       const target = current;
+      const rowId = current.rowId;
       /** @type {import('../../db/query.js').FullRow | null} */
       let row;
       try {
         row = (
           await client.call('query.row', {
             tableId: target.tableId,
-            rowId: target.rowId,
+            rowId,
             colIds: [target.column.id],
           })
         ).row;

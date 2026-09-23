@@ -249,6 +249,9 @@ export function openDialog(options) {
       body.querySelector('input, select, textarea')
     );
     (firstInput ?? primaryButton ?? row.querySelector('button'))?.focus();
+    // 미리 채운 이름(새 테이블의 `테이블 n`, 이름 바꾸기의 옛 이름)은 전체 선택해 둔다. Enter 한 번으로
+    // 그대로 받거나 바로 타이핑해 바꾼다(D-16).
+    if (firstInput instanceof HTMLInputElement && firstInput.type === 'text') firstInput.select();
   });
 }
 

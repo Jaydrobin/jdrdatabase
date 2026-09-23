@@ -580,6 +580,57 @@ test('runSchemaOp: 커맨드를 저널에 넣고 dirty, 테이블 목록 갱신�
   client.close();
 });
 
+test('createTable·addDefaultColumn(D-16): 기본 열, 자동 이름은 삭제된 열도 건너뛰고, 이름 겹침은 한 번 다시 시도', async () => {
+  const { store, client, notices } = await setup();
+  const tableId = await store.createTable('테이블 1', {
+    columns: [
+      { name: '열 1', type: 'text' },
+      { name: '열 2', type: 'text' },
+    ],
+  });
+  assert.ok(tableId);
+  assert.equal(store.getState().currentTableId, tableId, '만든 테이블을 고른다');
+  const columnNames = () =>
+    (store.getState().tables.find((tb) => tb.id === tableId)?.columns ?? []).map((c) => [
+      c.name,
+      c.deletedAt === null,
+    ]);
+  assert.deepEqual(columnNames(), [
+    ['열 1', true],
+    ['열 2', true],
+  ]);
+
+  const third = await store.addDefaultColumn(tableId);
+  assert.equal(third?.columnCount, 6, '시스템 열 3 + 사용자 열 3');
+  // `열 2`를 소프트 삭제하면 새 열은 그 이름을 가져가지 않는다(가져가면 삭제한 열을 복원할 수 없다).
+  const second = store.getState().tables[0]?.columns[1]?.id ?? '';
+  await store.runSchemaOp('schema.softDeleteColumn', { tableId, columnId: second });
+  await store.addDefaultColumn(tableId);
+  assert.deepEqual(columnNames(), [
+    ['열 1', true],
+    ['열 2', false],
+    ['열 3', true],
+    ['열 4', true],
+  ]);
+
+  // 스토어가 모르는 사이 다른 경로가 `열 5`를 만들었다: Worker가 거부하면 목록을 다시 읽고 `열 6`으로.
+  await client.call('schema.addColumn', { tableId, name: '열 5', type: 'text' });
+  const before = notices.length;
+  const retried = await store.addDefaultColumn(tableId);
+  assert.ok(retried);
+  assert.deepEqual(
+    columnNames().map((c) => c[0]),
+    ['열 1', '열 2', '열 3', '열 4', '열 5', '열 6'],
+  );
+  assert.equal(notices.length, before, '다시 시도해 성공하면 오류를 알리지 않는다');
+
+  assert.equal(await store.renameColumn(tableId, retried.columnId, '메모'), true);
+  assert.equal(columnNames().at(-1)?.[0], '메모');
+  assert.equal(await store.renameColumn(tableId, retried.columnId, '열 1'), false);
+  assert.equal(notices.at(-1)?.value, 'E_NAME_INVALID');
+  client.close();
+});
+
 test('runSchemaOp: 읽기 전용(다른 탭 점유)이면 실행하지 않고 안내', async () => {
   // 같은 채널의 다른 "탭"이 이 db_id를 쥐고 있게 만든다.
   const { store, fsx, notices, client } = await setup();

@@ -47,10 +47,11 @@ test('parseTsv: CRLF·LF 혼재, 끝의 빈 줄은 버리고 중간 빈 줄은 �
   assert.deepEqual(parseTsv('5" tall\tok'), [['5" tall', 'ok']]);
 });
 
-test('planPaste: 경계를 넘는 행은 새 행, 열은 버림, 100만 셀 초과는 E_PASTE_TOO_LARGE', () => {
+test('planPaste: 경계를 넘는 행은 새 행, 빈 행에서 시작하면 사이의 빈 줄, 열은 버림, 100만 셀 초과는 E_PASTE_TOO_LARGE', () => {
   const data = Array.from({ length: 3 }, () => ['1', '2', '3', '4']);
   const plan = planPaste({ data, anchor: { row: 8, col: 2 }, rowCount: 10, colCount: 5 });
   assert.deepEqual(plan, {
+    gapRows: 0,
     rows: 3,
     cols: 3,
     droppedColumns: 1,
@@ -58,9 +59,16 @@ test('planPaste: 경계를 넘는 행은 새 행, 열은 버림, 100만 셀 초�
     newRows: 1,
     cells: 9,
   });
+  // 빈 행(D-16)에서 시작하면 마지막 실제 행(9)과 시작 행(20) 사이의 빈 줄 10개를 함께 만든다.
   const beyond = planPaste({ data, anchor: { row: 20, col: 0 }, rowCount: 10, colCount: 5 });
   assert.equal(beyond.existingRows, 0);
   assert.equal(beyond.newRows, 3);
+  assert.equal(beyond.gapRows, 10);
+  assert.equal(
+    planPaste({ data, anchor: { row: 10, col: 0 }, rowCount: 10, colCount: 5 }).gapRows,
+    0,
+    '첫 빈 행에서 시작하면 사이에 빈 줄이 없다',
+  );
   const wide = Array.from({ length: 1001 }, () => new Array(1000).fill(''));
   assert.throws(
     () => planPaste({ data: wide, anchor: { row: 0, col: 0 }, rowCount: 0, colCount: 1 }),

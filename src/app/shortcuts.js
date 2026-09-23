@@ -8,7 +8,7 @@
  */
 
 /**
- * @typedef {'save' | 'saveAs' | 'undo' | 'redo' | 'edit' | 'cancel' | 'clear' | 'copy' | 'selectAll' | 'rowInsert' | 'rowDelete'} ShortcutAction
+ * @typedef {'save' | 'saveAs' | 'undo' | 'redo' | 'edit' | 'cancel' | 'clear' | 'copy' | 'selectAll' | 'rowInsert' | 'rowDelete' | 'columnMenu'} ShortcutAction
  */
 
 /**
@@ -32,6 +32,9 @@ export const SHORTCUTS = Object.freeze(
     { action: 'rowInsert', key: 'Enter', ctrl: true, shift: true, scope: 'grid' },
     { action: 'rowDelete', key: 'Delete', ctrl: true, shift: true, scope: 'grid' },
     { action: 'selectAll', key: 'a', ctrl: true, scope: 'grid' },
+    // 활성 셀의 열 메뉴(D-16). 머리글 버튼은 탭 정지가 아니므로 키보드로는 여기서 연다.
+    { action: 'columnMenu', key: 'F10', shift: true, scope: 'grid' },
+    { action: 'columnMenu', key: 'ContextMenu', scope: 'grid' },
     { action: 'copy', key: 'c', ctrl: true, scope: 'grid' },
     { action: 'edit', key: 'Enter', scope: 'grid' },
     { action: 'edit', key: 'F2', scope: 'grid' },

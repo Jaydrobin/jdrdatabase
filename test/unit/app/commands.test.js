@@ -12,6 +12,7 @@ import {
   deleteRowRange,
   deleteRows,
   editCell,
+  ghostRowInserts,
   insertRows,
   invert,
   UNDO_SNAPSHOT_MAX_ROWS,
@@ -361,5 +362,57 @@ test('deleteRowRange·clearRowRange: 뷰 조각(clauses)이 있으면 부분 질
       [3, null],
     ],
   );
+  await engine.close();
+});
+
+test('빈 행 확정(D-16): k번째 빈 행에 쓰면 k행이 생기고 값은 마지막 행, 되돌리면 덤프 동일', async () => {
+  const engine = await openWasmEngine();
+  await migrate(engine, { appVersion: 'test' });
+  const { tableId } = await tables.create(engine, {
+    name: '시트',
+    columns: [
+      { name: '열 1', type: 'text' },
+      { name: '열 2', type: 'integer' },
+    ],
+  });
+  const table = tables.requireTable(engine, tableId);
+  const [c1, c2] = table.columns.map((c) => c.id);
+  if (!c1 || !c2) throw new Error('columns missing');
+  // 빈 테이블의 세 번째 빈 행(k = 3).
+  const empty = stats(engine, table);
+  const inserts = ghostRowInserts({
+    firstId: (empty.maxId ?? 0) + 1,
+    count: 3,
+    cells: { [c2]: 42 },
+  });
+  assert.deepEqual(inserts, [
+    { id: 1, cells: {} },
+    { id: 2, cells: {} },
+    { id: 3, cells: { [c2]: 42 } },
+  ]);
+  const cmd = bulkEdit({ tableId, edits: [], inserts, now: NOW });
+  await roundTrip(engine, cmd);
+  await applyCommand(engine, cmd, 'do');
+  assert.deepEqual(
+    fetchRows(engine, table, {}, { offset: 0, limit: 10 }, [c1, c2]).map((r) => [
+      r.id,
+      r.cells[c1],
+      r.cells[c2],
+    ]),
+    [
+      [1, null, null],
+      [2, null, null],
+      [3, null, 42],
+    ],
+  );
+  // 행이 있는 테이블에서는 maxId 뒤로 이어진다(k = 1이면 한 행).
+  const next = ghostRowInserts({
+    firstId: (stats(engine, table).maxId ?? 0) + 1,
+    count: 1,
+    cells: { [c1]: '넷' },
+  });
+  await roundTrip(engine, bulkEdit({ tableId, edits: [], inserts: next, now: LATER }));
+  await applyCommand(engine, cmd, 'undo');
+  assert.equal(stats(engine, table).count, 0, '되돌리기 한 번에 만들어진 행이 모두 사라진다');
   await engine.close();
 });

@@ -7,6 +7,7 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 import { PAGE_URL } from './page-url.js';
+import { createTableWith } from './schema-ui.js';
 
 const IMPORT_INPUT = 'input.jdr-import-input';
 const FIXTURES = path.resolve('test/fixtures/import');
@@ -55,20 +56,6 @@ async function openImport(page, fixture) {
   await expect(dialog.locator('.jdr-dialog__title')).toHaveText('CSV·XLSX 가져오기');
   await expect(dialog.locator('table[data-role="preview"]')).toBeVisible();
   return dialog;
-}
-
-/**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- * @param {string} typeLabel
- */
-async function addColumn(page, name, typeLabel) {
-  await page.click('[data-action="column-add"]');
-  const dialog = page.locator('.jdr-dialog');
-  await dialog.locator('input').fill(name);
-  await dialog.locator('select').selectOption({ label: typeLabel });
-  await dialog.getByRole('button', { name: '추가' }).click();
-  await expect(page.locator('.jdr-sidebar__column-name', { hasText: name })).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -193,11 +180,10 @@ test('EUC-KR CSV: 인코딩이 감지되고, 잘못 고르면 경고 뒤 되돌�
 test('기존 테이블에 추가: 같은 이름의 열이 자동으로 대응되고, 대응 없는 열은 건너뛴다', async ({
   page,
 }) => {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('고객');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await addColumn(page, '이름', '텍스트');
-  await addColumn(page, '나이', '정수');
+  await createTableWith(page, '고객', [
+    { name: '이름', type: 'text' },
+    { name: '나이', type: 'integer' },
+  ]);
   const dialog = await openImport(page, 'bom-utf8.csv');
   await dialog.locator('input[type="radio"][value="existing"]').check();
   await expect(dialog.locator('select[data-field="existingTable"]')).toHaveValue(/^t_/);

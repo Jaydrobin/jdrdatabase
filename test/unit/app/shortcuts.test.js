@@ -51,3 +51,11 @@ test('한글 조합 중(isComposing, key Process)의 Enter·Esc는 어떤 행동
   assert.equal(resolveShortcut(key('Escape', { composing: true }), 'grid'), null);
   assert.equal(resolveShortcut(key('Process'), 'grid'), null);
 });
+
+test('그리드 수준: 열 메뉴는 Shift+F10과 ContextMenu 키(D-16), 문서 범위와 조합 중에는 없다', () => {
+  assert.equal(resolveShortcut(key('F10', { shift: true }), 'grid'), 'columnMenu');
+  assert.equal(resolveShortcut(key('ContextMenu'), 'grid'), 'columnMenu');
+  assert.equal(resolveShortcut(key('F10'), 'grid'), null, 'Shift 없는 F10은 브라우저의 것');
+  assert.equal(resolveShortcut(key('F10', { shift: true }), 'document'), null);
+  assert.equal(resolveShortcut(key('ContextMenu', { composing: true }), 'grid'), null);
+});

@@ -1,12 +1,13 @@
 // @ts-check
 /**
- * Step 4 E2E: 가상 그리드(읽기 전용). 테이블·열을 UI로 만들고 행 5,000개를 넣은 뒤,
+ * Step 4 E2E: 가상 그리드(읽기 전용). 테이블(열 다섯)을 만들고 행 5,000개를 넣은 뒤,
  * 행 가상화(DOM 행 수 상한), 행 번호, 끝까지 스크롤, 장문 미리보기·길이 배지, 열 너비 조절,
  * 열 고정, 키보드 이동, 빈 상태(열 없음·테이블 삭제)를 실제 산출물(`file://`)에서 확인한다.
  */
 import { expect, test } from '@playwright/test';
 import { delayTransport } from './delay-transport.js';
 import { PAGE_URL } from './page-url.js';
+import { addColumnUi, createTableUi, createTableWith, headerCell } from './schema-ui.js';
 
 const ROWS = 5_000;
 
@@ -34,35 +35,17 @@ function hook(page) {
 }
 
 /**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- * @param {string} typeLabel
- */
-async function addColumn(page, name, typeLabel) {
-  await page.click('[data-action="column-add"]');
-  const dialog = page.locator('.jdr-dialog');
-  await dialog.locator('input').fill(name);
-  await dialog.locator('select').selectOption({ label: typeLabel });
-  await dialog.getByRole('button', { name: '추가' }).click();
-  await expect(page.locator('.jdr-sidebar__column-name', { hasText: name })).toBeVisible();
-}
-
-/**
  * 테이블 하나(텍스트·정수·장문·날짜·불리언)를 만들고 행을 넣는다. 100번째마다 장문 셀이 1,600자다.
  * @param {import('@playwright/test').Page} page
  */
 async function seed(page) {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('고객');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await expect(page.locator('.jdr-grid__empty')).toHaveText(
-    '열이 없습니다. 사이드바의 "+ 열"로 추가하세요.',
-  );
-  await addColumn(page, '이름', '텍스트');
-  await addColumn(page, '나이', '정수');
-  await addColumn(page, '본문', '장문');
-  await addColumn(page, '가입', '날짜');
-  await addColumn(page, '활성', '참/거짓');
+  await createTableWith(page, '고객', [
+    { name: '이름', type: 'text' },
+    { name: '나이', type: 'integer' },
+    { name: '본문', type: 'longtext' },
+    { name: '가입', type: 'date' },
+    { name: '활성', type: 'boolean' },
+  ]);
   const state = await hook(page).state();
   const table = state?.tables[0];
   if (!table) throw new Error('table missing');
@@ -113,14 +96,28 @@ test('행 가상화: 5,000행에서 DOM 행은 가시 범위 + 버퍼뿐이고 �
     '1',
   );
 
-  // 캔버스 높이는 행 수 × 32 px(스케일링 없음).
+  // 캔버스 높이는 (행 수 + 빈 행 30줄) × 32 px(스케일링 없음, D-16).
   const canvasHeight = await page
     .locator('.jdr-grid__canvas')
     .evaluate((el) => Number.parseFloat(getComputedStyle(el).height));
-  expect(canvasHeight).toBe(ROWS * 32);
+  expect(canvasHeight).toBe((ROWS + 30) * 32);
 
+  // 맨 끝은 빈 행이다. 행 번호는 실제 행 수 뒤로 이어지고, 행 수 표시는 실제 행만 센다.
   await page.locator('.jdr-grid__scroller').evaluate((el) => {
     el.scrollTop = el.scrollHeight;
+  });
+  const lastGhost = page.locator(`.jdr-grid__row[data-row="${ROWS + 29}"]`);
+  await expect(lastGhost).toBeVisible();
+  await expect(lastGhost).toHaveClass(/jdr-grid__row--ghost/);
+  await expect(lastGhost.locator('.jdr-grid__cell--rownum')).toHaveText(
+    (ROWS + 30).toLocaleString('ko-KR'),
+  );
+  await expect(page.locator('.jdr-grid__rowcount')).toHaveText(
+    `행 ${ROWS.toLocaleString('ko-KR')}개`,
+  );
+  // 빈 행 30줄만큼 올리면 마지막 실제 행이 화면 맨 아래에 있다.
+  await page.locator('.jdr-grid__scroller').evaluate((el) => {
+    el.scrollTop = el.scrollHeight - el.clientHeight - 30 * 32;
   });
   const last = page.locator(`.jdr-grid__row[data-row="${ROWS - 1}"]`);
   await expect(last).toBeVisible();
@@ -192,10 +189,8 @@ test('열 너비 조절: 머리글 손잡이를 끌면 열과 그 뒤 열의 위
     )
     .toBe(260);
   // 다른 테이블로 갔다 돌아와도 너비가 남는다(메모리 뷰 상태).
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('임시');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await expect(page.locator('.jdr-grid__empty')).toBeVisible();
+  await createTableUi(page, '임시');
+  await expect(headerCell(page, '열 1')).toHaveCount(1);
   await page.click('.jdr-sidebar__table-name:has-text("고객")');
   await expect.poll(async () => (await header.boundingBox())?.width).toBe(260);
 });
@@ -262,10 +257,7 @@ test('키보드: 화살표·PageDown·Ctrl+End로 이동하면 활성 셀이 따
 test('빈 상태: 열을 모두 삭제하면 "열이 없습니다", 테이블을 삭제하면 테이블 선택 안내로 돌아간다', async ({
   page,
 }) => {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('메모');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await addColumn(page, '본문', '장문');
+  await createTableWith(page, '메모', [{ name: '본문', type: 'longtext' }]);
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 0개');
   await expect(page.locator('.jdr-grid__hcell[data-col="0"]')).toHaveText('본문');
   await page.locator('[data-action="column-delete"]').click();
@@ -291,9 +283,7 @@ test('그리드를 닫았다 다시 열어도 고정·너비·클릭·키보드�
   await seed(page);
 
   // 열이 없는 테이블을 고르면 호스트가 그리드를 언마운트하고, 되돌아오면 다시 마운트한다.
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('빈표');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
+  await createTableWith(page, '빈표', []);
   await expect(page.locator('.jdr-grid')).toHaveCount(0);
   await page.locator('.jdr-sidebar__table-name', { hasText: '고객' }).click();
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText(
@@ -334,9 +324,8 @@ test('테이블을 오가도 활성 셀은 하나뿐이다', async ({ page }) =>
   await expect(active).toHaveCount(1);
 
   // 다른 테이블을 열면 그리드는 행 요소를 풀로 돌려보내고 커서를 처음으로 되돌린다.
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('메모');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
+  await createTableUi(page, '메모');
+  await expect(headerCell(page, '열 1')).toHaveCount(1);
   await page.locator('.jdr-sidebar__table-name', { hasText: '고객' }).click();
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText(
     `행 ${ROWS.toLocaleString('ko-KR')}개`,
@@ -398,7 +387,7 @@ test('열 구성이 그대로면 목록을 다시 읽어도 스크롤·활성 �
   await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(40_000);
 
   // 열을 더하면 구성이 달라지므로 다시 마운트한다(스크롤은 처음으로 돌아간다).
-  await addColumn(page, '비고', '텍스트');
+  await addColumnUi(page, '비고');
   await expect(page.locator('.jdr-grid__hcell[data-col="5"]')).toHaveText('비고');
   await expect.poll(async () => scroller.evaluate((e) => e.scrollTop)).toBe(0);
 });
@@ -415,7 +404,8 @@ test('접근성: role="grid"가 행·행 그룹을 직접 소유하고 다른 �
   expect(childRoles).toEqual(['row', 'rowgroup']);
 
   const grid = page.locator('[role="grid"]');
-  await expect(grid).toHaveAttribute('aria-rowcount', String(ROWS + 1));
+  // 머리글 + 실제 행 + 빈 행 30줄(D-16).
+  await expect(grid).toHaveAttribute('aria-rowcount', String(ROWS + 31));
   await expect(grid).toHaveAttribute('aria-colcount', '6');
   await expect(grid.locator('> [role="row"] > [role="columnheader"]')).toHaveCount(6);
   await expect(
@@ -431,12 +421,11 @@ test('접근성: role="grid"가 행·행 그룹을 직접 소유하고 다른 �
 });
 
 test('스키마가 바뀐 뒤 다시 마운트되기 전에 온 창 질의 응답은 버린다', async ({ page }) => {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill('고객');
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await addColumn(page, '이름', '텍스트');
-  await addColumn(page, '나이', '정수');
-  await addColumn(page, '비고', '텍스트');
+  await createTableWith(page, '고객', [
+    { name: '이름', type: 'text' },
+    { name: '나이', type: 'integer' },
+    { name: '비고', type: 'text' },
+  ]);
 
   const state = await hook(page).state();
   const table = state?.tables[0];

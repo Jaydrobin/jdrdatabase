@@ -16,6 +16,7 @@ import { AppError } from '../util/errors.js';
 
 /** @typedef {import('./store.js').Store} Store */
 /** @typedef {import('../db/values.js').LogicalType} LogicalType */
+/** @typedef {import('../db/tables.js').NewColumn} NewColumn */
 /** @typedef {import('../db/values.js').ColumnOptions} ColumnOptions */
 /** @typedef {import('../db/values.js').CoercePolicy} CoercePolicy */
 /** @typedef {import('../db/client.js').CallOptions} CallOptions */
@@ -35,7 +36,7 @@ const BATCH_BYTES_BUDGET = MAX_BATCH_BYTES / 2;
 
 /**
  * @typedef {object} SchemaCommands
- * @property {(input: { name: string }) => Promise<string | null>} createTable 만든 테이블 id
+ * @property {(input: { name: string, columns?: NewColumn[] }) => Promise<string | null>} createTable 만든 테이블 id. `columns`는 함께 만들 열(D-16)
  * @property {(tableId: string, name: string) => Promise<boolean>} renameTable
  * @property {(tableId: string) => Promise<boolean>} dropTable 되돌릴 수 없음. 확인은 UI가 먼저 받는다
  * @property {(tableId: string, input: { name: string, type: LogicalType, options?: ColumnOptions | null }) => Promise<{ columnId: string, columnCount: number } | null>} addColumn
@@ -53,9 +54,7 @@ const BATCH_BYTES_BUDGET = MAX_BATCH_BYTES / 2;
 export function createSchemaCommands(store) {
   return {
     async createTable(input) {
-      const result = await store.runSchemaOp('schema.create', { name: input.name });
-      if (result) store.selectTable(result.tableId);
-      return result ? result.tableId : null;
+      return store.createTable(input.name, input.columns ? { columns: input.columns } : {});
     },
     async renameTable(tableId, name) {
       return (await store.runSchemaOp('schema.rename', { tableId, name })) !== null;
@@ -343,6 +342,21 @@ export function clearRowRange(input) {
  * @property {number} id
  * @property {Record<string, SqlValue>} cells
  */
+
+/**
+ * 빈 행 확정(D-16)의 새 행 목록. k번째 빈 행에 값을 쓰면 그 줄까지 k행을 만들고 마지막 행에만 값을 넣는다.
+ * 앞의 k−1행은 모든 열이 비어 있다. `bulkEdit`의 `inserts`로 넘겨 커맨드 하나로 적용한다.
+ * @param {{ firstId: number, count: number, cells: Record<string, SqlValue> }} input
+ * @returns {RowInsert[]}
+ */
+export function ghostRowInserts(input) {
+  /** @type {RowInsert[]} */
+  const out = [];
+  for (let i = 0; i < input.count; i += 1) {
+    out.push({ id: input.firstId + i, cells: i === input.count - 1 ? { ...input.cells } : {} });
+  }
+  return out;
+}
 
 /**
  * 여러 행의 셀을 한 번에 바꾸고(`edits`), 필요하면 값이 든 새 행을 붙인다(`inserts`, 붙여넣기가 경계를 넘을 때).

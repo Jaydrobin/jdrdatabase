@@ -14,6 +14,9 @@
  * - 복사는 `navigator.clipboard.writeText`, 붙여넣기는 그리드가 받는 `paste` 이벤트다.
  * - 뷰(Step 6): 행 읽기(`query.rows`)와 되돌릴 수 없는 범위 커맨드에 그리드의 뷰 사양을 그대로 넘겨,
  *   정렬·필터·검색이 있어도 그리드의 행 순번이 가리키는 행을 다룬다.
+ * - 빈 행(D-16): k번째 빈 행의 셀에 값을 확정하면(인라인·장문 편집기, 불리언, 붙여넣기) 그 줄까지 k행을
+ *   만들고 마지막 행에 값을 넣는 `cell.bulkEdit` 하나를 적용한다. 되돌리기 한 번에 만든 행이 모두 사라진다.
+ *   지우기·행 삭제는 실제 행 부분에만, 복사는 빈 행을 빈 칸으로 낸다.
  */
 import {
   bulkEdit,
@@ -21,6 +24,7 @@ import {
   deleteRowRange,
   deleteRows,
   editCell,
+  ghostRowInserts,
   insertRows,
   PASTE_MAX_CELLS,
   UNDO_SNAPSHOT_MAX_ROWS,
@@ -58,6 +62,7 @@ import { cellToText, convertPastedCell, parseTsv, planPaste, serializeTsv } from
  * @property {(range: CellRange) => void} onRowDelete
  * @property {() => void} onReset 그리드가 다른 테이블로 바뀌거나 내려갈 때. 편집기를 닫는다
  * @property {() => void} onRelayout 렌더 끝. 열려 있는 편집기를 편집 중인 칸 위에 다시 놓는다
+ * @property {() => void} onGhostDisabled 빈 행이 꺼지기 직전(정렬·필터·검색을 켬, 읽기 전용이 됨). 빈 행의 편집기를 닫고 알린다
  */
 
 /**
@@ -158,6 +163,10 @@ export function createEditingController(deps) {
   async function openEditor(row, col, initialText) {
     const table = editableTable();
     if (!table) return;
+    if (grid.isGhostRow(row)) {
+      openGhostEditor(table, row, col, initialText);
+      return;
+    }
     const info = grid.cellInfo(row, col);
     if (!info) return;
     const { column } = info;
@@ -226,6 +235,96 @@ export function createEditingController(deps) {
     );
   }
 
+  /**
+   * 빈 행 `row`의 셀에 값을 확정한다(D-16): 그 줄까지 행을 만들고 마지막 행에 값을 넣는 커맨드 하나.
+   * 행 수와 새 id는 확정 시점에 `query.stats`로 읽는다(빈 행이 켜진 뷰는 필터가 없어 테이블 행 수와 같다).
+   * 실패하면 트랜잭션이 롤백되어 행이 하나도 생기지 않는다(오류 알림은 히스토리가 한다).
+   * @param {TableInfo} table
+   * @param {number} row
+   * @param {ColumnInfo} column
+   * @param {SqlValue} value
+   * @returns {Promise<boolean>}
+   */
+  async function commitGhost(table, row, column, value) {
+    try {
+      const { count, maxId } = await client.call('query.stats', { tableId: table.id });
+      const k = row - count + 1;
+      if (k < 1) {
+        // 확정하는 사이 그 자리에 실제 행이 생겼다(다른 경로의 커맨드). 입력값은 버리고 다시 읽는다.
+        toasts.info('edit.reverted');
+        store.refreshData();
+        return false;
+      }
+      const inserts = ghostRowInserts({
+        firstId: (maxId ?? 0) + 1,
+        count: k,
+        cells: { [column.id]: value },
+      });
+      const result = await history.apply(
+        bulkEdit({ tableId: table.id, edits: [], inserts, now: nowIso() }),
+      );
+      if (!result) return false;
+      // 행 수는 다시 세어 오지만, 커서가 방금 만든 행에 머물도록 먼저 늘려 둔다.
+      grid.setRowCount(count + k);
+      return true;
+    } catch (err) {
+      toasts.error(toAppError(err));
+      return false;
+    }
+  }
+
+  /**
+   * 빈 행의 셀 편집기. DB에 행이 없으므로 빈 값으로 연다.
+   * @param {TableInfo} table
+   * @param {number} row
+   * @param {number} col
+   * @param {string | null} initialText
+   */
+  function openGhostEditor(table, row, col, initialText) {
+    const column = grid.columns()[col];
+    if (!column) return;
+    if (column.type === 'boolean') {
+      if (initialText !== null) return;
+      // 빈 칸의 불리언을 누르면 참이 된다(행이 없는 칸의 값은 비어 있다).
+      void commitGhost(table, row, column, 1).then(() => grid.focus());
+      return;
+    }
+    if (column.type === 'longtext') {
+      if (initialText !== null) return;
+      void longtext.open({
+        tableId: table.id,
+        tableName: table.name,
+        rowId: null,
+        rowIndex: row,
+        column,
+        // 빈 값 확정은 만들 것이 없다. 행을 만들지 않고 닫는다.
+        commit: (newValue) =>
+          newValue === null ? Promise.resolve(true) : commitGhost(table, row, column, newValue),
+      });
+      return;
+    }
+    inline.open(
+      { row, col, column, rect: grid.cellRect(row, col), text: '' },
+      {
+        initialText: initialText ?? undefined,
+        onCommit: async (value, reason) => {
+          // 빈 값 확정은 만들 것이 없다. 행을 만들지 않고 이동만 한다.
+          if (value !== null && !(await commitGhost(table, row, column, value))) return false;
+          if (reason === 'enter') grid.moveCursor(row + 1, col);
+          else if (reason === 'tab') grid.moveCursor(row, col + 1);
+          if (reason !== 'blur') grid.focus();
+          return true;
+        },
+        onCancel: () => {
+          grid.focus();
+        },
+        onRevert: () => {
+          toasts.info('edit.reverted');
+        },
+      },
+    );
+  }
+
   /** 필터나 검색이 있어 새 행이 보이지 않을 수 있는가(Step 6 예외 처리). */
   function filteredView() {
     const spec = normalizeViewSpec(grid.viewSpec());
@@ -260,10 +359,13 @@ export function createEditingController(deps) {
 
   /** @param {CellRange} range */
   async function clearRange(range) {
+    // 빈 행에는 지울 값이 없다. 실제 행 부분만 지우고, 선택이 빈 행뿐이면 아무것도 하지 않는다(D-16).
+    const r1 = Math.min(range.r1, grid.rowCount() - 1);
+    if (r1 < range.r0) return;
     const table = editableTable();
     if (!table) return;
     const columns = grid.columns().slice(range.c0, range.c1 + 1);
-    const count = range.r1 - range.r0 + 1;
+    const count = r1 - range.r0 + 1;
     if (columns.length === 0) return;
     if (count > UNDO_SNAPSHOT_MAX_ROWS) {
       // 되돌릴 수 없으므로 옛 값이 필요 없다. 읽으면 범위 전체가 메인 스레드로 올라온다
@@ -318,18 +420,23 @@ export function createEditingController(deps) {
       return;
     }
     try {
-      const rows = await readRows(
-        table.id,
-        range.r0,
-        count,
-        columns.map((c) => c.id),
-      );
-      const tsv = serializeTsv(
-        rows.map((row) => columns.map((c) => cellToText(c, row.cells[c.id] ?? null))),
-      );
+      // 빈 행(D-16)은 DB에 없으므로 읽지 않고 빈 칸으로 낸다.
+      const real = Math.max(0, Math.min(range.r1, grid.rowCount() - 1) - range.r0 + 1);
+      const rows =
+        real > 0
+          ? await readRows(
+              table.id,
+              range.r0,
+              real,
+              columns.map((c) => c.id),
+            )
+          : [];
+      const lines = rows.map((row) => columns.map((c) => cellToText(c, row.cells[c.id] ?? null)));
+      while (lines.length < count) lines.push(columns.map(() => ''));
+      const tsv = serializeTsv(lines);
       await writeClipboard(tsv);
       toasts.info('copy.done', {
-        rows: formatInteger(rows.length),
+        rows: formatInteger(lines.length),
         cols: formatInteger(columns.length),
       });
     } catch (err) {
@@ -359,8 +466,11 @@ export function createEditingController(deps) {
     }
     if (plan.cols === 0) return;
     const targets = columns.slice(anchor.col, anchor.col + plan.cols);
-    const irreversible = plan.rows > UNDO_SNAPSHOT_MAX_ROWS;
-    if (irreversible && !(await deps.confirmIrreversible({ count: plan.rows }))) return;
+    // 빈 행에서 시작하면(D-16) 마지막 실제 행과 시작 행 사이의 빈 행도 빈 값으로 만든다.
+    const irreversible = plan.gapRows + plan.rows > UNDO_SNAPSHOT_MAX_ROWS;
+    if (irreversible && !(await deps.confirmIrreversible({ count: plan.gapRows + plan.rows }))) {
+      return;
+    }
 
     // 값 변환(전체를 먼저 검증한다. 일부만 들어가면 무엇이 들어갔는지 알 수 없다).
     /** @type {import('../../db/values.js').StoredValue[][]} */
@@ -414,7 +524,9 @@ export function createEditingController(deps) {
       const inserts = [];
       if (plan.newRows > 0) {
         const { maxId } = await client.call('query.stats', { tableId: table.id });
-        const firstId = (maxId ?? 0) + 1;
+        let firstId = (maxId ?? 0) + 1;
+        for (let r = 0; r < plan.gapRows; r += 1) inserts.push({ id: firstId + r, cells: {} });
+        firstId += plan.gapRows;
         for (let r = 0; r < plan.newRows; r += 1) {
           const values = converted[plan.existingRows + r] ?? [];
           /** @type {Record<string, SqlValue>} */
@@ -477,10 +589,12 @@ export function createEditingController(deps) {
 
   /** @param {CellRange} range */
   async function deleteRange(range) {
+    // 빈 행은 지울 행이 없다. 실제 행 부분만 지우고, 선택이 빈 행뿐이면 아무것도 하지 않는다(D-16).
+    const r1 = Math.min(range.r1, grid.rowCount() - 1);
+    if (r1 < range.r0) return;
     const table = editableTable();
     if (!table) return;
-    const count = range.r1 - range.r0 + 1;
-    if (grid.rowCount() === 0) return;
+    const count = r1 - range.r0 + 1;
     if (count > UNDO_SNAPSHOT_MAX_ROWS) {
       if (!(await deps.confirmIrreversible({ count }))) return;
       await history.apply(
@@ -519,6 +633,16 @@ export function createEditingController(deps) {
     onReset: () => {
       inline.cancel();
       longtext.close();
+    },
+    onGhostDisabled: () => {
+      const cell = inline.cell();
+      const ghostInline = cell !== null && cell.row >= grid.rowCount();
+      const ghostLongtext = longtext.target()?.rowId === null;
+      if (!ghostInline && !ghostLongtext) return;
+      // 빈 행 자리가 더 이상 행을 가리키지 않는다. 값은 버리고 알린다(Step 12 예외 처리).
+      if (ghostInline) inline.cancel();
+      if (ghostLongtext) longtext.close();
+      toasts.info('grid.ghostClosed');
     },
     onRelayout: () => {
       // 고정 열의 칸은 렌더마다 `scrollLeft`만큼 다시 놓이고, 열 너비 조절도 칸을 옮긴다.

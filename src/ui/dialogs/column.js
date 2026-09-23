@@ -1,6 +1,7 @@
 // @ts-check
 /**
- * 열 대화상자(Step 3): 열 추가(이름·타입·select 항목), 이름 바꾸기, 타입 변경(정책 선택), 소프트 삭제 확인.
+ * 열 대화상자(Step 3): 이름 바꾸기, 타입 변경(정책 선택, select 항목), 소프트 삭제 확인.
+ * 열 추가는 대화상자 없이 자동 이름으로 끝난다(D-16, `store.addDefaultColumn`).
  * 사용자 데이터는 textContent·value로만 넣는다.
  */
 import { LOGICAL_TYPES } from '../../db/values.js';
@@ -55,17 +56,31 @@ function labeled(labelText, control) {
   return label;
 }
 
+/** 설명 줄 id의 일련번호(대화상자가 여러 번 열려도 id가 겹치지 않게). */
+let hintSeq = 0;
+
 /**
  * select 항목 입력(한 줄에 하나). 빈 줄·중복은 Worker가 정리한다.
+ * 입력할 때 필요한 정보는 툴팁에 숨기지 않는다(D-19): 흐린 예시(placeholder)와 입력칸 아래의 설명 줄을
+ * 늘 보여 주고, 설명 줄은 `aria-describedby`로 입력칸에 잇는다.
  * @param {string[]} choices
- * @returns {{ el: HTMLLabelElement, read: () => string[] }}
+ * @returns {{ el: HTMLElement, read: () => string[] }}
  */
 function choicesField(choices) {
   const textarea = document.createElement('textarea');
   textarea.className = 'jdr-dialog__input jdr-dialog__textarea';
   textarea.rows = 4;
+  textarea.placeholder = t('column.choicesPlaceholder');
   textarea.value = choices.join('\n');
-  const el = labeled(t('column.choicesLabel'), textarea);
+  hintSeq += 1;
+  const hint = document.createElement('p');
+  hint.className = 'jdr-dialog__hint';
+  hint.id = `jdr-choices-hint-${hintSeq}`;
+  hint.textContent = t('column.choicesHint');
+  textarea.setAttribute('aria-describedby', hint.id);
+  const el = document.createElement('div');
+  el.className = 'jdr-dialog__field';
+  el.append(labeled(t('column.choicesLabel'), textarea), hint);
   return {
     el,
     read: () =>
@@ -73,60 +88,6 @@ function choicesField(choices) {
         .split('\n')
         .map((c) => c.trim())
         .filter((c) => c),
-  };
-}
-
-/**
- * 열 추가 대화상자.
- * @param {{ taken: Iterable<string> }} options 살아 있는 열 이름
- * @returns {Promise<{ name: string, type: LogicalType, options: ColumnOptions | null } | null>}
- */
-export async function promptNewColumn(options) {
-  /** @type {HTMLInputElement | null} */
-  let nameInput = null;
-  /** @type {HTMLSelectElement | null} */
-  let typeSelect = null;
-  /** @type {ReturnType<typeof choicesField> | null} */
-  let choices = null;
-  const validateName = nameValidator(options.taken);
-  const value = await openDialog({
-    title: t('column.add.title'),
-    body: (body) => {
-      nameInput = document.createElement('input');
-      nameInput.type = 'text';
-      nameInput.className = 'jdr-dialog__input';
-      body.append(labeled(t('column.nameLabel'), nameInput));
-      typeSelect = makeTypeSelect('text');
-      body.append(labeled(t('column.typeLabel'), typeSelect));
-      choices = choicesField([]);
-      choices.el.hidden = true;
-      body.append(choices.el);
-      const onTypeChange = () => {
-        if (choices) choices.el.hidden = typeSelect?.value !== 'select';
-      };
-      typeSelect.addEventListener('change', onTypeChange);
-    },
-    buttons: [
-      { label: t('dialog.cancel'), value: 'cancel' },
-      { label: t('column.add.ok'), value: 'ok', primary: true },
-    ],
-    cancelValue: 'cancel',
-    validate: () => {
-      const problem = validateName(nameInput?.value ?? '');
-      if (problem) return problem;
-      if (typeSelect?.value === 'select' && (choices?.read().length ?? 0) === 0) {
-        return t('validate.choicesEmpty');
-      }
-      return null;
-    },
-  });
-  if (value !== 'ok' || !nameInput || !typeSelect) return null;
-  const type = /** @type {LogicalType} */ (/** @type {HTMLSelectElement} */ (typeSelect).value);
-  const list = choices ? /** @type {ReturnType<typeof choicesField>} */ (choices).read() : [];
-  return {
-    name: /** @type {HTMLInputElement} */ (nameInput).value.trim(),
-    type,
-    options: type === 'select' ? { choices: list } : null,
   };
 }
 
@@ -217,7 +178,7 @@ export function confirmDeleteColumn(name) {
 }
 
 /**
- * 타입 변경 대화상자 → 적용. 사이드바와 그 밖의 진입점이 같은 경로를 쓴다.
+ * 타입 변경 대화상자 → 적용. 사이드바와 머리글의 열 메뉴(D-16)가 같은 경로를 쓴다.
  * 10만 행 이상에서는 청크마다 진행률이 오고, 취소는 다음 청크 전에 롤백된다(Step 3 예외 처리).
  * @param {{ commands: SchemaCommands, toasts: Toasts, tableId: string, column: ColumnInfo }} input
  * @returns {Promise<void>}
@@ -245,7 +206,7 @@ export async function changeColumnTypeFlow(input) {
 }
 
 /**
- * 열 삭제 확인 → 소프트 삭제. 사이드바와 그 밖의 진입점이 같은 경로를 쓴다.
+ * 열 삭제 확인 → 소프트 삭제. 사이드바와 머리글의 열 메뉴가 같은 경로를 쓴다.
  * @param {{ commands: SchemaCommands, tableId: string, column: ColumnInfo }} input
  * @returns {Promise<void>}
  */

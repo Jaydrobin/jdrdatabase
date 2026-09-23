@@ -465,6 +465,17 @@ body {
   font-family: inherit;
 }
 
+/* 입력칸 아래에 늘 보이는 설명 줄(D-19). 흐린 예시(placeholder)와 함께 입력에 필요한 정보를 드러낸다. */
+.jdr-dialog__hint {
+  margin: -4px 0 8px;
+  color: var(--jdr-fg-muted);
+  font-size: 13px;
+}
+
+.jdr-dialog__field[hidden] {
+  display: none;
+}
+
 .jdr-toast--progress {
   border-color: var(--jdr-accent);
 }
@@ -691,4 +702,51 @@ body {
 .jdr-dialog__label + .jdr-import__check,
 .jdr-import__muted + .jdr-import__check {
   margin-top: 8px;
+}
+
+/* 공용 팝업 메뉴(ui/menu.js). 위치는 transform 한 번(열 때)으로 정한다. */
+.jdr-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 6px;
+  background: var(--jdr-bg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 15%);
+}
+
+.jdr-menu__item {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--jdr-fg);
+  cursor: pointer;
+}
+
+.jdr-menu__item:hover:not(:disabled),
+.jdr-menu__item:focus-visible {
+  background: var(--jdr-selection-bg);
+  outline: none;
+}
+
+.jdr-menu__item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--jdr-accent);
+}
+
+.jdr-menu__item:disabled {
+  color: var(--jdr-fg-muted);
+  cursor: default;
+}
+
+.jdr-menu__item--danger:not(:disabled) {
+  color: var(--jdr-danger);
 }

@@ -9,12 +9,15 @@ import { judge } from './revision.js';
 import { normalizeViewSpec, pruneViewSpec, toggleSort } from '../db/query.js';
 import { AppError, toAppError } from '../util/errors.js';
 import { formatBytes } from '../util/bytes.js';
+import { nextNames } from '../util/names.js';
+import { t } from '../i18n/index.js';
 
 /** @typedef {import('../db/client.js').Client} Client */
 /** @typedef {import('../db/engine.js').EngineCapabilities} EngineCapabilities */
 /** @typedef {import('../db/schema.js').Meta} Meta */
 /** @typedef {import('../db/command.js').Command} Command */
 /** @typedef {import('../db/tables.js').TableInfo} TableInfo */
+/** @typedef {import('../db/tables.js').NewColumn} NewColumn */
 /** @typedef {import('../db/worker.js').OpMap} OpMap */
 /** @typedef {import('../db/client.js').CallOptions} CallOptions */
 /** @typedef {import('../io/idb.js').Idb} Idb */
@@ -217,6 +220,9 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
  * @property {(tableId: string | null) => void} selectTable
  * @property {<K extends SchemaOp>(op: K, args: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result'] | null>} runSchemaOp 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다. 실패는 알리고 null
+ * @property {(name: string, options?: { columns?: NewColumn[] }) => Promise<string | null>} createTable 테이블을 만들고(기본 열은 `columns`, D-16) 그 테이블을 고른다. 만든 테이블 id. 실패는 알리고 null
+ * @property {(tableId: string) => Promise<{ columnId: string, columnCount: number } | null>} addDefaultColumn 자동 이름(`column.defaultName`)의 텍스트 열을 끝에 붙인다(D-16). 이름은 살아 있는 열과 소프트 삭제된 열의 이름을 모두 건너뛰고, Worker가 이름 겹침으로 거부하면 목록을 다시 읽어 한 번만 다시 시도한다
+ * @property {(tableId: string, columnId: string, name: string) => Promise<boolean>} renameColumn 열 표시 이름 바꾸기(머리글 이름 편집기). 실패는 알리고 false
  * @property {() => Promise<void>} refreshTables `schema.list`로 테이블 목록을 다시 읽는다
  * @property {(tableId: string) => TableViewState} getViewState 테이블의 뷰 상태(복사본)
  * @property {(tableId: string, columnId: string, width: number) => void} setColumnWidth
@@ -1564,6 +1570,50 @@ export function createStore(deps) {
       await store.recordCommand(result.cmd);
       await store.refreshTables();
       return result;
+    },
+
+    async createTable(name, options = {}) {
+      const result = await store.runSchemaOp('schema.create', {
+        name,
+        ...(options.columns ? { columns: options.columns } : {}),
+      });
+      if (!result) return null;
+      store.selectTable(result.tableId);
+      return result.tableId;
+    },
+
+    async addDefaultColumn(tableId) {
+      if (state.readOnly !== 'none') {
+        notify.info('file.readOnlyBlocked');
+        return null;
+      }
+      for (let attempt = 0; ; attempt += 1) {
+        const table = state.tables.find((tb) => tb.id === tableId);
+        if (!table) return null;
+        // 소프트 삭제된 열의 이름도 건너뛴다. 그 이름을 새 열이 가져가면 삭제한 열을 복원할 수 없다(D-16).
+        const taken = new Set(table.columns.map((c) => c.name));
+        const [name = ''] = nextNames(t('column.defaultName'), taken, 1);
+        /** @type {OpMap['schema.addColumn']['result']} */
+        let result;
+        try {
+          result = await client.call('schema.addColumn', { tableId, name, type: 'text' });
+        } catch (err) {
+          const appErr = toStoreError(err);
+          // 다른 경로(저널 재생, 다른 창의 커맨드)가 같은 이름을 막 만들었다. 목록을 다시 읽고 한 번만 더.
+          const retry = appErr.code === 'E_NAME_INVALID' && attempt === 0;
+          await store.refreshTables();
+          if (retry) continue;
+          notify.error(appErr);
+          return null;
+        }
+        await store.recordCommand(result.cmd);
+        await store.refreshTables();
+        return { columnId: result.columnId, columnCount: result.columnCount };
+      }
+    },
+
+    async renameColumn(tableId, columnId, name) {
+      return (await store.runSchemaOp('schema.renameColumn', { tableId, columnId, name })) !== null;
     },
 
     getViewState(tableId) {

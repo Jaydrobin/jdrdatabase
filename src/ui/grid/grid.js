@@ -10,9 +10,12 @@
  * - 사용자 데이터는 `cells.render`가 textContent로만 넣는다.
  * - 편집(Step 5): 선택 모델(`selection.js`)을 그리고, 편집·삭제·복사·붙여넣기·행 추가·삭제 요청은
  *   `hooks`로 편집 컨트롤러(`editing.js`)에 넘긴다. 커맨드는 이 파일에서 만들지 않는다.
- * - 뷰(Step 6): `viewSpec`(숨김·정렬·필터·검색)은 마운트 때 받아 창 질의·행 수에 그대로 넘긴다. 머리글
- *   클릭은 스토어의 정렬을 바꾸고(Shift+클릭은 보조 정렬), 정렬 표시와 `aria-sort`를 머리글에 그린다.
+ * - 뷰(Step 6): `viewSpec`(숨김·정렬·필터·검색)은 마운트 때 받아 창 질의·행 수에 그대로 넘긴다.
  *   필터 결과가 0건이면 "필터 지우기" 버튼이 있는 빈 상태를 보인다.
+ * - 머리글(D-16): 칸의 내용·정렬 버튼·열 메뉴·이름 편집기는 `header.js`가 맡는다. 이 파일은 칸의 배치와
+ *   너비 조절만 한다.
+ * - 빈 행(D-16): 정렬·필터·검색이 없고 쓸 수 있는 STRICT 테이블이면 마지막 행 아래에 `GHOST_ROWS`줄을 더
+ *   그린다. 빈 행은 화면에만 있고 창 질의를 하지 않는다. 빈 행에 값을 확정하는 일은 편집 컨트롤러가 한다.
  */
 import { resolveShortcut } from '../../app/shortcuts.js';
 import { MIN_COLUMN_WIDTH } from '../../app/store.js';
@@ -23,6 +26,7 @@ import { formatInteger } from '../../util/format.js';
 import { BLOCK_ROWS, createBlockCache } from './cache.js';
 import { render as renderCell } from './cells.js';
 import { createEditingController } from './editing.js';
+import { createHeader } from './header.js';
 import { createSelection } from './selection.js';
 
 /** @typedef {import('../../app/store.js').Store} Store */
@@ -39,6 +43,7 @@ import { createSelection } from './selection.js';
 /** @typedef {import('./editing.js').GridHooks} GridHooks */
 /** @typedef {import('../../app/history.js').History} History */
 /** @typedef {import('../editor/longtext.js').LongtextPanel} LongtextPanel */
+/** @typedef {import('../../app/commands.js').SchemaCommands} SchemaCommands */
 
 /** 행 높이(px, D-05). */
 export const ROW_HEIGHT = 32;
@@ -52,6 +57,8 @@ export const BUFFER_ROWS = 10;
 export const MAX_CANVAS_HEIGHT = 10_000_000;
 /** 고정할 수 있는 열 수 상한(UI 선택지). */
 export const MAX_FROZEN_COLUMNS = 5;
+/** 마지막 행 아래에 그리는 빈 행 수(D-16). 화면에만 있고 DB에는 없다. */
+export const GHOST_ROWS = 30;
 /** 테스트 빌드가 렌더 시간을 기록하는 `performance.measure` 이름(8장). */
 export const RENDER_MEASURE = 'jdr:grid.render';
 const RENDER_MARK = 'jdr:grid.render:start';
@@ -199,6 +206,11 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {(view: TableViewState) => void} applyView 열 너비·고정 열 갱신
  * @property {(table: TableInfo) => boolean} applyTable 보이는 열 구성이 그대로면 테이블 메타만 갈아 끼우고 데이터를 다시 읽는다(스크롤·커서·열 너비 유지). 구성이 달라 다시 마운트해야 하면 false
  * @property {(n: number) => void} setRowCount
+ * @property {() => boolean} ghostRowsEnabled 빈 행을 그리는가: 뷰에 정렬·필터·검색이 없고, 쓰기 가능하고, STRICT 테이블이고, 살아 있는 열이 있다(D-16)
+ * @property {(row: number) => boolean} isGhostRow 그 행 순번이 빈 행인가(`row >= rowCount`이고 빈 행이 켜져 있음)
+ * @property {() => number} displayRowCount 그리는 행 수(실제 행 + 빈 행)
+ * @property {() => void} refreshGhost 읽기 전용 여부가 바뀐 뒤 빈 행을 다시 판정한다. 꺼지면 빈 행의 편집기를 닫는다
+ * @property {(columnId: string) => void} startRename 그 열로 옮겨 머리글의 이름 편집기를 연다("+ 열" 직후)
  * @property {(scrollTop: number, viewportHeight: number) => RowRange} computeRange
  * @property {(range?: RowRange) => void} render
  * @property {() => void} invalidate 블록 캐시를 버리고 행 수를 다시 세어 다시 그린다
@@ -243,6 +255,8 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {Client} client
  * @property {Store} store
  * @property {(err: import('../../util/errors.js').AppError) => void} onError 창 질의 실패. 호출자가 빈 상태·사이드바 복귀를 맡는다
+ * @property {Toasts} toasts 머리글의 안내(읽기 전용, 이름 확정 실패)
+ * @property {SchemaCommands} commands 열 메뉴의 타입 변경·삭제
  */
 
 /**
@@ -257,6 +271,7 @@ export function computeColumnRange(scrollLeft, viewportWidth, columns) {
  * @property {boolean[]} cellFrozen 마지막으로 쓴 고정 여부
  * @property {boolean[]} cellCursor 마지막으로 쓴 활성 셀 여부
  * @property {boolean[]} cellSelected 마지막으로 쓴 선택 범위 포함 여부
+ * @property {boolean} ghost 마지막으로 쓴 빈 행 표시 여부. 같은 순번이라도 행 수가 바뀌면 빈 행이 실제 행이 된다
  * @property {number} y 마지막으로 쓴 translateY
  */
 
@@ -277,7 +292,7 @@ function div(className, role) {
  * @returns {Grid}
  */
 export function createGrid(deps) {
-  const { client, store, onError } = deps;
+  const { client, store, onError, toasts, commands } = deps;
   const cache = createBlockCache();
 
   // `role="grid"`는 자식이 `row`·`rowgroup`이어야 한다. 바깥 상자에 두면 그 사이의 도구 모음과
@@ -349,6 +364,10 @@ export function createGrid(deps) {
   let totalWidth = ROW_NUMBER_WIDTH;
   let frozen = 0;
   let rowCount = 0;
+  /** 이번 마운트에서 행 수를 한 번이라도 받았는가. 받기 전에는 빈 행을 그리지 않는다(자리가 곧 밀린다). */
+  let countKnown = false;
+  /** 빈 행을 그리는가(`ghostRowsEnabled()`를 마운트·행 수·읽기 전용 변경 때 다시 판정해 담는다). */
+  let ghost = false;
   /** 테이블 전환·무효화마다 오르는 세대. 이전 세대의 응답은 버린다(Step 4 예외 처리). */
   let generation = 0;
   let seq = 0;
@@ -384,8 +403,79 @@ export function createGrid(deps) {
     domRows: 0,
   };
 
+  /**
+   * 그 열이 보이게 가로로 스크롤한다(고정 열은 늘 보인다). `scrollToCell`의 가로 부분.
+   * @param {number} col
+   */
+  function scrollToColumn(col) {
+    const c = clamp(col, 0, Math.max(0, columns.length - 1));
+    if (c < frozen || columns.length === 0) return;
+    const left = lefts[c] ?? 0;
+    const width = widths[c] ?? 0;
+    const frozenRight =
+      frozen > 0 ? (lefts[frozen - 1] ?? 0) + (widths[frozen - 1] ?? 0) : ROW_NUMBER_WIDTH;
+    const scrollLeft = scroller.scrollLeft;
+    if (left - frozenRight < scrollLeft) {
+      scroller.scrollLeft = left - frozenRight;
+    } else if (left + width > scrollLeft + viewportWidth) {
+      scroller.scrollLeft = left + width - viewportWidth;
+    }
+  }
+
+  const headerCtl = createHeader({
+    store,
+    toasts,
+    commands,
+    host: {
+      table: () => table,
+      columns: () => columns,
+      revealColumn(col) {
+        if (!columns[col]) return null;
+        scrollToColumn(col);
+        // 머리글 칸은 가로 가상화로 숨어 있을 수 있다. 바로 그려 칸을 보이게 한 뒤 돌려준다.
+        render();
+        const cell = headerCells[col + 1] ?? null;
+        return cell && !cell.hidden ? cell : null;
+      },
+      columnLeft: (col) => (lefts[col] ?? 0) - (col < frozen ? 0 : scroller.scrollLeft),
+      overlay,
+      focus: () => scroller.focus(),
+      focusTarget: scroller,
+    },
+  });
+
+  /** 머리글을 마지막으로 만들 때의 쓰기 가능 여부. */
+  let headerWritable = false;
+
+  /** @returns {boolean} 지금 테이블을 바꿀 수 있는가 */
+  function writableNow() {
+    return table !== null && table.strict && store.getState().readOnly === 'none';
+  }
+
+  /** @returns {number} 그리는 행 수(실제 행 + 빈 행) */
+  const displayCount = () => rowCount + (ghost ? GHOST_ROWS : 0);
+
   /** @returns {RowLayout} */
-  const layout = () => ({ rowCount, rowHeight: ROW_HEIGHT });
+  const layout = () => ({ rowCount: displayCount(), rowHeight: ROW_HEIGHT });
+
+  /**
+   * 빈 행을 그릴 조건(D-16). 정렬·필터·검색이 있는 뷰에서는 새 행이 입력한 자리에 보인다는 보장이 없다.
+   * @returns {boolean}
+   */
+  function computeGhost() {
+    if (!table || !countKnown || !writableNow()) return false;
+    if (!table.columns.some((c) => c.deletedAt === null)) return false;
+    const spec = normalizeViewSpec(viewSpec);
+    return spec.sort.length === 0 && spec.filter === null && spec.search === '';
+  }
+
+  /** 행 수가 바뀐 뒤 캔버스 높이·접근성 행 수·선택 범위를 맞춘다. */
+  function applyRowLayout() {
+    canvas.style.height = `${canvasHeightFor(layout())}px`;
+    // 머리글 + 실제 행 + 빈 행.
+    scroller.setAttribute('aria-rowcount', String(displayCount() + 1));
+    selection.setBounds(displayCount(), columns.length);
+  }
 
   function scheduleRender() {
     if (rafId !== 0 || !mounted) return;
@@ -432,6 +522,7 @@ export function createGrid(deps) {
   }
 
   function buildHeader() {
+    headerCtl.beforeBuild();
     for (const cell of headerCells) cell.remove();
     headerCells.length = 0;
     const rowNumber = div('jdr-grid__hcell jdr-grid__hcell--rownum', 'columnheader');
@@ -440,40 +531,25 @@ export function createGrid(deps) {
     header.append(rowNumber);
     headerCells.push(rowNumber);
     const sort = normalizeViewSpec(viewSpec).sort;
+    const writable = writableNow();
+    headerWritable = writable;
     columns.forEach((column, index) => {
       const cell = div('jdr-grid__hcell', 'columnheader');
       cell.dataset.col = String(index);
       cell.setAttribute('aria-colindex', String(index + 2));
-      const name = document.createElement('span');
-      name.className = 'jdr-grid__hname';
-      name.textContent = column.name;
-      cell.append(name);
-      // 정렬 표시(Step 6): 방향 기호와, 다중 정렬이면 순번. `aria-sort`는 첫 정렬 열에만 둔다(ARIA 규칙).
       const order = sort.findIndex((s) => s.colId === column.id);
       const entry = order >= 0 ? sort[order] : undefined;
-      if (entry) {
-        const mark = document.createElement('span');
-        mark.className = 'jdr-grid__hsort';
-        mark.textContent =
-          (entry.dir === 'desc' ? t('grid.sortDescMark') : t('grid.sortAscMark')) +
-          (sort.length > 1 ? formatInteger(order + 1) : '');
-        mark.setAttribute(
-          'aria-label',
-          entry.dir === 'desc' ? t('grid.sortedDesc') : t('grid.sortedAsc'),
-        );
-        cell.append(mark);
-        if (order === 0)
-          cell.setAttribute('aria-sort', entry.dir === 'desc' ? 'descending' : 'ascending');
-      }
-      const resizer = div('jdr-grid__resizer');
-      resizer.setAttribute('role', 'separator');
-      resizer.setAttribute('aria-orientation', 'vertical');
-      resizer.setAttribute('aria-label', t('grid.resizeHandle', { name: column.name }));
-      cell.append(resizer);
+      headerCtl.render(
+        cell,
+        column,
+        entry ? { dir: entry.dir, index: order, count: sort.length } : null,
+        { writable },
+      );
       header.append(cell);
       headerCells.push(cell);
     });
     header.style.height = `${HEADER_HEIGHT}px`;
+    headerCtl.afterBuild();
   }
 
   /** 필터·검색 결과 0건 여부에 따라 빈 상태 블록을 보이거나 숨긴다. */
@@ -533,6 +609,7 @@ export function createGrid(deps) {
       cellFrozen: [true],
       cellCursor: [false],
       cellSelected: [false],
+      ghost: false,
       y: -1,
     };
   }
@@ -606,6 +683,13 @@ export function createGrid(deps) {
       rowEl.setAttribute('aria-rowindex', String(rowIndex + 2));
       const rowNumber = slot.cells[0];
       if (rowNumber) rowNumber.textContent = formatInteger(rowIndex + 1);
+    }
+    const isGhost = rowIndex >= rowCount;
+    if (slot.ghost !== isGhost) {
+      slot.ghost = isGhost;
+      rowEl.classList.toggle('jdr-grid__row--ghost', isGhost);
+      if (isGhost) rowEl.setAttribute('aria-label', t('grid.ghostRow'));
+      else rowEl.removeAttribute('aria-label');
     }
     if (slot.y !== y) {
       slot.y = y;
@@ -720,9 +804,11 @@ export function createGrid(deps) {
    * @param {RowRange} range
    */
   function ensureBlocks(range) {
-    if (!table || range.end <= range.start) return;
+    // 빈 행은 창 질의를 하지 않는다(D-16). 실제 행이 걸친 블록만 읽는다.
+    const end = Math.min(range.end, rowCount);
+    if (!table || end <= range.start) return;
     const firstBlock = Math.floor(range.start / BLOCK_ROWS);
-    const lastBlock = Math.floor((range.end - 1) / BLOCK_ROWS);
+    const lastBlock = Math.floor((end - 1) / BLOCK_ROWS);
     for (let block = firstBlock; block <= lastBlock; block += 1) {
       if (cache.has(table.id, block) || inflight.has(block)) continue;
       void fetchBlock(table.id, block, generation);
@@ -822,7 +908,8 @@ export function createGrid(deps) {
         active.set(i, slot);
       }
       const y = range.offsetY + (i - range.first) * ROW_HEIGHT;
-      renderRow(slot, i, y, scrollLeft, colRange, rowAt(i), sel);
+      // 빈 행은 낡은 블록에 남은 옛 행(행을 지운 직후)을 그리지 않도록 캐시를 보지 않는다.
+      renderRow(slot, i, y, scrollLeft, colRange, i < rowCount ? rowAt(i) : null, sel);
     }
     // 칸을 다 놓은 뒤에 편집기를 그 위에 맞춘다. 열려 있지 않으면 하는 일이 없다.
     hooks?.onRelayout();
@@ -861,21 +948,6 @@ export function createGrid(deps) {
   const onClearFilters = () => {
     if (table) store.clearFilters(table.id);
   };
-  /**
-   * 머리글 클릭 → 정렬 토글(Step 6). 손잡이를 끈 뒤 오는 click은 손잡이가 target이라 걸러진다.
-   * @param {MouseEvent} ev
-   */
-  const onHeaderClick = (ev) => {
-    const target = /** @type {HTMLElement | null} */ (ev.target);
-    if (!(target instanceof HTMLElement) || !table) return;
-    if (target.closest('.jdr-grid__resizer')) return;
-    const cell = target.closest('.jdr-grid__hcell[data-col]');
-    if (!(cell instanceof HTMLElement)) return;
-    const column = columns[Number(cell.dataset.col ?? -1)];
-    if (!column) return;
-    store.toggleSort(table.id, column.id, ev.shiftKey);
-  };
-
   /** @type {{ col: number, startX: number, startWidth: number, pointerId: number, target: HTMLElement } | null} */
   let resizing = null;
   /** @param {PointerEvent} ev */
@@ -1011,8 +1083,8 @@ export function createGrid(deps) {
    * @param {boolean} [extend]
    */
   function moveCursor(row, col, extend = false) {
-    if (rowCount === 0 || columns.length === 0) return;
-    const r = clamp(row, 0, rowCount - 1);
+    if (displayCount() === 0 || columns.length === 0) return;
+    const r = clamp(row, 0, displayCount() - 1);
     const c = clamp(col, 0, columns.length - 1);
     if (extend) selection.extendTo(r, c);
     else selection.setActive(r, c);
@@ -1053,6 +1125,7 @@ export function createGrid(deps) {
         else moveCursor(active.row, 0, extend);
         break;
       case 'End':
+        // Ctrl+End는 마지막 실제 행으로 간다. 빈 행은 아래 화살표로 들어간다.
         if (ev.ctrlKey || ev.metaKey) moveCursor(rowCount - 1, columns.length - 1, extend);
         else moveCursor(active.row, columns.length - 1, extend);
         break;
@@ -1089,6 +1162,9 @@ export function createGrid(deps) {
     } else if (action === 'rowDelete') {
       ev.preventDefault();
       hooks.onRowDelete(selection.getRange());
+    } else if (action === 'columnMenu') {
+      ev.preventDefault();
+      headerCtl.openMenu(active.col);
     } else if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
       // 셀에서 바로 타이핑: 첫 글자를 편집기의 초기값으로 넘긴다(Step 5 예외 처리).
       ev.preventDefault();
@@ -1100,6 +1176,8 @@ export function createGrid(deps) {
   const onPaste = (ev) => {
     if (!hooks || !table) return;
     if (ev.target instanceof HTMLElement && ev.target.closest('.jdr-editor')) return;
+    // 머리글 이름 편집기에 붙여넣는 글자는 그 입력칸의 것이다.
+    if (ev.target !== scroller) return;
     const text = ev.clipboardData?.getData('text/plain') ?? '';
     if (!text) return;
     ev.preventDefault();
@@ -1140,7 +1218,7 @@ export function createGrid(deps) {
     header.addEventListener('pointermove', onHeaderPointerMove);
     header.addEventListener('pointerup', onHeaderPointerUp);
     header.addEventListener('pointercancel', onHeaderPointerUp);
-    header.addEventListener('click', onHeaderClick);
+    headerCtl.mount(header);
     clearFiltersButton.addEventListener('click', onClearFilters);
     canvas.addEventListener('pointerdown', onCanvasPointerDown);
     canvas.addEventListener('pointermove', onCanvasPointerMove);
@@ -1161,7 +1239,7 @@ export function createGrid(deps) {
     header.removeEventListener('pointermove', onHeaderPointerMove);
     header.removeEventListener('pointerup', onHeaderPointerUp);
     header.removeEventListener('pointercancel', onHeaderPointerUp);
-    header.removeEventListener('click', onHeaderClick);
+    headerCtl.unmount();
     clearFiltersButton.removeEventListener('click', onClearFilters);
     canvas.removeEventListener('pointerdown', onCanvasPointerDown);
     canvas.removeEventListener('pointermove', onCanvasPointerMove);
@@ -1190,6 +1268,14 @@ export function createGrid(deps) {
         resizeObserver?.observe(scroller);
         mounted = true;
       }
+      // 같은 테이블에서 정렬·필터·검색을 켜 빈 행이 꺼지면, 빈 행에 열려 있던 편집기는 가리킬 행이 없다(D-16).
+      if (ghost && table?.id === options.table.id) {
+        const spec = normalizeViewSpec(options.viewSpec);
+        if (spec.sort.length > 0 || spec.filter !== null || spec.search !== '') {
+          hooks?.onGhostDisabled();
+        }
+      }
+      headerCtl.close();
       hooks?.onReset();
       generation += 1;
       inflight.clear();
@@ -1201,6 +1287,8 @@ export function createGrid(deps) {
       selection.reset();
       selection.setBounds(0, columns.length);
       rowCount = 0;
+      countKnown = false;
+      ghost = false;
       stats.rowCount = 0;
       applyColumnLayout(options.view);
       buildHeader();
@@ -1236,11 +1324,12 @@ export function createGrid(deps) {
 
     setRowCount(n) {
       rowCount = Math.max(0, Math.trunc(n));
+      countKnown = true;
+      ghost = computeGhost();
       stats.rowCount = rowCount;
-      canvas.style.height = `${canvasHeightFor(layout())}px`;
-      scroller.setAttribute('aria-rowcount', String(rowCount + 1));
+      // 행 수 표시는 실제 행만 센다. 빈 행은 DB에 없다.
       rowCountLabel.textContent = t('grid.rowCount', { count: formatInteger(rowCount) });
-      selection.setBounds(rowCount, columns.length);
+      applyRowLayout();
       rowDeleteButton.disabled = rowCount === 0;
       renderNoMatch();
       scheduleRender();
@@ -1264,13 +1353,35 @@ export function createGrid(deps) {
       scheduleRender();
     },
 
+    ghostRowsEnabled: () => ghost,
+    isGhostRow: (row) => ghost && row >= rowCount,
+    displayRowCount: () => displayCount(),
+
+    refreshGhost() {
+      if (!table) return;
+      // 읽기 전용이 되거나 풀리면 머리글의 편집 표시가 바뀐다. 상태 변경 알림은 저장 때마다 오므로
+      // 쓰기 가능 여부가 실제로 바뀐 때만 머리글을 다시 만든다.
+      if (writableNow() !== headerWritable) buildHeader();
+      const next = computeGhost();
+      if (next === ghost) return;
+      if (!next) hooks?.onGhostDisabled();
+      ghost = next;
+      applyRowLayout();
+      scheduleRender();
+    },
+
+    startRename(columnId) {
+      const col = columns.findIndex((c) => c.id === columnId);
+      if (col >= 0) headerCtl.openRename(col);
+    },
+
     scrollToRow(row) {
-      const target = clamp(row, 0, Math.max(0, rowCount - 1));
+      const target = clamp(row, 0, Math.max(0, displayCount() - 1));
       scroller.scrollTop = contentToScroll(target * ROW_HEIGHT, viewportHeight, layout());
     },
 
     scrollToCell(row, col) {
-      const target = clamp(row, 0, Math.max(0, rowCount - 1));
+      const target = clamp(row, 0, Math.max(0, displayCount() - 1));
       const contentTop = scrollToContent(scroller.scrollTop, viewportHeight, layout());
       const rowTop = target * ROW_HEIGHT;
       if (rowTop < contentTop) {
@@ -1282,24 +1393,14 @@ export function createGrid(deps) {
           layout(),
         );
       }
-      const c = clamp(col, 0, Math.max(0, columns.length - 1));
-      if (c < frozen || columns.length === 0) return;
-      const left = lefts[c] ?? 0;
-      const width = widths[c] ?? 0;
-      const frozenRight =
-        frozen > 0 ? (lefts[frozen - 1] ?? 0) + (widths[frozen - 1] ?? 0) : ROW_NUMBER_WIDTH;
-      const scrollLeft = scroller.scrollLeft;
-      if (left - frozenRight < scrollLeft) {
-        scroller.scrollLeft = left - frozenRight;
-      } else if (left + width > scrollLeft + viewportWidth) {
-        scroller.scrollLeft = left + width - viewportWidth;
-      }
+      scrollToColumn(col);
     },
 
     stats: () => ({ ...stats }),
 
     unmount() {
       if (!mounted) return;
+      headerCtl.close();
       hooks?.onReset();
       if (rafId !== 0) cancelAnimationFrame(rafId);
       rafId = 0;
@@ -1310,6 +1411,8 @@ export function createGrid(deps) {
       cache.invalidate();
       clearRows();
       table = null;
+      ghost = false;
+      countKnown = false;
       noMatch.hidden = true;
       el.remove();
       mounted = false;
@@ -1395,6 +1498,7 @@ export function createGrid(deps) {
  * @typedef {object} GridHost
  * @property {HTMLElement} el
  * @property {() => GridStats | null} stats 열린 그리드의 통계(테스트·진단용). 그리드가 없으면 null
+ * @property {(tableId: string, columnId: string) => void} startRename 열린 그리드가 그 테이블이면 그 열의 머리글 이름 편집기를 연다("+ 열" 직후, D-16)
  * @property {() => void} unmount
  */
 
@@ -1402,7 +1506,7 @@ export function createGrid(deps) {
  * 메인 영역의 그리드 호스트: 스토어의 선택·테이블·뷰·데이터 변경을 구독해 그리드를 열고 닫고,
  * 테이블이 없거나 열이 없으면 빈 상태를 보여 준다. 편집 컨트롤러(Step 5)를 그리드에 잇는다.
  * @param {HTMLElement} container
- * @param {{ store: Store, client: Client, toasts: Toasts, history: History, longtext: LongtextPanel, confirmIrreversible: (info: { count: number }) => Promise<boolean> }} deps
+ * @param {{ store: Store, client: Client, toasts: Toasts, commands: SchemaCommands, history: History, longtext: LongtextPanel, confirmIrreversible: (info: { count: number }) => Promise<boolean> }} deps
  * @returns {GridHost}
  */
 export function mountGridHost(container, deps) {
@@ -1422,6 +1526,8 @@ export function mountGridHost(container, deps) {
   const grid = createGrid({
     client,
     store,
+    toasts,
+    commands: deps.commands,
     onError: (err) => {
       // 창 질의 실패(테이블이 삭제됨 등): 빈 상태로 그리고 사이드바로 복귀(Step 4 예외 처리).
       toasts.error(err);
@@ -1501,12 +1607,19 @@ export function mountGridHost(container, deps) {
     store.on('data:changed', () => {
       if (openTableId) grid.invalidate();
     }),
+    // 읽기 전용이 되거나 풀리면 빈 행과 머리글의 편집 표시가 바뀐다(D-16).
+    store.on('state:changed', () => {
+      if (gridMounted) grid.refreshGhost();
+    }),
   ];
   sync();
 
   return {
     el,
     stats: () => (gridMounted ? grid.stats() : null),
+    startRename(tableId, columnId) {
+      if (gridMounted && openTableId === tableId) grid.startRename(columnId);
+    },
     unmount() {
       for (const off of unsubscribe) off();
       closeGrid();
