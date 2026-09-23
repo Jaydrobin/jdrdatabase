@@ -30,9 +30,9 @@ fn install_panic_hook(app_data: PathBuf) {
     }));
 }
 
-/// wry가 WebView2에 늘 넘기는 기본 브라우저 인자(`webview2/mod.rs`). 인자를 직접 지정하면 wry는 이것을 빼므로 앞에 붙인다.
-const WRY_DEFAULT_BROWSER_ARGS: &str =
-    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+/// wry가 WebView2에 늘 넘기는 기본 브라우저 인자 `--disable-features=…`의 값(`webview2/mod.rs`). 인자를 직접 지정하면
+/// wry는 이것을 빼므로 우리가 넣는다.
+const WRY_DISABLED_FEATURES: &str = "msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
 /// 메인 창은 설정(`tauri.conf.json`의 `create: false`)이 아니라 여기서 만든다. Windows에서 WebView2의 표준 환경 변수를
 /// 창에 넘기기 위해서다: wry는 브라우저 인자와 데이터 폴더를 늘 API로 지정하므로, Edge Driver(데스크톱 E2E)가
@@ -71,13 +71,33 @@ struct WebView2Overrides {
     data_directory: Option<PathBuf>,
 }
 
-/// 환경 변수의 브라우저 인자는 wry 기본 인자 뒤에 붙이고, 데이터 폴더는 `WEBVIEW2_USER_DATA_FOLDER`나 인자 속
+/// 환경 변수의 브라우저 인자는 wry 기본 인자와 합치고, 데이터 폴더는 `WEBVIEW2_USER_DATA_FOLDER`나 인자 속
 /// `--user-data-dir=`에서 받는다(WebView2의 데이터 폴더는 API가 정하므로 인자로만 주면 적용되지 않는다).
+/// `--disable-features=`는 뒤에 온 것이 앞의 것을 덮으므로(Edge Driver도 하나를 준다) 한 목록으로 합친다.
 fn webview2_overrides(args: Option<String>, folder: Option<PathBuf>) -> WebView2Overrides {
+    const DISABLE: &str = "--disable-features=";
     let args = args.map(|a| a.trim().to_string()).filter(|a| !a.is_empty());
     let from_args = args.as_deref().and_then(user_data_dir_arg);
+    let browser_args = args.map(|a| {
+        let mut disabled = vec![WRY_DISABLED_FEATURES.to_string()];
+        let rest: Vec<&str> = a
+            .split(' ')
+            .filter(|part| match part.strip_prefix(DISABLE) {
+                Some(features) => {
+                    if !features.is_empty() {
+                        disabled.push(features.to_string());
+                    }
+                    false
+                }
+                None => true,
+            })
+            .collect();
+        format!("{DISABLE}{} {}", disabled.join(","), rest.join(" "))
+            .trim_end()
+            .to_string()
+    });
     WebView2Overrides {
-        browser_args: args.map(|a| format!("{WRY_DEFAULT_BROWSER_ARGS} {a}")),
+        browser_args,
         data_directory: folder.filter(|f| !f.as_os_str().is_empty()).or(from_args),
     }
 }
@@ -174,6 +194,16 @@ mod tests {
         assert_eq!(
             user_data_dir_arg("--user-data-dir=\"C:\\a b\" --x"),
             Some(PathBuf::from("C:\\a b"))
+        );
+        // Edge Driver의 `--disable-features=`는 wry 기본 목록과 한 인자로 합친다(따로 두면 뒤의 것이 앞을 덮는다).
+        assert_eq!(
+            webview2_overrides(
+                Some("--disable-features=IgnoreDuplicateNavs,Prewarm --remote-debugging-port=0".into()),
+                None,
+            )
+            .browser_args
+            .as_deref(),
+            Some("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,IgnoreDuplicateNavs,Prewarm --remote-debugging-port=0")
         );
         assert_eq!(user_data_dir_arg("--remote-debugging-port=0"), None);
         assert_eq!(user_data_dir_arg("--user-data-dir="), None);
