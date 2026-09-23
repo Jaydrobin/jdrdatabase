@@ -26,6 +26,7 @@ import {
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
 import { confirmDialog, openDialog } from './ui/dialogs/dialog.js';
+import { openCleanupDialog } from './ui/dialogs/cleanup.js';
 import { openSettingsDialog } from './ui/dialogs/settings.js';
 import { mountLongtextPanel } from './ui/editor/longtext.js';
 import { mountGridHost } from './ui/grid/grid.js';
@@ -464,13 +465,23 @@ async function start(shell) {
   active.on('file:opened', syncSaveTimer);
 
   async function openSettings() {
-    const next = await openSettingsDialog({
+    const outcome = await openSettingsDialog({
       store: active,
       toasts: shell.toasts,
       settings: current,
       gzipSupported: filesystem.gzipSupported(),
     });
-    if (!next) return;
+    if (!outcome) return;
+    // 정리 버튼으로 닫혔으면 설정을 적용한 뒤 정리 대화상자를 연다(대화상자는 하나만 열린다).
+    if (outcome.openCleanup)
+      void applySettings(outcome.settings).then(() =>
+        openCleanupDialog({ store: active, toasts: shell.toasts }),
+      );
+    else await applySettings(outcome.settings);
+  }
+
+  /** @param {import('./app/settings.js').Settings} next */
+  async function applySettings(next) {
     current = next;
     active.setDeviceName(next.deviceName);
     active.setSaveGzip(next.saveGzip);

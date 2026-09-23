@@ -47,6 +47,8 @@ import { t } from '../i18n/index.js';
 /** @typedef {import('../import/pipeline.js').ImportPolicy} ImportPolicy */
 /** @typedef {import('../import/pipeline.js').ImportReport} ImportReport */
 /** @typedef {import('../import/pipeline.js').PreviewResult} PreviewResult */
+/** @typedef {import('../db/cleanup.js').CleanupPlan} CleanupPlan */
+/** @typedef {import('../db/cleanup.js').CleanupResult} CleanupResult */
 
 /** 저장 직전 백업을 IDB에 남기는 파일 크기 상한(D-04). */
 export const BACKUP_MAX_BYTES = 200 * 1024 * 1024;
@@ -163,7 +165,14 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {{ phase: string, done: number, total: number } | null} progress 데스크톱 모드의 긴 작업(열기·저장) 진행률. 없으면 null
  */
 
-/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done'} StoreEvent */
+/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done' | 'cleanup:done'} StoreEvent */
+
+/**
+ * 작업 사본 모두 버리기(D-18)의 결과. 실패한 항목은 사본이 그대로 남아 목록에 다시 나온다.
+ * @typedef {object} DiscardAllResult
+ * @property {number} removed
+ * @property {Array<{ entry: WorkcopyEntry, error: AppError }>} failed
+ */
 
 /**
  * `recordCommand`의 선택 사항.
@@ -223,6 +232,11 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {() => Promise<WorkcopyEntry[]>} listWorkcopies 데스크톱 모드: 복구를 기다리는 dirty 작업 사본. 브라우저 모드는 빈 배열
  * @property {(key: string) => Promise<boolean>} openWorkcopy 데스크톱 모드: 남은 작업 사본을 키로 연다
  * @property {(key: string) => Promise<boolean>} discardWorkcopy 데스크톱 모드: 남은 작업 사본을 버린다
+ * @property {() => Promise<DiscardAllResult>} discardAllWorkcopies 데스크톱 모드: 복구를 기다리는 작업 사본을 모두 버린다(D-18). 하나가 실패해도 나머지를 계속한다. 브라우저 모드는 할 일이 없다
+ * @property {() => Promise<number | null>} backupCount 이 브라우저에 남은 직전 저장본 수(IDB `backups`의 키 수, 모든 파일). IDB가 없거나 읽지 못하면 null
+ * @property {() => Promise<{ removed: number } | null>} clearBackups 이 브라우저의 직전 저장본을 모두 지운다(D-18). 저널·최근 파일·설정은 건드리지 않는다. 실패는 알리고 null
+ * @property {() => Promise<CleanupPlan | null>} planCleanup 데이터베이스 정리 계획(D-17). 실패는 알리고 null
+ * @property {(columns: Array<{ tableId: string, columnId: string }>, callOptions?: CallOptions) => Promise<CleanupResult | null>} runCleanup 정리 실행 → 커맨드를 저널에 기록하고 히스토리를 비운다(`cleanup:done`), 테이블 목록·그리드를 다시 읽고 dirty. 읽기 전용이면 안내하고 null. 실패는 던진다(대화상자가 원인별 문구로 표시)
  * @property {() => Promise<RecentFile | null>} recentFile IDB에 남은 최근 파일(핸들 또는 데스크톱 경로. 권한은 아직 묻지 않음)
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
  * @property {(tableId: string | null) => void} selectTable
@@ -1865,6 +1879,83 @@ export function createStore(deps) {
         notify.error(toStoreError(err));
         return false;
       }
+    },
+
+    async discardAllWorkcopies() {
+      /** @type {DiscardAllResult} */
+      const outcome = { removed: 0, failed: [] };
+      if (!nativeMode) return outcome;
+      // 목록은 열린 사본을 뺀 것이다(`listWorkcopies`). 지금 열린 DB는 대상이 아니다(D-18).
+      for (const entry of await store.listWorkcopies()) {
+        try {
+          await nativeFs('removeWorkcopy')(entry.key);
+          outcome.removed += 1;
+        } catch (err) {
+          // 파일 잠금 등. 그 사본만 남기고 나머지를 계속한다. 원본 파일은 이 경로에서 건드리지 않는다.
+          outcome.failed.push({ entry, error: toStoreError(err) });
+        }
+      }
+      return outcome;
+    },
+
+    async backupCount() {
+      if (!idb) return null;
+      try {
+        return (await idb.keys('backups')).length;
+      } catch (err) {
+        notify.error(toAppError(err));
+        return null;
+      }
+    },
+
+    async clearBackups() {
+      if (!idb) return null;
+      try {
+        const removed = (await idb.keys('backups')).length;
+        await idb.clear('backups');
+        return { removed };
+      } catch (err) {
+        // IDB의 clear는 트랜잭션 하나라 실패하면 아무것도 지워지지 않는다. 보관본이 그대로임을 문구로 알린다.
+        notify.error(
+          new AppError('E_UNKNOWN', 'clearing previous saves failed', {
+            cause: err,
+            detail: { backupsKept: true },
+          }),
+          'backup.clearFailed',
+        );
+        return null;
+      }
+    },
+
+    async planCleanup() {
+      try {
+        return await client.call('cleanup.plan');
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return null;
+      }
+    },
+
+    async runCleanup(columns, callOptions) {
+      if (state.readOnly !== 'none') {
+        notify.info('file.readOnlyBlocked');
+        return null;
+      }
+      const result = await client.call('cleanup.run', { columns }, callOptions);
+      // 커맨드는 저널에만 남긴다(재생은 `do` 방향이라 같은 재작성이 다시 일어난다). 되돌릴 수 없으므로 히스토리
+      // 스택에 넣지 않고, `cleanup:done`을 받은 히스토리가 스택을 비운다(테이블 삭제와 같은 규칙, D-08).
+      for (const cmd of result.cmds) {
+        await store.recordCommand(cmd, { fromHistory: true, refresh: false });
+      }
+      if (result.cmds.length > 0) {
+        emit('cleanup:done');
+      } else if (result.vacuumed) {
+        // 빈 공간만 줄였다. 논리 상태는 그대로라 저널에 남길 것이 없지만, 저장해야 파일이 작아진다.
+        store.markDirty();
+      }
+      await store.refreshTables();
+      emit('data:changed');
+      return result;
     },
 
     async openRecent() {

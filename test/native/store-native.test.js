@@ -615,3 +615,52 @@ test('desktop: 진행률을 읽지 못해도 열기·저장은 그대로 된다'
   await broken.client.call('db.close', { discardWorkcopy: true });
   broken.client.close();
 });
+
+test('desktop: 작업 사본 모두 버리기(D-18) — 열린 사본은 남기고, 하나가 실패해도 나머지를 지우며 원본은 그대로', async () => {
+  // 원본이 있는 dirty 사본: 저장한 뒤 편집하고 저장 없이 닫는다.
+  const first = await setup();
+  const file = path.join(scratch, '모두 버리기 원본.db');
+  first.fsx.queue.push(file);
+  await apply(first.store, first.client, CREATE_T);
+  assert.equal(await first.store.saveAs(), true);
+  await apply(first.store, first.client, INSERT_TWO);
+  await first.client.call('db.close', {});
+  first.client.close();
+  const originalBytes = await readFile(file);
+  // 저장한 적 없는 dirty 사본 둘.
+  for (let i = 0; i < 2; i += 1) {
+    const s = await setup();
+    await apply(s.store, s.client, CREATE_T);
+    await s.client.call('db.close', {});
+    s.client.close();
+  }
+
+  // 새로 뜬 앱. 한 사본은 지우기를 실패시킨다(다른 프로그램이 파일을 잡고 있는 경우).
+  let failKey = '';
+  const third = await setup({}, (fs) => ({
+    ...fs,
+    removeWorkcopy: async (key) => {
+      if (key === failKey) throw new AppError('E_FILE_LOCKED', 'injected lock');
+      await fs.removeWorkcopy?.(key);
+    },
+  }));
+  const before = await third.store.listWorkcopies();
+  assert.ok(before.length >= 3, `dirty 사본이 셋 이상이어야 한다(${before.length})`);
+  assert.ok(before.some((e) => e.meta?.originalPath === file));
+  failKey = before[0]?.key ?? '';
+  const result = await third.store.discardAllWorkcopies();
+  assert.equal(result.removed, before.length - 1);
+  assert.deepEqual(
+    result.failed.map((f) => [f.entry.key, f.error.code]),
+    [[failKey, 'E_FILE_LOCKED']],
+  );
+  assert.deepEqual(
+    (await third.store.listWorkcopies()).map((e) => e.key),
+    [failKey],
+    '실패한 사본만 목록에 남는다',
+  );
+  assert.deepEqual(await readFile(file), originalBytes, '원본 파일은 바뀌지 않는다');
+  assert.deepEqual(await count(third.client, 'SELECT 1'), [[1]], '열린 DB는 그대로 쓸 수 있다');
+  await engineCall('remove_workcopy', { key: failKey });
+  third.client.close();
+});

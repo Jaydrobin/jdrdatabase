@@ -704,6 +704,46 @@ body {
   margin-top: 8px;
 }
 
+/* 데이터베이스 정리 대화상자·설정의 확인 줄 (Step 13, D-17·D-18) */
+.jdr-cleanup__list {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.jdr-cleanup__table {
+  margin: 6px 0;
+  padding: 4px 10px 6px;
+  border: 1px solid var(--jdr-border);
+  border-radius: 6px;
+}
+
+.jdr-cleanup__table legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.jdr-cleanup__notes .jdr-dialog__message {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.jdr-settings__confirm {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--jdr-danger);
+  border-radius: 6px;
+  background: var(--jdr-warning-bg);
+  font-size: 13px;
+}
+
+.jdr-settings__confirm[hidden] {
+  display: none;
+}
+
+.jdr-settings__confirm p {
+  margin: 0 0 6px;
+}
+
 /* 공용 팝업 메뉴(ui/menu.js). 위치는 transform 한 번(열 때)으로 정한다. */
 .jdr-menu {
   position: fixed;

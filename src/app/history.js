@@ -6,7 +6,7 @@
  * - 스키마 커맨드는 Worker가 적용해 스토어가 기록하므로 스토어의 `onCommand` 알림으로 들어온다.
  * - 되돌리기는 `command.apply`를 `undo` 방향으로 부르고, 저널에는 역커맨드(`commands.invert`)를 기록한다.
  *   저널 재생은 항상 `do` 방향이므로 재생 결과가 사용자가 마지막으로 본 상태와 같다.
- * - 되돌릴 수 없는 커맨드(`irreversible`, `undo`가 빈 것)가 들어오면 스택을 비운다.
+ * - 되돌릴 수 없는 커맨드(`irreversible`, `undo`가 빈 것)가 들어오거나 데이터베이스 정리가 끝나면(`cleanup:done`) 스택을 비운다.
  * - "+ 열" 직후 이름 편집기의 확정(`mergeWithAdd`)은 스택 맨 위의 열 추가와 한 항목으로 합친다(D-16).
  *   두 커맨드는 저널에 이미 따로 기록되어 있고, 합친 항목을 되돌리면 그 역커맨드가 기록되므로 재생이 맞다.
  * - 실패한 되돌리기·다시 실행은 히스토리에서 제거하고 그리드가 다시 읽게 한다(Step 5 예외 처리).
@@ -29,7 +29,7 @@ import { toAppError } from '../util/errors.js';
 /** 스택 길이 상한(D-08). 넘으면 가장 오래된 것부터 버린다. */
 export const HISTORY_LIMIT = 200;
 
-/** @typedef {'irreversible' | 'fileOpened' | 'undoLimit' | 'import' | 'user'} ClearReason */
+/** @typedef {'irreversible' | 'fileOpened' | 'undoLimit' | 'import' | 'cleanup' | 'user'} ClearReason */
 
 /**
  * @typedef {object} PushOptions
@@ -270,6 +270,8 @@ export function createHistory(deps) {
     // 가져오기는 커맨드가 아니라 스택 위에 놓이지 않는다. 앞선 `column.add`를 되돌리면 `DROP COLUMN`이
     // 가져온 값을 지우므로 스택을 비운다(Step 7).
     store.on('import:done', () => history.clear('import')),
+    // 데이터베이스 정리는 되돌릴 수 없고 테이블을 다시 쓴다. 앞선 커맨드의 되돌리기가 지운 열을 가리킬 수 있다(D-17).
+    store.on('cleanup:done', () => history.clear('cleanup')),
   ];
   return history;
 }

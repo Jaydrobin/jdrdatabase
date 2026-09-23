@@ -131,7 +131,7 @@ export const ko = Object.freeze({
   'column.delete': '삭제',
   'column.delete.title': '열 삭제',
   'column.delete.message':
-    '열 "{name}"을(를) 숨깁니다. 데이터는 파일에 남아 있어 복원할 수 있고, "데이터베이스 정리"에서만 완전히 지워집니다.',
+    '열 "{name}"을(를) 숨깁니다. 데이터는 파일에 남아 있어 복원할 수 있고, 설정의 "데이터베이스 정리…"에서만 완전히 지워집니다.',
   'column.delete.ok': '삭제',
   'column.restore': '복원',
   'table.defaultName': '테이블 {n}',
@@ -412,6 +412,57 @@ export const ko = Object.freeze({
     '저장 직전의 파일을 그대로 새 파일로 씁니다. 열린 데이터베이스는 바뀌지 않습니다.',
   'settings.save': '저장',
   'settings.saved': '설정을 저장했습니다.',
+  'backup.clearFailed': '직전 저장본을 지우지 못했습니다. 보관본은 그대로입니다.',
+  'settings.databaseTitle': '데이터베이스',
+  'settings.cleanup': '데이터베이스 정리…',
+  'settings.cleanupHint':
+    '삭제한 열을 파일에서 완전히 지우고, 브라우저에서는 파일의 빈 공간도 줄입니다.',
+  'settings.cleanupNothing': '정리할 삭제된 열이 없습니다.',
+  'settings.backupClearAll': '이 브라우저의 직전 저장본 모두 지우기',
+  'settings.backupClearConfirm':
+    '이 브라우저에 남은 직전 저장본 {count}개(모든 파일)를 지웁니다. 되돌릴 수 없습니다. 저장하지 않은 변경의 복구 기록은 지우지 않습니다.',
+  'settings.storageUsage': '이 브라우저에서 이 앱이 쓰는 저장 공간: {usage} / {quota}',
+  'settings.backupClearOk': '모두 지우기',
+  'settings.backupCleared': '직전 저장본 {count}개를 지웠습니다.',
+  'settings.workcopyDiscardAll': '모두 버리기',
+  'settings.workcopyDiscardAllConfirm':
+    '작업 사본 {count}개와 그 안의 저장하지 않은 변경을 버립니다. 되돌릴 수 없습니다. 원본 파일은 바뀌지 않습니다.',
+  'settings.workcopyDiscardAllOk': '모두 버리기',
+  'settings.workcopyDiscarded': '작업 사본 {count}개를 버렸습니다. 원본 파일은 그대로입니다.',
+  'settings.workcopyDiscardFailed':
+    '버리지 못했습니다: {message}. 이 사본은 그대로 남았고 원본 파일은 바뀌지 않았습니다.',
+  'cleanup.title': '데이터베이스 정리',
+  'cleanup.intro': '체크한 열을 파일에서 완전히 지웁니다. 체크를 푼 열은 계속 복원할 수 있습니다.',
+  'cleanup.column': '{name} · {type} · {at}에 삭제',
+  'cleanup.index': '이 테이블의 검색 인덱스를 다시 만듭니다.',
+  'cleanup.noColumns': '삭제한 열이 없습니다. 파일의 빈 공간 줄이기만 합니다.',
+  'cleanup.size': '지금 크기 {size} · 줄일 수 있는 빈 공간 {free}',
+  'cleanup.sizeNative': '지금 크기 {size}. 파일의 빈 공간은 저장할 때 없어집니다.',
+  'cleanup.irreversible': '되돌릴 수 없습니다. 정리하면 되돌리기 기록이 모두 비워집니다.',
+  'cleanup.copies':
+    '지운 열의 값은 저장하기 전의 원본 파일, 이 브라우저의 직전 저장본, 클라우드 드라이브의 버전 기록에는 남아 있습니다. 직전 저장본은 설정에서 지울 수 있습니다.',
+  'cleanup.copiesNative':
+    '지운 열의 값은 저장하기 전의 원본 파일, 원본 옆의 .bak 파일, 클라우드 드라이브의 버전 기록에는 남아 있습니다.',
+  'cleanup.saveToShrink': '파일은 저장해야 작아집니다.',
+  'cleanup.memoryWarn':
+    '데이터베이스가 커서 정리하는 동안 브라우저 메모리가 모자랄 수 있습니다(약 {need} 필요). 실패해도 정리 전 상태 그대로입니다. 큰 파일은 데스크톱 앱에서 정리하세요.',
+  'cleanup.run': '정리',
+  'cleanup.progress.purge': '테이블 다시 쓰는 중… {done}/{total}',
+  'cleanup.progress.index': '검색 인덱스 다시 만드는 중… {done}/{total}행',
+  'cleanup.progress.vacuum': '빈 공간 줄이는 중… 이 단계는 취소할 수 없습니다.',
+  'cleanup.cancelling': '취소하는 중…',
+  'cleanup.cancelled':
+    '정리를 취소했습니다. 정리 전 상태 그대로이며 원본 파일도 바뀌지 않았습니다.',
+  'cleanup.failed':
+    '정리하지 못했습니다: {message}. 정리 전 상태 그대로이며 원본 파일도 바뀌지 않았습니다.',
+  'cleanup.stale':
+    '삭제한 열이 그사이 복원되었거나 없어졌습니다. 목록을 다시 읽었습니다. 정리 전 상태 그대로입니다.',
+  'cleanup.done':
+    '삭제한 열 {count}개를 지웠습니다({before} → {after}). 저장해야 파일이 작아집니다.',
+  'cleanup.doneCompacted':
+    '파일의 빈 공간을 줄였습니다({before} → {after}). 저장해야 파일이 작아집니다.',
+  'cleanup.vacuumFailed':
+    '삭제한 열은 지웠지만 빈 공간은 줄이지 못했습니다: {message}. 저장은 할 수 있습니다.',
   'export.title': '"{table}" 내보내기',
   'export.formatLabel': '형식',
   'export.format.csv': 'CSV',

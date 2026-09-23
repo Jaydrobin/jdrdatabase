@@ -129,7 +129,7 @@ export const en = Object.freeze({
   'column.delete': 'Delete',
   'column.delete.title': 'Delete column',
   'column.delete.message':
-    'Hides column "{name}". Its data stays in the file and can be restored; it is removed for good only by "Clean up database".',
+    'Hides column "{name}". Its data stays in the file and can be restored; it is removed for good only by "Clean up database…" in Settings.',
   'column.delete.ok': 'Delete',
   'column.restore': 'Restore',
   'table.defaultName': 'Table {n}',
@@ -412,6 +412,60 @@ export const en = Object.freeze({
     'Writes the file as it was just before the last save. The open database is unchanged.',
   'settings.save': 'Save',
   'settings.saved': 'Settings saved.',
+  'backup.clearFailed': 'Could not delete the previous saves. They are still there.',
+  'settings.databaseTitle': 'Database',
+  'settings.cleanup': 'Clean up database…',
+  'settings.cleanupHint':
+    'Removes deleted columns from the file for good; in the browser it also reclaims free space in the file.',
+  'settings.cleanupNothing': 'There are no deleted columns to clean up.',
+  'settings.backupClearAll': 'Delete all previous saves in this browser',
+  'settings.backupClearConfirm':
+    'Deletes the {count} previous saves kept in this browser (for every file). This cannot be undone. Recovery records of unsaved changes are not deleted.',
+  'settings.storageUsage': 'Storage this app uses in this browser: {usage} / {quota}',
+  'settings.backupClearOk': 'Delete all',
+  'settings.backupCleared': 'Deleted {count} previous saves.',
+  'settings.workcopyDiscardAll': 'Discard all',
+  'settings.workcopyDiscardAllConfirm':
+    'Discards {count} working copies and the unsaved changes in them. This cannot be undone. The original files are not changed.',
+  'settings.workcopyDiscardAllOk': 'Discard all',
+  'settings.workcopyDiscarded':
+    'Discarded {count} working copies. The original files are unchanged.',
+  'settings.workcopyDiscardFailed':
+    'Could not discard: {message}. This copy is still there and the original file is unchanged.',
+  'cleanup.title': 'Clean up database',
+  'cleanup.intro':
+    'Checked columns are removed from the file for good. Unchecked columns can still be restored.',
+  'cleanup.column': '{name} · {type} · deleted {at}',
+  'cleanup.index': 'The search index of this table is rebuilt.',
+  'cleanup.noColumns':
+    'There are no deleted columns. Only the free space in the file is reclaimed.',
+  'cleanup.size': 'Current size {size} · reclaimable free space {free}',
+  'cleanup.sizeNative': 'Current size {size}. Free space in the file is removed when you save.',
+  'cleanup.irreversible': 'This cannot be undone. Cleaning up empties the undo history.',
+  'cleanup.copies':
+    "The values of removed columns remain in the original file until you save, in the previous save kept in this browser, and in your cloud drive's version history. Previous saves can be deleted in Settings.",
+  'cleanup.copiesNative':
+    "The values of removed columns remain in the original file until you save, in the .bak file next to it, and in your cloud drive's version history.",
+  'cleanup.saveToShrink': 'The file gets smaller only when you save.',
+  'cleanup.memoryWarn':
+    'The database is large, so the browser may run out of memory while cleaning up (about {need} needed). If it fails, nothing changes. Clean up large files in the desktop app.',
+  'cleanup.run': 'Clean up',
+  'cleanup.progress.purge': 'Rewriting tables… {done}/{total}',
+  'cleanup.progress.index': 'Rebuilding the search index… {done}/{total} rows',
+  'cleanup.progress.vacuum': 'Reclaiming free space… This step cannot be cancelled.',
+  'cleanup.cancelling': 'Cancelling…',
+  'cleanup.cancelled':
+    'Clean-up cancelled. Everything is as it was before, and the original file is unchanged.',
+  'cleanup.failed':
+    'Could not clean up: {message}. Everything is as it was before, and the original file is unchanged.',
+  'cleanup.stale':
+    'Some deleted columns were restored or removed in the meantime. The list was reloaded. Nothing was changed.',
+  'cleanup.done':
+    'Removed {count} deleted columns ({before} → {after}). The file gets smaller when you save.',
+  'cleanup.doneCompacted':
+    'Reclaimed free space in the file ({before} → {after}). The file gets smaller when you save.',
+  'cleanup.vacuumFailed':
+    'Removed the deleted columns but could not reclaim free space: {message}. You can still save.',
   'export.title': 'Export "{table}"',
   'export.formatLabel': 'Format',
   'export.format.csv': 'CSV',

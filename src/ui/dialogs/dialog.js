@@ -17,12 +17,18 @@ import { t } from '../../i18n/index.js';
  * @typedef {object} DialogOptions
  * @property {string} title
  * @property {string} [message] 본문 문단. 줄바꿈(`\n`)은 문단 구분
- * @property {(body: HTMLElement) => void} [body] 폼 등 추가 내용을 채우는 함수
+ * @property {(body: HTMLElement, actions: DialogActions) => void} [body] 폼 등 추가 내용을 채우는 함수. `actions`는 본문 안의 컨트롤이 버튼 행의 버튼을 누른 것과 같게 닫을 때 쓴다
  * @property {DialogButton[]} buttons
  * @property {string} cancelValue Esc·배경 클릭 시 resolve 값
  * @property {() => string | null | Promise<string | null>} [validate] 확인(primary) 전에 검사. 오류 문구를 돌려주면 닫지 않고 표시. Promise면 끝날 때까지 버튼을 잠근다(가져오기 실행처럼 긴 작업)
  * @property {() => boolean} [beforeCancel] 취소(취소 버튼·Esc·배경)를 가로챈다. false를 돌려주면 닫지 않는다(진행 중인 작업을 먼저 멈출 때)
  * @property {boolean} [wide] 넓은 대화상자(미리보기 표 등)
+ */
+
+/**
+ * 본문 콜백이 받는 손잡이.
+ * @typedef {object} DialogActions
+ * @property {(value: string) => void} submit 그 값의 버튼을 누른 것과 같다(확인 버튼이면 `validate`를 거친다). 본문을 만드는 동안이 아니라 사용자 동작에서 부른다
  */
 
 /** @type {HTMLElement | null} */
@@ -89,7 +95,8 @@ export function openDialog(options) {
         body.append(p);
       }
     }
-    options.body?.(body);
+    // `submit`은 아래의 함수 선언이다. 본문의 컨트롤은 사용자 동작에서만 부르므로 그때는 버튼 행이 이미 있다.
+    options.body?.(body, { submit: (value) => submit(value) });
     dialog.append(body);
 
     const error = document.createElement('p');
