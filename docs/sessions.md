@@ -35,7 +35,8 @@ grep -n 미확인 docs/sessions.md
 | I | 11 (타우리 셸·네이티브 엔진) | 완료(데스크톱 E2E는 Linux만 실측, Windows·macOS 미확인) |
 | I 점검 | 세션 I 산출물 코드 점검과 수정 | 완료(CI 다섯 잡 초록. Windows·macOS WebView 실측은 미확인) |
 | J | 누적 미수정 항목 정리(세션 A~I의 "점검했지만 고치지 않은 것" 12건) | 완료(CI 다섯 잡 초록) |
-| K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(코드 푸시·문서 전용 푸시 양쪽 실측. concurrency 취소 동작과 main 푸시 경로는 미확인) |
+| K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(코드 푸시·문서 전용 푸시 양쪽 실측. main 푸시 경로는 미확인. PR 실행의 concurrency 취소는 세션 L에서 실측) |
+| L | 누적 미확인 항목 정리(SheetJS 0.20.3, 두 탭·인덱스 배지·작업 사본 목록 E2E, `E_MEM`·concurrency 실측, 5 GB 데스크톱 성능, Windows E2E 시도) | 완료(작업 사본 목록의 데이터 유실 버그 수정. Windows E2E는 WebView2 인자 문제로 되돌림, 작업 사본 복사는 성능 예산 초과로 제안 대기) |
 
 ## 기록
 
@@ -695,7 +696,7 @@ CI: 헤드 커밋 `b85738c`에서 `check-build-e2e` 초록(push·pull_request �
 - 저널·히스토리: `autosave.test.js`(suspend → 기록 중단·truncated, clear가 풀어 줌), `store.test.js`(가져오기 뒤 `journalStop = 'import'`, 이후 커맨드 미기록, 저장 뒤 해제, 새 테이블 선택, 기존 테이블 추가는 선택 유지), `history.test.js`(`import:done`이 스택을 비움), E2E(배너 문구, 되돌리기 버튼 잠김, 저장 뒤 배너 사라짐).
 
 **Step 8 완료 기준**
-- [x] 픽스처(날짜·시간·불리언·수식·병합·오류 셀·빈 헤더·1904 체계): `test/fixtures/import/basic.xlsx`(시트 "데이터": 빈·중복 헤더, 날짜·시각·불리언·수식(`f`+계산값)·`#N/A`·`#REF!`·병합 A4:B5·선행 0 우편번호·실수·일련번호 60/61; 시트 "둘째": 헤더가 3행), `date1904.xlsx`, `encrypted.xlsx`(CFB에 `EncryptedPackage`·`EncryptionInfo` 스트림). `xlsx.test.js` 5개 + `pipeline.test.js` 2개 + E2E 2개. **1900 윤년 버그는 SheetJS가 일련번호 60을 `1900-02-28`, 61을 `1900-03-01`로 돌려줍니다**(위임한 대로 두고 검사로 못박음). 1904 통합 문서의 같은 날짜가 같은 문자열로 읽힙니다. 손상은 잘린 zip(`E_XLSX_CORRUPT`)으로 검사했고, **빈 입력과 평문은 SheetJS가 CSV로 읽어 던지지 않습니다**(형식은 확장자로 정하므로 실사용에서는 `.xlsx`로 이름만 바꾼 CSV가 표로 읽힙니다).
+- [x] 픽스처(날짜·시간·불리언·수식·병합·오류 셀·빈 헤더·1904 체계): `test/fixtures/import/basic.xlsx`(시트 "데이터": 빈·중복 헤더, 날짜·시각·불리언·수식(`f`+계산값)·`#N/A`·`#REF!`·병합 A4:B5·선행 0 우편번호·실수·일련번호 60/61; 시트 "둘째": 헤더가 3행), `date1904.xlsx`, `encrypted.xlsx`(CFB에 `EncryptedPackage`·`EncryptionInfo` 스트림). `xlsx.test.js` 5개 + `pipeline.test.js` 2개 + E2E 2개. **1900 윤년 버그는 SheetJS가 일련번호 60을 `1900-02-28`, 61을 `1900-03-01`로 돌려줍니다**(위임한 대로 두고 검사로 못박음). 1904 통합 문서의 같은 날짜가 같은 문자열로 읽힙니다. (→ 세션 L: 이 검사는 0.18.12의 1904 쓰기·읽기 버그가 서로 상쇄돼 초록이었습니다. 0.20.3으로 픽스처를 다시 만들었고, 일련번호 60은 이제 숫자 셀로 옵니다.) 손상은 잘린 zip(`E_XLSX_CORRUPT`)으로 검사했고, **빈 입력과 평문은 SheetJS가 CSV로 읽어 던지지 않습니다**(형식은 확장자로 정하므로 실사용에서는 `.xlsx`로 이름만 바꾼 CSV가 표로 읽힙니다).
 - [x] 5만 행 × 20열 xlsx 가져오기 20초 이하: `test/perf/import-xlsx.perf.spec.js`(SheetJS로 만든 35,546,232바이트) **미리보기 2,907 ms, 가져오기 5,925 ms**(예산 20,000 ms).
 - Step 8 예외 처리 대응: 암호화 `E_XLSX_ENCRYPTED`(단위 + E2E: 미리보기 경고 문구, 가져오기 버튼은 같은 문구로 거부), 100 MB 상한 `E_FILE_TOO_LARGE`(단위. UI 문구 `import.xlsxTooLarge`는 코드 경로만), 병합(`merged` 경고 + 나머지 칸 NULL: 단위·E2E), 오류 셀(NULL + 보고서 `error_cell`: 단위·E2E), 빈·중복 헤더(`열2`, `이름 (2)`: 단위·E2E), 선행 0(`text`: 단위·E2E), 손상 zip(단위).
 
@@ -1308,7 +1309,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - [x] `cargo test`(코어 19개 + 앱 크레이트 컴파일): `PRAGMA compile_options`에 `ENABLE_FTS5`(rusqlite 0.40 `bundled`, SQLite 3.53.2), 저장 원자성(`VACUUM INTO` 실패 주입: 없는 폴더 아래 임시 경로 → 원본·`.bak` 바이트 동일, 임시 파일 없음 / rename 실패 주입 → 원본을 `.bak`에서 원복하고 임시 파일 경로를 detail로), `run_batch` 원자성(1만 행 중 5,001번째 실패 → 0행, 바깥 트랜잭션 안에서는 SAVEPOINT), 다른 스레드의 `interrupt`로 20억 행 재귀 질의 중단(`E_IMPORT_CANCELLED`, 200 ms 뒤 호출 → 즉시 종료, 커넥션 재사용 가능), 한글·공백 경로 왕복(`한글 폴더/데이터 베이스 (1).db`, 저장 → `.bak` → 복원 → 다시 열기). 그 밖에 원본 변경 감지·`force`, 다른 이름으로 저장, dirty 사본 복구·버리기·경로로 찾기·원본 상태 비교, 새 DB 임시 사본 목록·정리·키로 열기, 비SQLite·손상·외부 파일, 경로 싱크, JSON 값·base64. `cargo fmt --check`·`cargo clippy --workspace --all-targets -- -D warnings` 0건.
 - [x] Step 1 엔진 적합성 테스트를 네이티브 엔진에 대해 통과: `npm run test:native` **26개**(적합성 19 + 큰 응답 버퍼 재수신 1 + 사본 저장 왕복 1 + 데스크톱 스토어 흐름 5). `engine-contract.js`를 wasm과 공유하며(`engine-contract.test.js`는 wasm만 부른다), worker_threads 스레드의 브리지(`io/ipc-bridge.js`)가 `jdr-ipc-stdio` 프로세스를 잇고 메인 스레드의 엔진이 `Atomics.wait`로 기다립니다. tauri-driver 환경에서는 아래 E2E가 Worker 안의 같은 엔진으로 `SELECT 1`·FTS5 trigram 한글 부분 일치를 확인했습니다.
 - [x] 데스크톱 E2E(tauri-driver): **Linux(WebKitGTK 2.52, Xvfb)에서 통과.** `test/desktop/run.mjs`가 테스트 변형(`dist/test/tauri/index.html`)을 담은 디버그 바이너리를 만들고 WebDriver 프로토콜을 fetch로 직접 말합니다. 검사: 상태바 "데스크톱 모드 · SQLite 3.53.2", IndexedDB·BroadcastChannel 사용 가능, Worker 전송, `SELECT 1`, FTS5, 새 테이블 → 훅으로 경로 주입 → 다른 이름으로 저장(revision 1) → 편집 → 저장(`.bak`, revision 2) → 새로 만들기 → 다시 열기(2행) → `.bak` 복원 → 원본 변경 감지 대화상자에서 "취소"(파일 그대로). 파일 대화상자는 `__jdrTest.setPickedPath`로 대신합니다. **Windows는 미확인**(CI `desktop` 잡은 세 OS에서 빌드까지만, E2E는 Linux만).
-- [ ] **5 GB 픽스처 성능(미확인).** 열기 2초·창 질의 50 ms·저장 1.5배는 재지 않았습니다. 이 환경의 디스크 예산과 시간으로 500만 행 픽스처(약 5 GB)를 만들 수 없었고, 데스크톱 성능 spec(`test/perf`의 데스크톱 판)도 이번 세션에 넣지 않았습니다. 후속 세션(I-2)에서 `gen-fixture.mjs --rows 5000000 --db`로 만든 파일을 `test:desktop`에 넣어 8장 데스크톱 표를 채워야 합니다.
+- [ ] ~~**5 GB 픽스처 성능(미확인).**~~ → 세션 L에서 측정(`test/desktop/perf.mjs`, 결과는 세션 L 절). 열기 2초·창 질의 50 ms·저장 1.5배는 재지 않았습니다. 이 환경의 디스크 예산과 시간으로 500만 행 픽스처(약 5 GB)를 만들 수 없었고, 데스크톱 성능 spec(`test/perf`의 데스크톱 판)도 이번 세션에 넣지 않았습니다. 후속 세션(I-2)에서 `gen-fixture.mjs --rows 5000000 --db`로 만든 파일을 `test:desktop`에 넣어 8장 데스크톱 표를 채워야 합니다.
 - [x] `verify.mjs`가 브라우저·타우리 산출물이 CSP 태그 외 동일함을 확인: `verify OK`(두 변형 192바이트 차이 = CSP 메타 줄).
 - [x] `docs/desktop.md`: 브라우저 모드와의 차이(상한·열기·저장·백업·미저장 변경), 작업 사본 위치(OS별 앱 데이터 폴더, WAL 부속 파일), 저장 절차와 `.bak`, 클라우드 폴더 사용, 미저장 변경 복구, 빌드·검사 명령, 구조.
 
@@ -1339,7 +1340,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
 **미확인 (후속 세션에서 이어받음)**
 
-- 5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 위 완료 기준 참고.
+- ~~5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 위 완료 기준 참고.~~ → 세션 L에서 측정.
 - Windows(WebView2)·macOS(WKWebView)에서의 데스크톱 모드 전부: `http://jdr.localhost/call` 형태의 프로토콜에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream. CI `desktop` 잡(세 OS)의 첫 실행 결과도 미확인입니다(이 푸시가 첫 실행).
 - 실제 파일 대화상자(`pick_open`·`pick_save`)와 내보내기 경로 싱크(`sink_write`)의 WebView 실측(E2E는 훅으로 경로를 넣고, 싱크는 Node `test:native`의 JSON 경로로만 검사).
 - CI에서의 `tauri build`(릴리스 번들) 성공 여부와 번들 크기.
@@ -1398,7 +1399,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 **미확인 (후속 세션에서 이어받음)**
 
 - ~~이 푸시의 CI `desktop` 잡 결과.~~ 위 검증 절에 적었습니다. 세 OS 전부 초록이고 설치본까지 나왔습니다.
-- 5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리. 세션 I에서 이어받아 그대로 남습니다(이 환경의 디스크·시간 예산으로 500만 행 픽스처를 만들지 못했습니다).
+- ~~5 GB 픽스처의 데스크톱 성능 예산(8장 데스크톱 표 6개 항목)과 최대 상주 메모리.~~ → 세션 L에서 측정. 세션 I에서 이어받아 그대로 남습니다(이 환경의 디스크·시간 예산으로 500만 행 픽스처를 만들지 못했습니다).
 - **Windows(WebView2)·macOS(WKWebView)에서 앱이 실제로 도는 것**은 여전히 미확인입니다. 이번에 확인된 것은 러스트 쪽(`cargo test`가 저장·사본·싱크를 세 OS에서 검증)과 빌드·번들까지이고, WebView 안에서 도는 부분 — `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 파일 대화상자, `sink_write` raw 본문, single-instance, WebView별 IndexedDB·CompressionStream — 은 데스크톱 E2E가 Linux에서만 돌기 때문에 확인되지 않습니다. 8번(Windows의 `sync_all`)이 러스트 단위 테스트에서만 드러난 것처럼, WebView 쪽에도 같은 종류의 플랫폼 차이가 남아 있을 수 있습니다. Windows E2E는 Microsoft Edge Driver로 붙일 수 있으므로 후속 세션에서 `desktop` 잡의 `e2e` 행렬 값을 Windows에도 켜는 것을 제안합니다.
 - 실제 파일 대화상자(`pick_open`·`pick_save`)의 WebView 실측. E2E는 `__jdrTest.setPickedPath`로 경로를 넣습니다.
 - 위 "고치지 않고 남긴 것"의 다섯 항목(열기·저장 진행률, 남은 dirty 사본 접근, 외부 파일의 핫 WAL, `run()`의 `expect`, `writeSync` 예외)은 판단이 필요한 채로 남습니다.
@@ -1460,9 +1461,9 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
   첫 푸시(`0e2c11f`)에서는 **macOS와 Windows가 같은 자리에서 빨강**이었습니다. 앱 코드가 아니라 이 세션이 새로 넣은 `progress_peek` 검사가 배경 스레드로 1 ms마다 샘플링하는 방식이라, 빠른 기계에서 2,000행 배치가 첫 샘플보다 먼저 끝났습니다. 세션 F 점검 후속이 같은 종류의 간헐 실패로 고생한 전례가 있어 재실행으로 넘기지 않고, 보고 콜백 안에서 읽도록 다시 써 타이밍 의존을 없앴습니다(`543abd8`). 보고 횟수(500행마다 네 번)까지 단언할 수 있게 되어 검사가 더 강해졌습니다.
 - **진행률 표시의 실제 모습.** 폴링 주기(500 ms)와 상태바 문구는 5 GB 파일에서 보지 못했습니다. 이 환경의 픽스처는 폴링이 한 번도 돌기 전에 끝납니다. 러스트 쪽 `progress_peek`은 4,000행 `run_batch`가 도는 동안 다른 스레드가 읽는 것을 검사로 확인했고, JS 쪽은 "폴링이 실패해도 작업은 된다"까지만 검사합니다.
-- **설정 대화상자의 작업 사본 목록 UI.** 스토어 메서드는 `test:native`가 덮지만(둘 이상 남은 사본을 모두 열고 버리는 것), 대화상자에 실제로 그려지는 모습과 키보드 조작은 데스크톱 E2E에 넣지 않았습니다.
-- **"인덱스가 오래됨" 배지의 실제 표시.** `ftsStale` 판정은 단위 테스트가 덮지만 도구 모음 버튼·툴팁은 코드 경로만입니다.
-- **SheetJS 0.20.3**(위 조건부 항목). 프록시가 `cdn.sheetjs.com`을 열어야 가능합니다.
+- ~~**설정 대화상자의 작업 사본 목록 UI.**~~ → 세션 L에서 데스크톱 E2E로 해소(그 과정에서 데이터 유실 버그 수정). 스토어 메서드는 `test:native`가 덮지만(둘 이상 남은 사본을 모두 열고 버리는 것), 대화상자에 실제로 그려지는 모습과 키보드 조작은 데스크톱 E2E에 넣지 않았습니다.
+- ~~**"인덱스가 오래됨" 배지의 실제 표시.**~~ → 세션 L에서 E2E로 해소. `ftsStale` 판정은 단위 테스트가 덮지만 도구 모음 버튼·툴팁은 코드 경로만입니다.
+- ~~**SheetJS 0.20.3**(위 조건부 항목).~~ → 세션 L에서 갱신(`6651617`). 프록시가 `cdn.sheetjs.com`을 열어야 가능합니다.
 - 5 GB 픽스처의 데스크톱 성능 예산, Windows·macOS의 WebView 실측, 그리고 세션 I 점검이 남긴 나머지 항목은 그대로입니다.
 - **이 세션이 손대지 않은 "점검했지만 고치지 않은 것"**: 사용자와 합의한 대로 받아들인 트레이드오프(고정 열 뒤 스크롤, `selectAll`의 활성 셀, `clearRange` 그룹 수, 내보내기 역압, `export.stream` 배타, 자동 저장 실패 토스트, 읽기 전용에서도 내보내기, `engine.exec` 비배타, 네이티브 `integrity_check` 생략, `NULLS LAST`의 빈 문자열, `views.list` 실패 삼킴, `restoreBackup`의 빈 `db_id`, 오버레이가 스크롤 막대를 덮음, `run()`의 `expect`, `writeSync` 예외, 평문 `.xlsx`, UTF-16 추정, `decodeHead`의 죽은 `try/catch`, XLSX 날짜 로컬 시각, `plan()`의 늦은 이름 검사, 머리글 정렬의 마우스 전용)는 각 세션 절에 근거와 함께 그대로 남아 있습니다.
 
@@ -1503,6 +1504,96 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - ~~문서 전용 커밋에서 `perf`·`desktop`이 skipped로 보고되는지는 이 커밋이 그 실측입니다.~~ **확인됐습니다**(푸시 `a067bd9`, `docs/sessions.md` 한 파일). `changes`가 바뀐 파일로 `docs/sessions.md`만 찍고 `code=false`를 냈고, `ci` run 35721772843의 **`perf`가 skipped**, `desktop` run 35721772867의 **`desktop`이 skipped**입니다. 두 run의 결론은 그대로 **success**라 required check가 pending으로 남지 않습니다. `check-build-e2e`는 조건 없이 돌아 통과했습니다.
 
   아낀 시간: `desktop` run이 **8분 35초 → 8초**(세 OS 러스트 빌드·타우리 번들·데스크톱 E2E가 통째로 빠짐), `ci` run은 `perf`(3.1분, 별도 러너)가 빠지고 `check-build-e2e`만 남아 3분 56초입니다. `changes` 잡 자체의 비용은 잡당 5~8초입니다.
-- **`concurrency`의 실제 취소 동작은 미확인입니다.** 설정이 붙은 것과 group 값은 확인했지만, "PR 실행 중에 새 푸시가 오면 앞 실행이 cancelled 된다"와 "`main` 푸시 실행은 취소되지 않는다"를 실제로 보려면 앞 실행이 도는 중에 겹쳐 푸시해야 합니다. CI 소모를 줄이려는 세션에서 그것만을 위해 겹쳐 푸시하지 않았습니다. 다음 세션이 자연스럽게 연속 푸시를 하면 그때 확인됩니다.
+- **`concurrency`의 실제 취소 동작은 미확인입니다.** 설정이 붙은 것과 group 값은 확인했지만, "PR 실행 중에 새 푸시가 오면 앞 실행이 cancelled 된다"와 "`main` 푸시 실행은 취소되지 않는다"를 실제로 보려면 앞 실행이 도는 중에 겹쳐 푸시해야 합니다. CI 소모를 줄이려는 세션에서 그것만을 위해 겹쳐 푸시하지 않았습니다. 다음 세션이 자연스럽게 연속 푸시를 하면 그때 확인됩니다. → 세션 L: PR 쪽은 확인(`45b462d`의 run 35807661515·35807661516이 다음 푸시에 `cancelled`). `main` 푸시 실행이 취소되지 않는 것은 여전히 미확인.
 - **`push`(main) 경로는 미확인입니다.** 이 브랜치의 실행은 전부 `pull_request` 이벤트라, `github.event.before`를 쓰는 갈래와 `cancel-in-progress: false`는 병합 때 처음 돕니다. 로컬에서 같은 입력으로 스크립트를 돌려 본 것까지입니다.
 - 세션 J와 그 앞 세션들의 미확인 목록(SheetJS 0.20.3 갱신, Windows·macOS WebView 실측, 5 GB 픽스처 데스크톱 성능, 실제 한글 IME·스크린 리더, Firefox·Safari 등)은 이 세션이 줄이지 못했고 그대로 남습니다.
+
+### 세션 L (누적 미확인 항목 정리) — 2026-09-23
+
+커밋: `6651617` chore(vendor) SheetJS 0.20.3 → `cbf728c` fix(export) → `0013d9b` build(verify) → `45b462d` fix(import) → `f94574b` test(e2e) 두 탭 → `d40dc54` test(e2e) 인덱스 배지 → `b3f74a9` fix(store) 열린 작업 사본 → `62eb535` test(desktop) 작업 사본 목록 → `1f0580d` ci(desktop) Windows E2E → `d2477be` refactor(test) → `0b936ae` fix(test) npx.cmd → `59b0788` ci(desktop) 진단 → `39708f6` test(desktop) 5 GB 성능 → `402daf7` ci(desktop) Windows E2E 되돌림 → `31c1279` fix(perf) 메모리 최고 수위 → `d98dd27` test(perf) 기준선 → 이 커밋 docs(session).
+
+시작 상태: 로컬 클론이 얕아(depth 50) 문서 세 개만 있는 옛 커밋에 머물러 있었습니다. `git fetch --unshallow` 뒤 원격 `dfae864`로 fast-forward 했고(force-push 없음), 그 상태에서 `npm run check`(362개)·`build`·`verify`·`test:e2e`(68개)가 모두 초록임을 확인하고 시작했습니다. 이 세션은 `DESIGN.md` 5.0의 Step을 구현하지 않고, 사용자와 고른 누적 미확인 항목(SheetJS 갱신, 두 탭, 인덱스 배지, `E_MEM`, 작업 사본 목록 UI, Windows WebView2, 5 GB 픽스처, concurrency 취소)만 다룹니다.
+
+**한 일**
+
+1. **SheetJS CE 0.18.12 → 0.20.3**(`6651617`, 단독 vendor 커밋). `cdn.sheetjs.com`은 이 환경에서 여전히 `CONNECT 403`이라 저장소 소유자가 받아 전달한 `xlsx.full.min.js`·`types/index.d.ts`를 넣었습니다. `XLSX.version`이 `0.20.3`이고 `fetch`·`XMLHttpRequest`·`importScripts`·`eval`이 없는 것을 확인했습니다. `LICENSE.sheetjs`는 0.18.12와 같은 Apache-2.0 전문·저작권 고지라 바꾸지 않았습니다. 교체로 드러난 것:
+   - **XLSX 내보내기가 빈 통합 문서를 썼습니다**(`cbf728c`). 0.18은 행 배열 자체가 dense 시트였고 0.20은 행을 `!data`에 둡니다. 배열을 그대로 넘기면 sparse 시트로 읽혀 헤더까지 빠집니다. "내보낸 xlsx를 다시 가져오면 같다" 왕복 검사가 빨강인 것을 본 뒤 고쳤습니다. 행 수만 보는 검사는 빈 시트에서도 통과했습니다.
+   - **기존 배포본(0.18.12)은 1904 날짜 체계 파일의 날짜를 4년 1일 앞당겨 가져왔습니다**(`45b462d`). 0.18.12는 `cellDates` 읽기와 쓰기가 모두 1904 보정을 빼먹었고, 픽스처도 같은 0.18로 만들어 두 오류가 서로 상쇄돼 검사가 초록이었습니다. 옛 `date1904.xlsx`는 1904 체계 일련번호 45296(= 2028-01-06, 엑셀의 표시와 SheetJS의 `w`도 `1/6/28`)을 담고 있었습니다. 0.20.3으로 다시 만든 픽스처는 ECMA-376 정의대로 43834를 담고(XML에서 직접 확인), 0.18.12로 읽으면 2020-01-04가 되어 기존 단언이 빨강입니다.
+   - **일련번호 60(달력에 없는 1900-02-29)**: 0.20.3은 이것을 1900-02-28로 옮기지 않고 숫자 셀로 줍니다. 설계(Step 8 "SheetJS에 위임")대로 앱 코드는 바꾸지 않았고, 그 칸이 든 열은 `text`로 추론되며 사용자가 `date`로 지정하면 그 칸은 보고서에 변환 실패로 남는다(날짜를 만들어 내지 않는다)는 것을 단위·E2E에 못박았습니다. `DESIGN.md` Step 8 예외 처리에 두 동작을 적었습니다.
+   - `verify`: Apple Numbers 쓰기 템플릿의 하이퍼링크 자리표시자 `https://sheetjs.com/` 문자열 하나만 허용 목록에 더했습니다(`0013d9b`). 요청을 만들지 않고 앱은 `bookType: 'xlsx'`만 씁니다.
+
+2. **두 탭 동시 열기 E2E**(`f94574b`). 같은 컨텍스트의 두 페이지(원점이 같아 BroadcastChannel·IndexedDB를 실제로 공유)로 검사합니다. 뒤 탭은 읽기 전용·안내 토스트·저장 버튼 잠김, 앞 탭을 닫으면 잠금이 남지 않고, 새로 고친 탭은 자기 자신을 다른 탭으로 보지 않습니다. `held` 응답을 끊은 빌드에서 `"otherTab"` 대신 `"none"`으로 빨강인 것을 확인했습니다.
+
+3. **"인덱스가 오래됨" 배지 E2E**(`d40dc54`). 인덱스를 만든 뒤 열을 추가하면 버튼이 "검색 인덱스 (오래됨)"과 안내 툴팁을 보이고, 툴팁대로 껐다가 다시 만들면 풀립니다. 판정을 늘 `false`로 만든 빌드에서 빨강인 것을 확인했습니다.
+
+4. **작업 사본 목록에서 데이터 유실 버그를 찾아 고쳤습니다**(`b3f74a9`). 설정 → 작업 사본 목록에서 "열기"를 누르면 대화상자가 열린 채 그 행이 남았고, 같은 행의 "버리기"를 누르면 러스트 `remove_workcopy`가 열린 DB를 닫고 폴더를 지웠습니다. 화면은 복구한 변경이 열려 있다고 보여 주지만 모든 질의·저장이 `E_DB_QUERY(database is not open)`로 실패했고 복구한 변경은 디스크에서 사라졌습니다(데스크톱 E2E로 재현, `workcopies/`가 빈 것 확인). dirty 사본이 있는 파일을 일반 열기로 복구한 뒤 설정을 열어도 같은 행이 나왔습니다. 스토어의 모든 `db.open`을 `openDb` 하나로 모아 열린 사본의 키를 기억하고, `listWorkcopies`는 그 사본을 빼고 `discardWorkcopy`는 거부합니다. 설정 대화상자는 열기에 성공한 행을 뺍니다. `test:native`(실제 rusqlite)에 재현 테스트를 넣어 빨강을 본 뒤 고쳤습니다. 기존 "dirty 사본이 둘 이상" 테스트는 스토어를 거치지 않는 닫기(앱 종료 흉내) 뒤 같은 스토어를 다음 실행처럼 썼는데, 실제 재시작처럼 새 스토어로 보게 바꿨습니다.
+
+5. **작업 사본 목록 UI 데스크톱 E2E**(`62eb535`). WebDriver 세션을 지우면 tauri-driver가 앱을 저장 없이 끝내므로 dirty 사본을 실제로 남길 수 있습니다. 세 번의 앱 실행으로: (1) 기존 시나리오 끝(원본 변경으로 저장 취소)에서 끝내 사본을 남기고, (2) 시작 안내("…작업 사본에 남아 있습니다")를 확인한 뒤 새 파일을 저장·편집한 채 끝내고, (3) 설정에 두 사본이 보이고, 하나는 포커스 + Enter(WebDriver Actions)로 버리고, 다른 하나는 열면 행이 빠지고 변경이 복구되며, 저장 뒤에는 이 실행의 사본이 목록에 남지 않습니다.
+
+6. **Windows WebView2 데스크톱 E2E는 켜려다 되돌렸습니다**(`1f0580d` → `0b936ae` → `59b0788` → `402daf7`). 세 번의 CI에서 차례로:
+   - `run.mjs`가 `npx.cmd`를 셸 없이 띄워 빌드 단계에서 `status null`로 멈췄습니다(Windows Node 20의 CVE-2024-27980 수정). tauri CLI의 `tauri.js`를 Node로 직접 부르게 고쳤습니다.
+   - 레지스트리에서 WebView2 런타임 버전을 읽어 같은 버전의 Edge Driver를 받는 단계가 동작했습니다(런타임·드라이버 모두 152.0.4191.66).
+   - 그러나 세션 생성이 60초 뒤 `DevToolsActivePort file doesn't exist`로 실패했습니다. 실패 시 진단 단계(run 35809985584): **테스트 앱은 Windows에서 뜨고 15초 뒤에도 살아 있습니다**(WebView2 프로세스 6개). 그런데 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`로 띄워도 포트가 열리지 않습니다. wry 0.55.1은 WebView2 환경을 만들 때 브라우저 인자(기본 `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`)와 데이터 폴더를 늘 API로 지정하므로(`webview2/mod.rs:294-327`), Edge Driver가 환경 변수로 주는 원격 디버깅 인자·데이터 폴더가 적용되지 않는 것으로 보입니다.
+   - 고치려면 창을 설정 대신 코드로 만들어 표준 WebView2 환경 변수를 앱이 받아 넘겨야 합니다. 데스크톱 셸의 기동 경로를 바꾸는 일이고 Windows에서는 CI 왕복으로만 확인할 수 있어 이번에는 하지 않았습니다. 한 번도 통과한 적 없는 새 잡을 켜 두면 PR CI가 빨갛게 남으므로 이 세션이 켠 matrix 값만 되돌렸습니다(기존 검사를 끈 것이 아닙니다). Edge Driver 단계와 실패 진단은 `e2e` 값에 묶여 있어 다시 켜면 그대로 돕니다. `DESIGN.md`·`docs/desktop.md`의 문구도 실제 상태(Linux만)로 맞췄습니다.
+
+7. **5 GB 데스크톱 성능 측정**(`d2477be` 도우미 분리 → `39708f6` `test/desktop/perf.mjs`). 사용: `node test/desktop/perf.mjs <경로>`(Linux는 `xvfb-run`으로 감쌈).
+   - **픽스처**: `gen-fixture --rows 5000000 --db`로는 만들 수 없습니다(wasm 엔진이 DB 전체를 메모리에 둠). 스크립트가 30만 행 기반 DB(wasm)를 만든 뒤 앱 안에서(rusqlite) `INSERT … SELECT`로 500만 행까지 늘려 저장합니다. 결과 5,242,847,232 bytes, 500만 행 × 20열(8장 규격). 측정 뒤에는 저장 전 파일(`.bak`)을 원본 자리로 되돌려 같은 픽스처를 재사용합니다(되돌리기 전에는 측정마다 3,000행씩 늘었습니다).
+   - **측정 방식에서 바로잡은 것**: 러스트 `open_ms`는 열기 시작부터라 사본 복사를 포함합니다(`core/src/db.rs:224`). 복사를 빼고 판정합니다. 복사·저장의 기준은 원본을 캐시에 올린 뒤 잰 "복사 + fsync"입니다(앱의 복사·저장은 `sync_all`로 끝남). 식은 캐시의 기준은 실행마다 2배 넘게 흔들렸고 그 복사가 캐시를 데워 사본 복사만 빨라 보였습니다. `run_batch`의 장문은 픽스처와 같은 분포(`gen-fixture`의 `longCell`)를 씁니다. 처음에 넣은 약 960자 장문(셀당 약 2.9 KB)으로는 129~170 ms였습니다. 바이너리는 **릴리스 프로필**로 잽니다. 디버그 프로필은 번들 SQLite(C)를 최적화 없이 컴파일해 저장·질의가 제품과 다릅니다.
+   - **결과(릴리스, 이 컨테이너의 Linux VM·ext4, 세 번)**:
+
+     | 항목 | 예산 | 실행 1 | 실행 2 | 실행 3 | 판정 |
+     |---|---|---|---|---|---|
+     | 열기(사본 복사 제외) | 2초 | 2 ms | 2 ms | 3 ms | 통과 |
+     | 작업 사본 복사 | 복사+fsync의 1.2배 | 9.6초(1.54배) | 13.7초(3.03배) | 10.4초(2.44배) | **초과** |
+     | 창 질의(끝부분 200행) | 50 ms | 9 ms | 10 ms | 7 ms | 통과 |
+     | `run_batch` 1,000행(장문 2열) | 100 ms | 33 ms | 29 ms | 27 ms | 통과 |
+     | 5 GB 저장 | 복사+fsync의 1.5배 | 5.8초(0.93배) | 5.6초(1.24배) | 6.8초(1.91배) | **경계**(3번 중 2번 통과) |
+     | 최대 상주 메모리(앱 프로세스) | 500 MB | 269 MB | 269 MB | 269 MB | 통과 |
+
+     기준 "복사 + fsync"는 3.6~6.3초로 흔들렸고, 저장의 절대 시간은 5.6~6.8초로 안정적이었습니다. WebKitWebProcess는 따로 약 285 MB입니다. 끝부분 창 질의의 **첫 호출**은 벽시계로 약 0.75~0.84초인데, `query.window`가 행 수를 함께 세기 때문입니다(500만 행 `COUNT(*)`, 이후 캐시). `DESIGN.md` 1장이 "남는 상한"으로 적은 count 지연 그 자체입니다.
+   - **작업 사본 복사가 넘는 원인**: `workcopy.rs`의 `copy_original`은 64 MB마다 진행률을 보고하려고 8 MB 버퍼로 읽고 씁니다. 같은 5 GB 파일로 러스트의 세 방식을 직접 비교했습니다(릴리스, 끝에 `sync_all`): 8 MB 루프 6.1~20.2초, **64 MB씩 끊은 `std::io::copy` 3.1~3.7초**(Linux에서 `copy_file_range`를 씀, 조각 사이에서 진행률 보고 가능), `std::fs::copy` 4.0~4.5초. `dd bs=8M conv=fsync`도 9~21초(`cp` + `sync`는 3.3~4.4초)로 같은 경향입니다. 아래 "고치지 않은 것"에 제안을 적었습니다.
+
+8. **`E_MEM`을 실제 Chromium(141 headless)에서 실측했습니다**(커밋하지 않은 스크래치 스크립트. 세션 H가 적은 대로 2 GB 채우기는 상시 E2E에 넣지 않습니다). Worker 모드에서 10 MB `zeroblob`을 199개(약 1.99 GB) 넣자 `SQLITE_NOMEM` → `E_MEM`이 났고 탭은 죽지 않았습니다. 트랜잭션은 롤백되고 DB는 계속 쓸 수 있으며(199행 조회), 잠금 없이 dirty가 남습니다. 이 상태에서 저장(다운로드 폴백)을 누르면 스냅샷 직렬화가 `SQLITE_NOMEM`으로 실패하고 1초 안에 "메모리가 부족합니다. 작업을 중단했습니다. 저장한 뒤 앱을 다시 시작하세요. (E_MEM)" 토스트가 뜨며, dirty·revision이 그대로이고 앱은 계속 쓸 수 있습니다. 문구의 문제는 아래 "고치지 않은 것"에 적었습니다.
+
+9. **CI `perf`의 메모리 측정을 고쳤습니다**(`31c1279`). `402daf7`의 `perf` 잡(run 35810754630)이 `app-300k.peakRssBytes` 1,163,759,616으로 기준선(856,301,568) 대비 36% 회귀라며 빨강이었습니다. 이 값은 `db.snapshot` RPC 동안 렌더러 RSS를 100 ms 간격으로 표본한 최대값인데, 스냅샷(130~200 ms)의 짧은 봉우리(직렬화 바이트 + transfer, 약 +300 MB)를 표본이 잡는지에 따라 달라집니다(CI에서 표본 2개일 때 857 MB, 3개일 때 1,164 MB). 코드 원인이 아닌 것은 로컬에서 확인했습니다. 통과했던 `d40dc54`와 HEAD가 같은 조건에서 1.031~1.045 GB와 1.043~1.051 GB였고(모두 표본 3개), 이 경로(Worker 직접 RPC)는 그 사이의 변경(스토어·설정 대화상자)을 지나지 않습니다. 기준선을 올리지 않고 측정을 고쳤습니다. 작업 직전에 렌더러의 `/proc/<pid>/clear_refs`로 최고 수위를 되돌리고 작업 뒤 `VmHWM`을 읽습니다(로컬 세 번 1,158,275,072~1,158,664,192 bytes, 흔들림 0.4 MB 안). 키는 `saveHwmBytes`로 바꿨고, 그 푸시의 CI(run 35811610414, 새 키는 건너뜀·회귀 없음)가 잰 1,163,780,096 bytes를 기준선에 넣었습니다(`d98dd27`. 바이트 항목은 보정하지 않으므로 시간 항목과 보정값의 짝은 그대로). **진짜 봉우리는 약 1.16 GB로, 8장 절대 예산(1.2 GiB)의 여유가 약 10%뿐입니다.** 지금까지의 857 MB는 봉우리를 놓친 값이었습니다.
+
+10. **`concurrency` 취소를 실측했습니다.** 01:48:46에 `d40dc54`를 푸시하자 앞 커밋 `45b462d`의 `ci` run 35807661515와 `desktop` run 35807661516이 01:49:09~11에 `cancelled`로 끝났습니다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **362개** 통과(개수 변화 없음. SheetJS·1904·일련번호 60 단언은 기존 테스트 안에서 바뀜). lint·prettier·`tsc --strict` 포함.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,858,000 bytes**(3.68 MiB / 예산 6 MiB), 세션 K의 3,783,864 bytes에서 **+74,136 bytes**(SheetJS 0.20.3이 메인·Worker 번들에 각각 약 36 KB 더 큼). 외부 참조 0, vendor 체크섬 OK.
+- [x] `npm run test:e2e`: **70개** 통과(68 + 두 탭 + 인덱스 배지).
+- [x] `npm run test:native`: **29개** 통과(28 + 열린 작업 사본). 수정 전 빨강 확인.
+- [x] `npm run test:desktop`(tauri-driver 2.0.6 + WebKitGTK + Xvfb): **Linux 통과**, 세 번의 앱 실행 시나리오 포함.
+- [x] `cargo fmt --check`: 통과(러스트 코드는 바꾸지 않음).
+- [x] CI: SheetJS 커밋을 포함한 `d40dc54`에서 `ci`(run 35807837716: check·build·e2e·perf)와 `desktop`(run 35807837601: 세 OS)이 초록. `62eb535`까지 담은 `1f0580d`·`0b936ae`·`59b0788`의 `desktop` Linux·macOS 잡이 초록(Windows는 위 6번). `402daf7`의 `perf`는 위 9번의 이유로 빨강이었고, 측정을 고친 `31c1279`에서 `check-build-e2e`·`perf`가 초록(run 35811610414).
+- [x] `CLAUDE.md` 7.1: `innerHTML`에 사용자 데이터가 닿는 곳을 더하지 않았고(설정 목록은 `textContent`), 모드 문자열 비교를 더하지 않았으며, `src/db`·`src/import`에 SQL 문자열 연결을 더하지 않았습니다.
+
+**이어받은 미확인 항목의 결과**
+
+- SheetJS 0.20.3 갱신(CVE-2023-30533, CVE-2024-22363): **해소**(위 1번). 파일이 공식 배포본과 바이트 단위로 같은지는 공식 해시를 받을 수 없어 대조하지 못했습니다(아래 미확인).
+- 두 탭 동시 열기의 실제 브라우저 시나리오: **해소**(Chromium, 위 2번).
+- "인덱스가 오래됨" 배지의 실제 표시: **해소**(위 3번).
+- 설정 대화상자의 작업 사본 목록 UI: **해소**(Linux WebKitGTK, 위 5번). 그 과정에서 데이터 유실 버그를 고쳤습니다(위 4번).
+- 메모리 부족(`E_MEM`) 경로: **Chromium에서 해소**(위 8번). 삽입·저장 두 경로 모두 `E_MEM`, 롤백, 잠금 없음, 계속 사용 가능.
+- `concurrency`의 실제 취소 동작: **해소**(위 10번).
+- 5 GB 픽스처의 데스크톱 성능 예산: **측정함**(위 7번). 여섯 항목 중 넷 통과, 작업 사본 복사 초과, 저장 경계. Linux만.
+- Windows(WebView2) 실측: **부분**. 앱이 Windows에서 뜨고 살아 있는 것은 처음 확인했습니다. E2E는 위 6번의 이유로 돌지 않습니다.
+
+**점검했지만 고치지 않은 것**
+
+- **작업 사본 복사가 예산의 1.5~3배**(위 7번). 제안: Linux에서 `copy_original`을 64 MB씩 끊은 `std::io::copy`(`(&src).take(64 MB)`)로 바꾸면 진행률 보고를 유지한 채 3~4초로 내려갑니다(같은 파일로 실측). Windows·macOS의 `std::io::copy`는 커널 복사를 쓰지 않고 작은 버퍼로 내려가므로 지금 루프를 두어야 하고(`cfg(target_os = "linux")`), 그 두 OS의 5 GB 복사 시간은 따로 재야 합니다. 러스트 코어의 복사 경로를 플랫폼마다 나누는 일이라 사용자 확인 뒤에 합니다.
+- **`E_MEM` 안내 문구가 저장 실패일 때 모순입니다.** "저장한 뒤 앱을 다시 시작하세요"는 삽입 실패에는 맞지만, 저장 자체가 `E_MEM`으로 실패했을 때도 같은 문구가 떠 방금 실패한 일을 다시 하라고 안내합니다. 또 wasm의 `maxFileBytes`(1.5 GB) 검사는 열기·가져오기·붙여넣기에만 걸려 있어, 편집을 쌓으면 저장할 수 없는 크기(약 2 GB)까지 경고 없이 커집니다. 어떤 안내가 맞을지(최근 변경 되돌리기, 데이터 삭제, 데스크톱 앱 권유 등)는 문구·UX를 정하는 일이라 남깁니다.
+- **Windows E2E의 WebView2 인자**(위 6번). 다음 단계 제안: 앱이 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`·`WEBVIEW2_USER_DATA_FOLDER`가 있으면 그 값을 wry의 `additional_browser_args`(기본 인자와 합쳐)·데이터 폴더로 넘기게 창을 코드로 만든다. 그 전에 빈 Tauri 2 템플릿으로 같은 러너에서 tauri-driver가 붙는지 먼저 보면 원인을 확정할 수 있습니다.
+- **`docs/desktop.md`의 "구조" 절이 설계와 어긋납니다.** Worker가 `SharedArrayBuffer`·`Atomics.wait`로 메인에 넘긴다고 적혀 있지만, 세션 I 이후 기본 경로는 엔진 프로토콜(`jdr://localhost/call`)에 대한 동기 XHR이고 공유 버퍼 중계는 폴백입니다(`DESIGN.md` D-15). 문서만의 문제라 이번 범위에 넣지 않았습니다.
+
+**미확인 (후속에서 이어받음)**
+
+- **Windows(WebView2)의 데스크톱 E2E**: 위 6번의 WebView2 인자 문제로 세션을 만들지 못합니다. Windows에서 WebView 안의 동작(엔진 프로토콜 `http://jdr.localhost/call`에 대한 Worker 동기 XHR, 저장·`.bak`·복원, 작업 사본 목록)은 여전히 **미확인**입니다.
+- **작업 사본 복사 예산 초과와 저장의 경계 판정**: 위 제안을 적용할지 결정이 필요합니다. 성능은 이 컨테이너의 Linux VM(ext4)에서만 쟀고, 8장의 측정 환경(4코어 노트북)·Windows·macOS에서는 **미확인**입니다(macOS APFS의 `fs::copy`는 클론이라 결과가 크게 다를 수 있습니다).
+- **SheetJS 파일 무결성**: 공식 배포본의 해시와 대조하지 못했습니다(**미확인**). `cdn.sheetjs.com`에 닿는 환경에서 `sha256sum`을 `vendor/CHECKSUMS`의 값과 견주면 끝납니다.
+- **`E_MEM`의 다른 브라우저**: Firefox·Safari에서 NOMEM보다 탭 종료가 먼저 오는지는 **미확인**입니다(Chromium은 약 2 GB에서 NOMEM이 먼저였습니다).
+- **이 기록을 담은 푸시(기준선 `d98dd27` 포함)의 CI 결과**: **미확인**(이 커밋 뒤에 확인해 적습니다).
+- `push`(main) 경로: 병합 때 처음 돕니다(세션 K의 항목 그대로, **미확인**).
+- 이번에 고르지 않은 항목(30만 행 내보내기 메모리, File System Access 실측, 한글 파일 이름의 `<a download>`, Firefox·Safari, macOS WKWebView, 스크린 리더·실제 한글 IME 등)은 세션 K까지의 목록 그대로 **미확인**입니다.
