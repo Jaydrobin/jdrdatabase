@@ -123,6 +123,71 @@ test('새 DB → 저장(다운로드) → 다시 열기 → 같은 db_id와 revi
   await expect(page.locator('.jdr-toolbar__file')).toHaveText('database.db');
 });
 
+/**
+ * 두 번째 탭을 첫 탭과 같은 조건(폴백 경로, 확인 창 수락)으로 연다. 같은 컨텍스트의 페이지라 원점이 같아
+ * BroadcastChannel과 IndexedDB를 첫 탭과 실제로 공유한다.
+ * @param {import('@playwright/test').BrowserContext} context
+ */
+async function openSecondTab(context) {
+  const other = await context.newPage();
+  await other.addInitScript(() => {
+    const w = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (window));
+    delete w.showOpenFilePicker;
+    delete w.showSaveFilePicker;
+  });
+  other.on('dialog', (dialog) => void dialog.accept());
+  await other.goto(PAGE_URL);
+  await waitReady(other);
+  return other;
+}
+
+test('두 탭: 같은 파일을 연 뒤 탭은 읽기 전용이고, 앞 탭을 닫거나 새로 고친 뒤에는 잠금이 남지 않는다', async ({
+  page,
+  context,
+}) => {
+  // 파일을 만든다. 새 DB는 잠금을 쥐지 않으므로(store.newDatabase) 파일을 열어야 잠금이 생긴다.
+  const downloadPromise = page.waitForEvent('download');
+  await page.click('[data-action="save"]');
+  const download = await downloadPromise;
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'jdr-e2e-'));
+  const saved = path.join(dir, download.suggestedFilename());
+  await download.saveAs(saved);
+  await expect.poll(async () => (await state(page))?.meta.revision).toBe('1');
+  const dbId = (await state(page))?.meta.db_id;
+
+  // A: 파일을 연다 → 잠금을 쥔다.
+  await page.locator(`input.${FILE_INPUT_CLASS}`).setInputFiles(saved);
+  await expect.poll(async () => (await state(page))?.file.name).toBe('database.db');
+  expect((await state(page))?.readOnly).toBe('none');
+
+  // B: 같은 파일을 연다 → 읽기 전용, 안내, 저장·가져오기 잠김.
+  const other = await openSecondTab(context);
+  await other.locator(`input.${FILE_INPUT_CLASS}`).setInputFiles(saved);
+  await expect.poll(async () => (await state(other))?.meta.db_id).toBe(dbId);
+  expect((await state(other))?.readOnly).toBe('otherTab');
+  await expect(other.locator('.jdr-toast--info')).toContainText(
+    '다른 탭이 이 데이터베이스를 편집 중이어서 읽기 전용으로 열었습니다.',
+  );
+  await expect(other.locator('.jdr-toolbar__readonly')).toHaveText('읽기 전용');
+  await expect(other.locator('[data-action="save"]')).toBeDisabled();
+  // 앞 탭은 그대로 쓸 수 있다.
+  expect((await state(page))?.readOnly).toBe('none');
+
+  // A를 닫으면 잠금이 풀린다: B가 다시 열면 쓸 수 있다.
+  await page.close({ runBeforeUnload: true });
+  await other.locator(`input.${FILE_INPUT_CLASS}`).setInputFiles(saved);
+  await expect.poll(async () => (await state(other))?.readOnly).toBe('none');
+  await expect(other.locator('.jdr-toolbar__readonly')).toHaveText('');
+  await expect(other.locator('[data-action="save"]')).toBeEnabled();
+
+  // 새로 고친 탭은 새로 고치기 전의 자기 자신을 "다른 탭"으로 보지 않는다.
+  await other.reload();
+  await waitReady(other);
+  await other.locator(`input.${FILE_INPUT_CLASS}`).setInputFiles(saved);
+  await expect.poll(async () => (await state(other))?.meta.db_id).toBe(dbId);
+  expect((await state(other))?.readOnly).toBe('none');
+});
+
 test('SQLite가 아닌 파일과 손상 파일은 오류 코드로 거부하고 새 DB로 돌아간다', async ({ page }) => {
   for (const [file, code] of [
     ['not-sqlite.txt', 'E_FILE_NOT_SQLITE'],
