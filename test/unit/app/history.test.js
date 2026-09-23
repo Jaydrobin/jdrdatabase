@@ -29,13 +29,15 @@ async function setup() {
   });
   const idb = createMemoryIdb();
   const autosave = createAutosave({ idb });
-  /** @type {Array<{ kind: 'error' | 'info', value: string }>} */
+  /** @type {Array<{ kind: 'error' | 'info' | 'warn', value: string }>} */
   const notices = [];
   const notify = {
     /** @param {{ code: string }} err */
     error: (err) => notices.push({ kind: 'error', value: err.code }),
     /** @param {string} key */
     info: (key) => notices.push({ kind: 'info', value: key }),
+    /** @param {string} key */
+    warn: (key) => notices.push({ kind: 'warn', value: key }),
   };
   const store = createStore({
     client,

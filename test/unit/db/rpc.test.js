@@ -113,6 +113,26 @@ test('db.snapshot: bumpRevision이면 revision·saved_at·saved_by를 기록하�
   client.close();
 });
 
+test('db.size: 직렬화하면 나올 바이트 수와 같고, 쓰기로 커지며, 배타 op가 아니다', async () => {
+  const { client } = await readyClient();
+  const empty = await client.call('db.size');
+  const snap = await client.call('db.snapshot', {});
+  assert.equal(empty.bytes, snap.bytes.byteLength);
+  await client.call('engine.exec', { sql: 'CREATE TABLE b (x BLOB) STRICT' });
+  await client.call('engine.exec', {
+    sql: 'INSERT INTO b (x) VALUES (zeroblob(?))',
+    params: [300_000],
+  });
+  const grown = await client.call('db.size');
+  assert.ok(grown.bytes > empty.bytes + 300_000, `${grown.bytes}`);
+  assert.equal(grown.bytes, (await client.call('db.snapshot', {})).bytes.byteLength);
+  // 지운 행의 페이지는 freelist로 남아 파일 크기가 줄지 않는다(직렬화 크기와 같게 센다).
+  await client.call('engine.exec', { sql: 'DELETE FROM b' });
+  assert.equal((await client.call('db.size')).bytes, grown.bytes);
+  assert.equal(isExclusiveOp('db.size'), false);
+  client.close();
+});
+
 test('db.open: 메타 없는 외부 파일은 unmanaged로 열리고 schema.adopt가 등록한다', async () => {
   const { client } = await readyClient();
   await client.call('db.open', {});

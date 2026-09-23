@@ -178,7 +178,7 @@ async function setup(answers = {}, patchFs) {
   const fsx = nativeFs();
   /** @type {string[]} */
   const asked = [];
-  /** @type {Array<{ kind: 'error' | 'info', value: string, params?: unknown, saving?: boolean }>} */
+  /** @type {Array<{ kind: 'error' | 'info' | 'warn', value: string, params?: unknown, saving?: boolean }>} */
   const notices = [];
   // 알림이 뜬 시점의 저장 뮤텍스를 함께 남긴다(저장 성공 알림은 뮤텍스를 놓기 전에 뜬다).
   /** @type {import('../../src/app/store.js').Store | null} */
@@ -210,6 +210,8 @@ async function setup(answers = {}, patchFs) {
         notices.push({ kind: 'error', value: err.code, saving: made?.getState().saving }),
       info: (key, params) =>
         notices.push({ kind: 'info', value: key, params, saving: made?.getState().saving }),
+      warn: (key, params) =>
+        notices.push({ kind: 'warn', value: key, params, saving: made?.getState().saving }),
     },
     deviceName: '데스크톱',
     defaultFileName: 'database.db',

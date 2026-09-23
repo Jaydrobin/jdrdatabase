@@ -290,6 +290,10 @@ body {
   background: var(--jdr-danger-bg);
 }
 
+.jdr-toast--warn {
+  background: var(--jdr-warning-bg);
+}
+
 .jdr-toast__message {
   flex: 1 1 auto;
   word-break: break-word;

@@ -55,6 +55,12 @@ export const en = Object.freeze({
     '{count} of them were skipped because the target table is now an external (read-only) table.',
   'file.backupSkipped': 'The file is over 200 MB, so the pre-save backup was skipped.',
   'file.backupFailed': 'The pre-save backup could not be made ({code}). Saving continues.',
+  'file.saveMemFailed':
+    'Out of memory, so the database was not saved. Nothing was written to the file and your changes are still in this window. The database is too large to save in the browser. Export the tables to CSV and use the desktop app for data of this size.',
+  'file.sizeWarn':
+    'The database has grown to {size}, past the recommended browser size ({limit}). If it grows further, editing or saving may fail when memory runs out. Save now, and use the desktop app for larger data.',
+  'file.sizeOver':
+    'The database has grown to {size}, past the largest size the browser can open ({limit}). A file saved at this size cannot be reopened in the browser, and saving may also fail for lack of memory. Export the tables to CSV and use the desktop app.',
   'unload.dirty': 'There are unsaved changes.',
   'confirm.discard.title': 'Unsaved changes',
   'confirm.discard.message':

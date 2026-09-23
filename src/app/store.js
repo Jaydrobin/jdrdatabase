@@ -8,6 +8,7 @@
 import { judge } from './revision.js';
 import { normalizeViewSpec, pruneViewSpec, toggleSort } from '../db/query.js';
 import { AppError, toAppError } from '../util/errors.js';
+import { formatBytes } from '../util/bytes.js';
 
 /** @typedef {import('../db/client.js').Client} Client */
 /** @typedef {import('../db/engine.js').EngineCapabilities} EngineCapabilities */
@@ -90,8 +91,9 @@ export const MIN_COLUMN_WIDTH = 40;
 
 /**
  * @typedef {object} Notifier
- * @property {(err: AppError) => void} error
+ * @property {(err: AppError, key?: MessageKey) => void} error `key`를 주면 `error.<코드>` 대신 그 문구로 알린다
  * @property {(key: MessageKey, params?: MessageParams) => void} info
+ * @property {(key: MessageKey, params?: MessageParams) => void} warn 오류는 아니지만 놓치면 안 되는 안내
  */
 
 /**
@@ -649,6 +651,8 @@ export function createStore(deps) {
    * @type {string | null}
    */
   let openWorkcopyKey = null;
+  /** 크기 경고 단계(`checkDbSize`): 0 권장 크기 아래, 1 `warnFileBytes` 이상, 2 `maxFileBytes` 이상. */
+  let sizeLevel = 0;
 
   /**
    * `db.open`을 부르고 열린 작업 사본의 키를 기억한다. 스토어의 모든 열기는 이 함수를 거친다. 열기가 실패하면
@@ -661,7 +665,38 @@ export function createStore(deps) {
     openWorkcopyKey = null;
     const opened = await client.call('db.open', args, options);
     openWorkcopyKey = opened.workcopy?.workcopyKey ?? null;
+    await checkDbSize({ baseline: true });
     return opened;
+  }
+
+  /**
+   * 편집·가져오기로 커진 DB의 크기 경고(Step 10). 열기 때의 상한 검사는 파일 크기만 보므로, 커맨드·가져오기 뒤에
+   * `db.size`로 재어 `warnFileBytes`·`maxFileBytes`를 처음 넘을 때 한 번씩 알린다. 상한이 없으면(native) 재지 않는다.
+   * `baseline`이면 알리지 않고 단계만 정한다(열기 직후. 큰 파일은 열 때 이미 확인받았다).
+   * @param {{ baseline?: boolean }} [options]
+   * @returns {Promise<void>}
+   */
+  async function checkDbSize(options = {}) {
+    if (!Number.isFinite(caps.warnFileBytes)) return;
+    /** @type {number} */
+    let bytes;
+    try {
+      ({ bytes } = await client.call('db.size'));
+    } catch (err) {
+      const appErr = toAppError(err);
+      // 열기와 겹친 것은 미룸이다. 다음 변경에서 다시 잰다. 그 밖의 실패는 알리되 이미 적용된 변경은 그대로다.
+      if (appErr.code !== 'E_DB_BUSY') notify.error(appErr);
+      return;
+    }
+    const level = bytes >= caps.maxFileBytes ? 2 : bytes >= caps.warnFileBytes ? 1 : 0;
+    const previous = sizeLevel;
+    sizeLevel = level;
+    if (options.baseline || level <= previous) return;
+    const limit = level === 2 ? caps.maxFileBytes : caps.warnFileBytes;
+    notify.warn(level === 2 ? 'file.sizeOver' : 'file.sizeWarn', {
+      size: formatBytes(bytes),
+      limit: formatBytes(limit),
+    });
   }
 
   /**
@@ -938,7 +973,9 @@ export function createStore(deps) {
     } catch (err) {
       const appErr = toStoreError(err);
       // 자동 저장이 가져오기·내보내기(배타 op)와 겹친 것은 오류가 아니라 미룸이다.
-      if (!(options.auto && appErr.code === 'E_DB_BUSY')) notify.error(appErr);
+      // 스냅샷의 메모리 부족에는 "저장한 뒤 다시 시작"(`error.E_MEM`)이 맞지 않는다. 방금 실패한 일이 저장이다.
+      if (appErr.code === 'E_MEM') notify.error(appErr, 'file.saveMemFailed');
+      else if (!(options.auto && appErr.code === 'E_DB_BUSY')) notify.error(appErr);
       return false;
     } finally {
       duringSave = null;
@@ -1434,6 +1471,7 @@ export function createStore(deps) {
       }
       // 커맨드는 DB 내용을 바꿨다. 그리드는 블록 캐시를 버리고 다시 읽는다(D-06).
       if (options.refresh !== false) emit('data:changed');
+      await checkDbSize();
     },
 
     onCommand(handler) {
@@ -1678,6 +1716,7 @@ export function createStore(deps) {
       await store.refreshTables();
       if (args.target.kind === 'new') store.selectTable(report.tableId);
       emit('data:changed');
+      await checkDbSize();
       return report;
     },
 

@@ -429,7 +429,11 @@ async function start(shell) {
     autosave,
     tablock,
     prompts: createPrompts(),
-    notify: { error: (err) => shell.toasts.error(err), info: (k, p) => shell.toasts.info(k, p) },
+    notify: {
+      error: (err, key) => shell.toasts.error(err, key),
+      info: (k, p) => shell.toasts.info(k, p),
+      warn: (k, p) => shell.toasts.warn(k, p),
+    },
     deviceName: current.deviceName,
     defaultFileName: t('file.defaultName'),
     saveGzip: current.saveGzip,

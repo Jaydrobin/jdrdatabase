@@ -86,6 +86,7 @@ import {
  *   'db.open': { args: { bytes?: Uint8Array | ArrayBuffer, dbId?: string, adoptExternal?: boolean, originalPath?: string, discardWorkcopy?: boolean, workcopyKey?: string }, result: OpenResult },
  *   'db.snapshot': { args: { bumpRevision?: boolean, savedBy?: string }, result: { bytes: Uint8Array<ArrayBuffer>, meta: Meta } },
  *   'db.save': { args: { originalPath: string, bumpRevision?: boolean, savedBy?: string, force?: boolean }, result: { meta: Meta, size: number, mtime: number, backupPath: string | null } },
+ *   'db.size': { args: undefined, result: { bytes: number } },
  *   'db.close': { args: { discardWorkcopy?: boolean } | undefined, result: null },
  *   'schema.adopt': { args: undefined, result: OpenResult },
  *   'schema.list': { args: undefined, result: { tables: TableInfo[] } },
@@ -372,6 +373,14 @@ export function createDispatcher(options) {
           : {};
       const bytes = active.snapshot();
       return { result: { bytes, meta }, transfer: [bytes.buffer] };
+    },
+
+    'db.size': async () => {
+      const active = requireEngine();
+      // 직렬화하면 나올 바이트 수. 비어 있는 페이지(freelist)도 파일에 들어가므로 page_count로 센다.
+      const count = active.exec('PRAGMA page_count').rows[0]?.[0];
+      const size = active.exec('PRAGMA page_size').rows[0]?.[0];
+      return { bytes: Number(count ?? 0) * Number(size ?? 0) };
     },
 
     'db.save': async (args) => {

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../../../src/app/store.js';
+import { formatBytes } from '../../../src/util/bytes.js';
 import { AppError } from '../../../src/util/errors.js';
 import { createClient, createInlineTransport } from '../../../src/db/client.js';
 import { createAutosave } from '../../../src/io/autosave.js';
@@ -174,7 +175,7 @@ async function setup(options = {}) {
   const idb = options.idb === undefined ? createMemoryIdb() : options.idb;
   const fsx = fakeFs();
   const p = fakePrompts(options.prompts);
-  /** @type {Array<{ kind: 'error' | 'info', value: string }>} */
+  /** @type {Array<{ kind: 'error' | 'info' | 'warn', value: string, key?: string, params?: unknown }>} */
   const notices = [];
   const autosave = createAutosave({ idb });
   const store = createStore({
@@ -186,8 +187,12 @@ async function setup(options = {}) {
     tablock: createTabLock(),
     prompts: p.prompts,
     notify: {
-      error: (err) => notices.push({ kind: 'error', value: err.code }),
+      error: (err, key) =>
+        notices.push(
+          key ? { kind: 'error', value: err.code, key } : { kind: 'error', value: err.code },
+        ),
       info: (key) => notices.push({ kind: 'info', value: key }),
+      warn: (key, params) => notices.push({ kind: 'warn', value: key, params }),
     },
     deviceName: '테스트 기기',
     defaultFileName: 'database.db',
@@ -310,6 +315,88 @@ test('파일 크기: maxFileBytes 초과는 E_FILE_TOO_LARGE, warnFileBytes 초�
   );
   assert.equal(await store.openPicked({ name: 'huge.db', file: huge, handle: null }), false);
   assert.equal(notices.at(-1)?.value, 'E_FILE_TOO_LARGE');
+});
+
+test('크기 경고(Step 10): 편집으로 warnFileBytes·maxFileBytes를 처음 넘을 때 한 번씩 알리고, 열 때의 크기는 기준일 뿐이다', async () => {
+  const WARN = 300_000;
+  const MAX = 900_000;
+  const { store, client, fsx, notices } = await setup({
+    caps: { warnFileBytes: WARN, maxFileBytes: MAX },
+  });
+  const warns = () => notices.filter((n) => n.kind === 'warn');
+  /** 약 300 KB를 더하는 커맨드를 적용하고 기록한다. */
+  const grow = async () => {
+    const cmd = {
+      type: 'test.grow',
+      tableId: null,
+      do: [{ sql: 'INSERT INTO t (s) VALUES (?)', params: ['x'.repeat(300_000)] }],
+      undo: [{ sql: 'DELETE FROM t WHERE id = (SELECT max(id) FROM t)' }],
+      summary: 'grow',
+    };
+    await client.call('command.apply', { cmd });
+    await store.recordCommand(cmd);
+    return (await client.call('db.size')).bytes;
+  };
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  assert.deepEqual(warns(), []);
+
+  assert.ok((await grow()) >= WARN);
+  assert.deepEqual(
+    warns().map((n) => [n.value, /** @type {{ limit: string }} */ (n.params).limit]),
+    [['file.sizeWarn', formatBytes(WARN)]],
+  );
+  assert.ok((await grow()) < MAX, '두 번째는 같은 단계라 다시 알리지 않는다');
+  assert.equal(warns().length, 1);
+  assert.ok((await grow()) >= MAX);
+  assert.deepEqual(
+    warns().map((n) => n.value),
+    ['file.sizeWarn', 'file.sizeOver'],
+  );
+  await grow();
+  assert.equal(warns().length, 2, '같은 단계에서는 한 번만');
+
+  await store.saveAs();
+  const big = fsx.downloads.at(-1)?.bytes ?? new Uint8Array(0);
+  assert.ok(big.byteLength >= MAX);
+
+  // 새 DB는 기준이 0으로 돌아간다.
+  await store.newDatabase({ force: true });
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  assert.equal(warns().length, 2);
+
+  // 이미 큰 파일을 열면 열 때 확인받았으므로(큰 파일 확인) 다음 편집에서 다시 알리지 않는다.
+  const tooBig = await setup({ caps: { warnFileBytes: WARN, maxFileBytes: big.byteLength + 1 } });
+  assert.equal(await tooBig.store.openPicked(pickedFile('big.db', big)), true);
+  assert.deepEqual(tooBig.asked, ['large']);
+  const cmd = { ...CREATE_T, do: [{ sql: 'INSERT INTO t (s) VALUES (?)', params: ['작은 편집'] }] };
+  await tooBig.client.call('command.apply', { cmd });
+  await tooBig.store.recordCommand(cmd);
+  assert.deepEqual(
+    tooBig.notices.filter((n) => n.kind === 'warn'),
+    [],
+  );
+  client.close();
+  tooBig.client.close();
+});
+
+test('크기 경고: 상한이 없는 엔진(native)은 크기를 재지 않는다', async () => {
+  const { store, client, notices } = await setup({
+    caps: { warnFileBytes: Infinity, maxFileBytes: Infinity },
+  });
+  /** @type {string[]} */
+  const ops = [];
+  const call = client.call;
+  client.call = (op, args, options) => (ops.push(op), call(op, args, options));
+  await client.call('command.apply', { cmd: CREATE_T });
+  await store.recordCommand(CREATE_T);
+  assert.equal(ops.includes('db.size'), false);
+  assert.deepEqual(
+    notices.filter((n) => n.kind === 'warn'),
+    [],
+  );
+  client.close();
 });
 
 test('외부 SQLite 파일: 승인하면 schema.adopt로 등록, 거절하면 새 DB', async () => {
@@ -1257,7 +1344,8 @@ test('오류 주입(Step 10): 스냅샷의 메모리 부족은 E_MEM으로 알�
   await client.call('command.apply', { cmd: CREATE_T });
   await store.recordCommand(CREATE_T);
   assert.equal(await store.save(), false);
-  assert.deepEqual(notices.at(-1), { kind: 'error', value: 'E_MEM' });
+  // 저장이 실패한 것이므로 "저장한 뒤 다시 시작"(error.E_MEM)이 아니라 저장 실패 안내를 쓴다.
+  assert.deepEqual(notices.at(-1), { kind: 'error', value: 'E_MEM', key: 'file.saveMemFailed' });
   const s = store.getState();
   assert.equal(s.dirty, true, '저장되지 않았으므로 dirty 유지');
   assert.equal(s.file.name, null);
