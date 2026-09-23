@@ -390,7 +390,7 @@ scripts/
 .github/workflows/
   ci.yml                         푸시·PR마다 check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정)
   desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux·Windows는 tauri-driver E2E까지(Step 11)
-  release.yml                    `v*` 태그에서 build·verify 뒤 dist/jdrdatabase.html을 GitHub 릴리스에 첨부(CLAUDE.md 7.1: dist/는 릴리스 태그에서만 배포)
+  release.yml                    `v*` 태그 푸시 또는 수동 실행(버전 입력)에서 브라우저 산출물 dist/jdrdatabase.html과 세 OS의 타우리 설치본·Windows 포터블 실행 파일을 한 GitHub 릴리스에 첨부하고 SHA256SUMS에 모두 적는다(CLAUDE.md 7.1: dist/는 릴리스에서만 배포)
 ```
 
 ### 3.2 실행 시 구조
