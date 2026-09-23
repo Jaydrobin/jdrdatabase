@@ -31,7 +31,10 @@ function run(cmd, args, options = {}) {
     cwd: options.cwd ?? ROOT,
     env: options.env ?? process.env,
   });
-  if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed with ${r.status}`);
+  // 실행 자체가 실패하면 status가 null이고 원인은 error에 있다.
+  if (r.status !== 0) {
+    throw new Error(`${cmd} ${args.join(' ')} failed with ${r.status ?? r.error?.message}`);
+  }
 }
 
 export function binaryPath() {
@@ -44,8 +47,10 @@ export async function buildTestApp() {
   step('build: dist/test/tauri/index.html');
   run(process.execPath, [path.join(ROOT, 'build', 'build.mjs'), '--test']);
   step('build: debug desktop binary with the test variant');
-  const tauri = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  run(tauri, ['tauri', 'build', '--debug', '--no-bundle', '--config', TEST_CONFIG], {
+  // npx 대신 CLI 진입 스크립트를 Node로 직접 부른다. Windows의 Node 20은 `.cmd`를 셸 없이 띄우지 않고
+  // (CVE-2024-27980), 셸을 거치면 cmd.exe가 JSON 인자의 따옴표를 깨뜨린다.
+  const cli = path.join(ROOT, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+  run(process.execPath, [cli, 'build', '--debug', '--no-bundle', '--config', TEST_CONFIG], {
     cwd: TAURI_DIR,
   });
 }
