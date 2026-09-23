@@ -12,156 +12,24 @@
  * WebDriver 프로토콜은 fetch로 직접 말한다(런타임 의존 없음). node:test 없이 순서대로 돌리고 실패는 예외로 끝낸다.
  */
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const TAURI_DIR = path.join(ROOT, 'src-tauri');
-const DRIVER_PORT = Number(process.env.JDR_DRIVER_PORT ?? 4444);
-const BASE = `http://127.0.0.1:${DRIVER_PORT}`;
-const TEST_CONFIG = JSON.stringify({
-  build: { frontendDist: '../dist/test/tauri', beforeBuildCommand: '' },
-});
-
-/** @param {string} label */
-function step(label) {
-  console.log(`[desktop] ${label}`);
-}
-
-/**
- * @param {string} cmd
- * @param {string[]} args
- * @param {{ cwd?: string, env?: NodeJS.ProcessEnv }} [options]
- */
-function run(cmd, args, options = {}) {
-  const r = spawnSync(cmd, args, {
-    stdio: 'inherit',
-    cwd: options.cwd ?? ROOT,
-    env: options.env ?? process.env,
-  });
-  if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')} failed with ${r.status}`);
-}
-
-function binaryPath() {
-  if (process.env.JDR_DESKTOP_BINARY) return process.env.JDR_DESKTOP_BINARY;
-  const exe = process.platform === 'win32' ? 'jdrdatabase-desktop.exe' : 'jdrdatabase-desktop';
-  return path.join(TAURI_DIR, 'target', 'debug', exe);
-}
-
-async function buildTestApp() {
-  step('build: dist/test/tauri/index.html');
-  run(process.execPath, [path.join(ROOT, 'build', 'build.mjs'), '--test']);
-  step('build: debug desktop binary with the test variant');
-  const tauri = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  run(tauri, ['tauri', 'build', '--debug', '--no-bundle', '--config', TEST_CONFIG], {
-    cwd: TAURI_DIR,
-  });
-}
-
-/**
- * @param {string} method
- * @param {string} route
- * @param {unknown} [body]
- * @returns {Promise<unknown>}
- */
-async function wd(method, route, body) {
-  const res = await fetch(`${BASE}${route}`, {
-    method,
-    headers: { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const json = /** @type {{ value: unknown }} */ (await res.json());
-  if (!res.ok) {
-    const value = /** @type {{ error?: string, message?: string }} */ (json.value ?? {});
-    throw new Error(
-      `WebDriver ${method} ${route}: ${value.error ?? res.status} ${value.message ?? ''}`,
-    );
-  }
-  return json.value;
-}
-
-/**
- * @param {string} sessionId
- * @param {string} script `arguments[0..]`를 받고 값을 돌려주는 함수 본문. 비동기면 마지막 인자(콜백)에 결과를 준다
- * @param {unknown[]} [args]
- * @param {boolean} [async]
- */
-async function execute(sessionId, script, args = [], async = false) {
-  return wd('POST', `/session/${sessionId}/execute/${async ? 'async' : 'sync'}`, { script, args });
-}
-
-/**
- * 앱의 테스트 훅으로 Promise를 돌려주는 식을 실행한다. 거부는 `{ __error }`로 온다.
- * @param {string} sessionId
- * @param {string} expression `hook`(window.__jdrTest)을 쓰는 식
- * @param {unknown[]} [args]
- */
-async function hook(sessionId, expression, args = []) {
-  const script = `const done = arguments[arguments.length - 1]; const hook = window.__jdrTest; const a = Array.from(arguments).slice(0, -1); Promise.resolve().then(() => (${expression})).then((v) => done(v === undefined ? null : v), (e) => done({ __error: String(e && e.code ? e.code + ': ' + e.message : e) }));`;
-  const value = await execute(sessionId, script, args, true);
-  if (value && typeof value === 'object' && '__error' in value) {
-    throw new Error(String(/** @type {{ __error: string }} */ (value).__error));
-  }
-  return value;
-}
-
-/**
- * @param {string} sessionId
- * @param {string} selector
- */
-async function text(sessionId, selector) {
-  return execute(
-    sessionId,
-    'const el = document.querySelector(arguments[0]); return el ? el.textContent : null;',
-    [selector],
-  );
-}
-
-/**
- * @param {() => Promise<boolean>} predicate
- * @param {string} what
- * @param {number} [timeoutMs]
- */
-async function waitFor(predicate, what, timeoutMs = 20_000) {
-  const started = Date.now();
-  for (;;) {
-    if (await predicate()) return;
-    if (Date.now() - started > timeoutMs) throw new Error(`timeout waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-}
-
-/**
- * 앱을 띄워 상태바가 "준비됨"이 될 때까지 기다린다.
- * @param {string} binary
- * @returns {Promise<string>} 세션 id
- */
-async function startApp(binary) {
-  const created = /** @type {{ sessionId: string }} */ (
-    await wd('POST', '/session', {
-      capabilities: { alwaysMatch: { 'tauri:options': { application: binary } } },
-    })
-  );
-  const id = created.sessionId;
-  step('session created; waiting for app ready');
-  await waitFor(
-    async () => (await text(id, '.jdr-statusbar__item')) === '준비됨',
-    'status ready',
-    60_000,
-  );
-  return id;
-}
-
-/**
- * 세션을 지운다. tauri-driver가 앱 프로세스를 끝내므로 저장하지 않은 변경은 dirty 작업 사본으로 남는다.
- * @param {string} sessionId
- */
-async function stopApp(sessionId) {
-  await wd('DELETE', `/session/${sessionId}`);
-}
+import {
+  binaryPath,
+  buildTestApp,
+  DRIVER_PORT,
+  execute,
+  hook,
+  pressKey,
+  startApp,
+  startDriver,
+  step,
+  stopApp,
+  text,
+  waitFor,
+  wd,
+} from './webdriver.js';
 
 /**
  * 설정 대화상자의 작업 사본 목록 행: 표시 문구와 행 순번.
@@ -191,54 +59,17 @@ async function focusWorkcopyButton(sessionId, name, label) {
   );
 }
 
-/**
- * 포커스된 요소에 실제 키 입력(WebDriver Actions)을 보낸다.
- * @param {string} sessionId
- * @param {string} key WebDriver 키 코드(예: Enter는 '\uE007')
- */
-async function pressKey(sessionId, key) {
-  await wd('POST', `/session/${sessionId}/actions`, {
-    actions: [
-      {
-        type: 'key',
-        id: 'keyboard',
-        actions: [
-          { type: 'keyDown', value: key },
-          { type: 'keyUp', value: key },
-        ],
-      },
-    ],
-  });
-  await wd('DELETE', `/session/${sessionId}/actions`);
-}
-
 async function main() {
   if (!process.env.JDR_DESKTOP_BINARY) await buildTestApp();
   const binary = binaryPath();
   // Windows 러너의 임시 폴더는 8.3 짧은 이름(RUNNER~1)일 수 있다. 앱이 돌려주는 경로와 비교하므로 긴 이름으로 둔다.
   const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'jdr-desktop-')));
   step(`tauri-driver on ${DRIVER_PORT} for ${binary}`);
-  // Windows는 WebView2 런타임과 같은 버전의 msedgedriver가 필요하다. CI는 그 경로를 JDR_NATIVE_DRIVER로 준다.
-  const nativeDriver = process.env.JDR_NATIVE_DRIVER;
-  const driverArgs = ['--port', String(DRIVER_PORT)];
-  if (nativeDriver) driverArgs.push('--native-driver', nativeDriver);
-  const driver = spawn('tauri-driver', driverArgs, { stdio: 'inherit' });
-  driver.on('error', (err) => {
-    console.error(`tauri-driver failed to start: ${err.message}`);
-    process.exit(2);
-  });
+  const driver = await startDriver();
   /** @type {string | null} */
   let sessionId = null;
   let failed = false;
   try {
-    await waitFor(async () => {
-      try {
-        await fetch(`${BASE}/status`);
-        return true;
-      } catch {
-        return false;
-      }
-    }, 'tauri-driver');
     sessionId = await startApp(binary);
 
     // 1. 데스크톱 모드 기동: 상태바 모드, SharedArrayBuffer, Worker 안 네이티브 엔진.
