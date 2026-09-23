@@ -37,6 +37,9 @@ Firefox·Safari(WebKit) 열은 세션 H에서도 채우지 못했다. Playwright
 | `indexedDB` 접근이 던지는 환경 → `E_ENV_NO_IDB` 상태바 안내, 저널·백업 없이 새 테이블·저장(다운로드) 동작 | ✓ (세션 H, E2E `fault.spec.js`: `indexedDB` getter가 던지게 주입) | 미확인 | 미확인 | 미확인 |
 | FSA 핸들의 `createWritable().write()` 실패 → `E_FILE_WRITE`, 원본·dirty·저널 유지, 다음 저장이 모든 변경을 담음 | ✓ (세션 H, E2E `fault.spec.js`: 가짜 `showSaveFilePicker`·핸들 주입. 실제 FSA 핸들의 실패는 미확인) | 미확인 | 미확인 | 미확인 |
 | axe(WCAG 2.1 A·AA) critical·serious 0건: 빈 앱, 그리드, 대화상자 7종, 장문·인라인 편집기, 가져오기 결과 | ✓ (세션 H, E2E `a11y.spec.js`, `@axe-core/playwright` 4.13.0) | 해당 없음(정적 검사) | 해당 없음 | 해당 없음 |
+| 툴팁(D-19): 비활성(`disabled`) 버튼 위의 포인터 이벤트 | ✓ 이벤트가 온다(세션 P: Chromium 141은 꺼진 버튼에도 `pointerover`·`pointerenter`·`mouseover`를 대상 버튼으로 낸다. 그래서 꺼진 버튼에도 툴팁이 보인다. E2E `help.spec.js`의 "뷰 삭제"). 키보드로는 꺼진 버튼에 포커스가 가지 않으므로 툴팁을 볼 수 없다(도움말 "테이블·열·빈 행" 주제가 꺼진 까닭을 설명) | 미확인 | 미확인 | 미확인 |
+| 도움말 단축키 F1: 문서의 `keydown`으로 오고 `preventDefault()`로 앱이 가져감 | ✓ 도움말이 열린다(세션 P, E2E `help.spec.js`). 헤드리스라 브라우저 자체의 F1 동작(Chrome 도움말 탭)이 함께 일어나는지는 볼 수 없다 | 미확인 | 미확인 | 미확인 |
+| 시크릿(off-the-record) 프로필의 IndexedDB 수명(D-18) | ✓ (세션 P, Playwright `browser.newContext()`는 off-the-record 컨텍스트다): 같은 컨텍스트의 다른 탭에서는 IDB 값이 보이고, 컨텍스트를 닫은 뒤 새 컨텍스트에서는 스토어가 없다. 즉 시크릿 창을 모두 닫으면 저널·직전 저장본이 함께 사라진다. 실제 Chrome 시크릿 창에서 손으로 확인하지는 않았다 | 미확인 | 미확인 | 미확인 |
 | CDP `SystemInfo.getProcessInfo` + `/proc/<pid>/status`로 렌더러 RSS, `HeapProfiler.collectGarbage` + `Performance.getMetrics`로 JS 힙 측정 | ✓ (세션 H, `test/perf/app.perf.spec.js`·`memory.perf.spec.js`. Linux 전용) | 해당 없음(측정 도구) | 해당 없음 | 해당 없음 |
 
 ## 데스크톱 모드 (타우리 WebView)
@@ -55,4 +58,8 @@ Firefox·Safari(WebKit) 열은 세션 H에서도 채우지 못했다. Playwright
 | 내보내기 경로 싱크(`sink_write` raw 본문) | 미확인 | 미확인 | 미확인(WebView에서 실측하지 않음. Node `test:native`가 JSON 경로로 코어 싱크를 검사) |
 | IndexedDB(`known_revisions`·설정), BroadcastChannel | ✓ (세션 M: 둘 다 true) | 미확인 | ✓ (세션 I: 테스트 훅 `idbAvailable()`·`tabLockAvailable()` 둘 다 true) |
 | 비정상 종료로 남은 dirty 작업 사본: 시작 안내, 설정의 작업 사본 목록에서 키보드로 버리기·열어서 복구 | ✓ (세션 M) | 미확인 | ✓ (세션 L) |
+| 도움말(D-19): 저장 주제가 데스크톱 문구(작업 사본·`.bak`), Esc로 닫으면 도움말 버튼으로 포커스 복귀 | 미확인(`desktop` 워크플로의 Windows 잡이 같은 시나리오를 돌린다) | 미확인 | ✓ (세션 P, `test/desktop/run.mjs` 7번) |
+| 툴팁: 키보드 포커스(`:focus-visible`)로 즉시 표시와 `aria-describedby` | 미확인 | 미확인 | ✓ (세션 P: WebDriver Shift+Tab) |
+| 도움말 단축키 F1이 WebView에서 문서로 옴 | 미확인 | 미확인 | ✓ 도움말이 열린다(세션 P, WebDriver 키 입력) |
+| 비활성 버튼 위의 포인터 이벤트(툴팁 표시) | 미확인 | 미확인 | ✓ 툴팁이 보인다(세션 P: WebDriver 포인터 이동을 꺼진 "되돌리기" 위로) |
 | 두 번째 인스턴스 실행(single-instance 플러그인) | 미확인 | 미확인 | 미확인 |

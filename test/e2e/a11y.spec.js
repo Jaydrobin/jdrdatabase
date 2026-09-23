@@ -258,3 +258,47 @@ test('axe(D-16): 열 메뉴·머리글 이름 편집기·빈 행이 열린 상�
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
 });
+
+/**
+ * sRGB 색 문자열(`rgb(…)`/`rgba(…)`)의 상대 휘도(WCAG 2.1).
+ * @param {string} color
+ */
+function luminance(color) {
+  const [r, g, b] = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+    const c = Number(v) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+}
+
+test('axe: 툴팁이 보이는 상태와 도움말 대화상자(모든 주제), 툴팁 명도 대비 4.5:1 이상 (D-19)', async ({
+  page,
+}) => {
+  await seed(page);
+  // 키보드 포커스로 띄운 툴팁(aria-describedby 연결 상태).
+  await page.locator('[data-action="new"]').focus();
+  await page.keyboard.press('Tab');
+  const tooltip = page.locator('#jdr-tooltip');
+  await expect(tooltip).toBeVisible();
+  await audit(page, '툴팁 표시');
+  const { fg, bg } = await tooltip.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { fg: style.color, bg: style.backgroundColor };
+  });
+  const [light, dark] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+  const ratio = ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05);
+  expect(ratio, `툴팁 명도 대비 ${fg} / ${bg}`).toBeGreaterThanOrEqual(4.5);
+  await page.keyboard.press('Escape');
+
+  await page.click('[data-action="help-open"]');
+  const dialog = page.locator('.jdr-dialog');
+  await expect(dialog).toBeVisible();
+  const tabs = dialog.getByRole('tab');
+  const count = await tabs.count();
+  for (let i = 0; i < count; i += 1) {
+    await tabs.nth(i).click();
+    await audit(page, `도움말: ${await tabs.nth(i).textContent()}`);
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});

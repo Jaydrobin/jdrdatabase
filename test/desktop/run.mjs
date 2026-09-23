@@ -356,6 +356,116 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.deepEqual(await workcopyRows(sessionId), []);
     step(`discard all: ${pending} copies removed, originals unchanged`);
+
+    // 7. 도움말(D-19, Step 14): 저장 주제가 데스크톱 문구(작업 사본·.bak)다. F1과 툴팁은 WebView별 실측을 남긴다.
+    // 콜백 안에서는 null 좁히기가 풀리므로 지금 세션을 상수로 둔다.
+    const sid = sessionId;
+    await execute(
+      sid,
+      // 설정 본문의 확인 줄에도 "취소"가 있으므로 버튼 행의 취소를 누른다.
+      'document.querySelector(\'.jdr-dialog__buttons button[data-value="cancel"]\')?.click();',
+    );
+    await waitFor(
+      async () =>
+        (await execute(sid, 'return document.querySelector(".jdr-dialog") === null;')) === true,
+      'settings closed',
+    );
+    // 스크립트의 click()은 포커스를 옮기지 않는다. 닫힌 뒤 포커스가 돌아오는지 보려면 먼저 버튼에 포커스를 둔다.
+    await execute(
+      sid,
+      'const b = document.querySelector(\'[data-action="help-open"]\'); b.focus(); b.click();',
+    );
+    await waitFor(async () => (await text(sid, '.jdr-dialog__title')) === '도움말', 'help dialog');
+    await execute(
+      sid,
+      'Array.from(document.querySelectorAll(\'.jdr-dialog [role="tab"]\')).find((x) => x.textContent === "저장과 복구").click();',
+    );
+    const saving = /** @type {string} */ (await text(sid, '.jdr-dialog [role="tabpanel"]'));
+    assert.match(saving, /작업 사본/);
+    assert.match(saving, /\.bak/);
+    assert.doesNotMatch(saving, /저널/);
+    step('help: saving topic describes the work copy and .bak');
+    await pressKey(sid, '\uE00C');
+    await waitFor(
+      async () =>
+        (await execute(
+          sid,
+          'return document.querySelector(".jdr-dialog") === null && document.activeElement?.dataset.action === "help-open";',
+        )) === true,
+      'help closed with Esc and focus back on the help button',
+    );
+    // 툴팁: 키보드 포커스로 즉시 보인다(도움말 버튼에서 Shift+Tab → 앞 버튼).
+    await wd('POST', `/session/${sid}/actions`, {
+      actions: [
+        {
+          type: 'key',
+          id: 'keyboard',
+          actions: [
+            { type: 'keyDown', value: '\uE008' },
+            { type: 'keyDown', value: '\uE004' },
+            { type: 'keyUp', value: '\uE004' },
+            { type: 'keyUp', value: '\uE008' },
+          ],
+        },
+      ],
+    });
+    await wd('DELETE', `/session/${sid}/actions`);
+    await waitFor(
+      async () =>
+        (await execute(
+          sid,
+          'const t = document.getElementById("jdr-tooltip"); return !!t && !t.hidden && t.textContent !== "" && document.activeElement?.getAttribute("aria-describedby") === "jdr-tooltip";',
+        )) === true,
+      'tooltip on keyboard focus',
+      3_000,
+    );
+    step(`tooltip on keyboard focus: ${JSON.stringify(await text(sid, '#jdr-tooltip'))}`);
+    await pressKey(sid, '\uE00C');
+    // F1: WebView가 가로채지 않으면 도움말이 열린다(실측만 남기고 실패로 보지 않는다. 버튼 경로는 위에서 확인).
+    await pressKey(sid, '\uE031');
+    let f1 = false;
+    try {
+      await waitFor(async () => (await text(sid, '.jdr-dialog__title')) === '도움말', 'F1', 3_000);
+      f1 = true;
+      await pressKey(sid, '\uE00C');
+    } catch {
+      f1 = false;
+    }
+    step(`F1 opens help: ${f1}`);
+    // 비활성 버튼의 툴팁: 포인터를 꺼진 버튼(고른 뷰가 없으면 "뷰 삭제", 테이블이 없으면 "되돌리기")에 올린다.
+    const disabled = /** @type {{ x: number, y: number, action: string } | null} */ (
+      await execute(
+        sid,
+        'const b = document.querySelector("button[data-action][disabled]"); if (!b) return null; const r = b.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), action: b.dataset.action };',
+      )
+    );
+    if (disabled) {
+      await wd('POST', `/session/${sid}/actions`, {
+        actions: [
+          {
+            type: 'pointer',
+            id: 'mouse',
+            parameters: { pointerType: 'mouse' },
+            actions: [
+              {
+                type: 'pointerMove',
+                duration: 0,
+                origin: 'viewport',
+                x: disabled.x,
+                y: disabled.y,
+              },
+            ],
+          },
+        ],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const shown = await execute(
+        sid,
+        'const t = document.getElementById("jdr-tooltip"); return !!t && !t.hidden && t.textContent !== "";',
+      );
+      await wd('DELETE', `/session/${sid}/actions`);
+      step(`tooltip on disabled button (${disabled.action}): ${shown}`);
+    }
     console.log('[desktop] all checks passed');
   } catch (err) {
     failed = true;
