@@ -388,9 +388,9 @@ scripts/
   gen-import-fixtures.mjs        test/fixtures/import/의 CSV(바이트 고정)·XLSX(SheetJS로 씀. 내용 고정) 픽스처를 다시 만든다
   serve-dist.mjs                 dist/를 http://localhost로 서빙하는 정적 서버(지원 매트릭스의 http 열 실측용. 런타임 코드 아님)
 .github/workflows/
-  ci.yml                         푸시·PR마다 check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정)
-  desktop.yml                    Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build. Linux·Windows는 tauri-driver E2E까지(Step 11)
-  release.yml                    `v*` 태그 푸시 또는 수동 실행(버전 입력)에서 브라우저 산출물 dist/jdrdatabase.html과 세 OS의 타우리 설치본·Windows 포터블 실행 파일을 한 GitHub 릴리스에 첨부하고 SHA256SUMS에 모두 적는다(CLAUDE.md 7.1: dist/는 릴리스에서만 배포)
+  ci.yml                         PR마다(Linux) check → build → verify → e2e, 그리고 perf(30만 행 픽스처를 러너에서 만들어 기준선 대비 회귀 판정). main 푸시에서는 돌지 않는다(병합 커밋은 PR에서 검사한 내용과 같다)
+  desktop.yml                    수동 실행(workflow_dispatch) 전용. Windows·macOS·Linux에서 cargo fmt·clippy·test(워크스페이스), test:native, tauri build --debug --no-bundle. Linux·Windows는 tauri-driver E2E까지(Step 11). 설치본은 만들지 않는다
+  release.yml                    `v*` 태그 푸시 또는 수동 실행(버전 입력)에서 브라우저 검사(check·e2e)와 세 OS의 cargo test·test:native를 거쳐, 브라우저 산출물 dist/jdrdatabase.html과 세 OS의 타우리 설치본·Windows 포터블 실행 파일을 한 GitHub 릴리스에 첨부하고 SHA256SUMS에 모두 적는다(CLAUDE.md 7.1: dist/는 릴리스에서만 배포). 잡 사이에 넘기는 중간 아티팩트는 하루만 보관한다
 ```
 
 ### 3.2 실행 시 구조
@@ -879,7 +879,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 **산출물**: `test/perf/*.perf.spec.js`(app·grid·search·import·import-xlsx·memory), `test/perf/report.js`, `test/perf/global-teardown.js`, `test/perf/perf-baseline.json`, `test/e2e/a11y.spec.js`, `test/e2e/fault.spec.js`, `test/e2e/page-url.js`, `test/unit/conventions.test.js`, `scripts/serve-dist.mjs`, `.github/workflows/release.yml`, `docs/support-matrix.md` 갱신, README 갱신
 
 **작업**
-- 성능 트레이스 자동화: 30만 행 픽스처로 8장의 항목을 `npm run test:perf`가 잰다. 각 spec은 측정값을 `report.js`의 `record(name, metrics)`로 `test-results/perf/<name>.json`에 남기고, 로컬에서는 8장의 절대 예산으로 판정한다. CI(`JDR_PERF_COMPARE=1`)에서는 절대 예산 대신 `perf-baseline.json`(GitHub `ubuntu-latest` 러너의 실측)과 비교해 낮을수록 좋은 항목이 기준선의 1.3배를 넘으면 `global-teardown.js`가 실패시킨다(CLAUDE.md 6장). 기준선은 CI 로그의 요약 JSON을 그대로 옮겨 적고 갱신은 PR 설명에 사유를 남긴다. `ci.yml`의 `perf` 잡이 푸시마다 돌리며 픽스처는 러너에서 만들고 `actions/cache`로 재사용한다.
+- 성능 트레이스 자동화: 30만 행 픽스처로 8장의 항목을 `npm run test:perf`가 잰다. 각 spec은 측정값을 `report.js`의 `record(name, metrics)`로 `test-results/perf/<name>.json`에 남기고, 로컬에서는 8장의 절대 예산으로 판정한다. CI(`JDR_PERF_COMPARE=1`)에서는 절대 예산 대신 `perf-baseline.json`(GitHub `ubuntu-latest` 러너의 실측)과 비교해 낮을수록 좋은 항목이 기준선의 1.3배를 넘으면 `global-teardown.js`가 실패시킨다(CLAUDE.md 6장). 기준선은 CI 로그의 요약 JSON을 그대로 옮겨 적고 갱신은 PR 설명에 사유를 남긴다. `ci.yml`의 `perf` 잡이 PR 푸시마다 돌리며 픽스처는 러너에서 만들고 `actions/cache`로 재사용한다.
 - 메모리 프로파일: `memory.perf.spec.js`가 2만 행 DB 열기 → CSV 가져오기 → 저장(다운로드) → 새로 만들기를 한 사이클로 여러 번 반복하고, 사이클마다 CDP `HeapProfiler.collectGarbage` 뒤 메인 스레드 JS 힙(`Performance.getMetrics`의 `JSHeapUsedSize`)과 렌더러 프로세스 RSS(Linux `/proc/<pid>/status`. Worker의 wasm 메모리는 같은 프로세스에 있다)를 기록한다. 두 번째 사이클 대비 마지막 사이클의 증가가 JS 힙 10 MB 또는 RSS 15%를 넘으면 실패(캐시·행 풀·statement 캐시 누수).
 - 오류 주입 테스트(`fault.spec.js` + 단위):
   - Worker 강제 종료: 기동 뒤 Worker의 `error` 이벤트(처리되지 않은 예외)는 전송 계층의 치명적 오류다. `client`는 대기 중인 호출뿐 아니라 **그 뒤의 모든 호출**을 즉시 `E_ENV_NO_WORKER`로 거부하고(죽은 Worker에 보낸 요청은 영원히 응답이 없다) `onFatal` 구독자에게 알린다. `main.js`는 앱을 잠그고(`lock.engineStopped`) 저널 상태를 알린다: 미저장 변경이 저널에 있으면 "새로 고친 뒤 같은 파일을 열면 복구", 저널이 멈춘 상태(가져오기·상한)면 "그 변경은 잃음", 미저장 변경이 없으면 "잃은 변경 없음". 새로 고치면 저널 복구 제안이 뜬다. wasm 폴백은 없다(D-15와 같은 이유로 조용히 모드가 바뀌면 안 된다).

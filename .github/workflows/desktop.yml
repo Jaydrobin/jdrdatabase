@@ -1,82 +1,16 @@
 name: desktop
 
-# 데스크톱(Step 11): 세 플랫폼에서 러스트 워크스페이스 검사(fmt·clippy·test), 실제 rusqlite 엔진에 대한 JS 적합성
-# 테스트(test:native), 타우리 빌드. Linux(WebKitWebDriver + Xvfb)와 Windows(Edge Driver)는 tauri-driver로 데스크톱
-# E2E까지 돌린다. macOS는 tauri-driver가 지원하지 않는다.
-# 브라우저 산출물 검사는 ci.yml이 맡는다. 러스트 빌드가 느리므로 PR과 main 푸시에서만 돈다.
+# 데스크톱 검사(Step 11): 세 플랫폼에서 러스트 워크스페이스 검사(fmt·clippy·test), 실제 rusqlite 엔진에 대한 JS 적합성
+# 테스트(test:native), 디버그 타우리 빌드(--no-bundle). Linux(WebKitWebDriver + Xvfb)와 Windows(Edge Driver)는
+# tauri-driver로 데스크톱 E2E까지 돌린다. macOS는 tauri-driver가 지원하지 않는다.
+# 러스트 빌드가 느리고 Windows·macOS 러너는 Actions 분량을 각각 2배·10배로 차감하므로 자동으로 돌지 않는다.
+# 데스크톱 코드를 바꾼 PR에서 Actions 탭의 "Run workflow"로 PR 브랜치를 골라 수동으로 돌린다. 설치본은 만들지 않는다
+# (release.yml이 세 OS에서 테스트를 거쳐 만든다). 브라우저 산출물 검사는 ci.yml이 맡는다.
 on:
-  push:
-    branches: [main]
-  pull_request:
-
-# 같은 ref에 새 푸시가 오면 PR 실행만 취소해 러너 시간을 아낀다. `main` 푸시 실행은 릴리스·기준선의
-# 근거로 남아야 하므로 취소하지 않는다(cancel-in-progress를 pull_request에서만 true로 둔다).
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  workflow_dispatch:
 
 jobs:
-  # 문서만 바뀐 푸시에서 무거운 잡을 건너뛴다. `paths-ignore`로 워크플로 자체를 막으면 필수 체크가
-  # 영영 pending으로 남아 병합이 막히므로, 워크플로는 늘 돌리고 잡 수준 `if`로 건너뛴다(건너뛴 잡은
-  # skipped로 보고되어 필수 체크를 만족한다). 서드파티 액션을 쓰지 않고 git diff로만 판정한다.
-  changes:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      code: ${{ steps.filter.outputs.code }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect non-docs changes
-        id: filter
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.event.after }}
-        run: |
-          set -euo pipefail
-          have() { [ -n "$1" ] && [ "$1" != '0000000000000000000000000000000000000000' ] && git cat-file -e "$1^{commit}" 2>/dev/null; }
-          files=''
-          known=0
-          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
-            # v1 구현은 PR 하나를 세션마다 이어 푸시하므로(CLAUDE.md 8장) PR 전체 diff에는 늘 코드가
-            # 들어 있다. 판정 대상은 "이번 푸시"여야 하므로 synchronize의 before..after를 먼저 본다.
-            if have "$BEFORE_SHA" && have "$AFTER_SHA"; then
-              files="$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA")"
-              known=1
-            # PR을 연 첫 실행에는 before가 없고, force-push 뒤에는 before가 사라진다. 둘 다 PR 전체를 본다.
-            elif have "$BASE_SHA" && have "$HEAD_SHA"; then
-              files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
-              known=1
-            fi
-          elif have "$BEFORE_SHA" && have "$GITHUB_SHA"; then
-            files="$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")"
-            known=1
-          fi
-          # 범위를 정할 수 없으면(첫 푸시, force-push로 사라진 before 등) 건너뛰지 않는다.
-          if [ "$known" = '0' ]; then
-            echo 'diff range unknown -> run everything'
-            echo 'code=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo '--- changed files ---'
-          printf '%s\n' "$files"
-          # docs/** 와 README.md 만 남으면 문서 전용. 빈 줄도 같이 지운다.
-          rest="$(printf '%s\n' "$files" | grep -Ev '^(docs/.*|README\.md)?$' || true)"
-          if [ -n "$rest" ]; then
-            echo 'code=true' >> "$GITHUB_OUTPUT"
-            echo 'non-docs changes found -> run everything'
-          else
-            echo 'code=false' >> "$GITHUB_OUTPUT"
-            echo 'docs-only change -> heavy jobs skipped'
-          fi
-
   desktop:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -210,20 +144,3 @@ jobs:
           Get-Content $log -ErrorAction SilentlyContinue | Select-String -Pattern 'Launching|WEBVIEW2|user-data-dir|remote-debugging|DevToolsActivePort|environment|binary|Failed|ERROR' | Select-Object -First 80 | ForEach-Object { Write-Host $_.Line }
           Stop-Process -Id $d.Id -Force -ErrorAction SilentlyContinue
           Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2' } | Stop-Process -Force -ErrorAction SilentlyContinue
-
-      - name: Tauri bundle (release)
-        run: npx tauri build
-        working-directory: src-tauri
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: desktop-${{ matrix.os }}
-          path: |
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.dmg
-          if-no-files-found: ignore
