@@ -7,7 +7,7 @@ use crate::error::{AppError, Code, Result};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -247,29 +247,14 @@ fn copy_original(
     size: u64,
     progress: &dyn Fn(u64, u64),
 ) -> Result<()> {
-    let mut src = fs::File::open(original)
+    let src = fs::File::open(original)
         .map_err(|e| AppError::from_io(e, "copy: open original", Some(original)))?;
     let result = (|| -> Result<()> {
         let mut dst = fs::File::create(target)
             .map_err(|e| AppError::from_io(e, "copy: create workcopy", Some(target)))?;
-        let mut buf = vec![0u8; 8 * 1024 * 1024];
-        let mut done: u64 = 0;
-        let mut next_report = COPY_PROGRESS_EVERY;
-        loop {
-            let n = src
-                .read(&mut buf)
-                .map_err(|e| AppError::from_io(e, "copy: read", Some(original)))?;
-            if n == 0 {
-                break;
-            }
-            dst.write_all(&buf[..n])
-                .map_err(|e| AppError::from_io(e, "copy: write", Some(target)))?;
-            done += n as u64;
-            if done >= next_report {
-                progress(done, size);
-                next_report += COPY_PROGRESS_EVERY;
-            }
-        }
+        let done = copy_body(&src, &mut dst, original, target, &|done| {
+            progress(done, size)
+        })?;
         dst.sync_all()
             .map_err(|e| AppError::from_io(e, "copy: sync", Some(target)))?;
         progress(done, size);
@@ -279,6 +264,68 @@ fn copy_original(
         let _ = fs::remove_file(target);
     }
     result
+}
+
+/// 64 MB 조각마다 `std::io::copy`로 넘긴다. Linux의 표준 라이브러리는 파일 사이 복사에
+/// `copy_file_range`를 써서 사용자 공간 버퍼를 거치지 않는다(5 GB에서 8 MB 버퍼 루프의 절반 이하).
+#[cfg(target_os = "linux")]
+fn copy_body(
+    src: &fs::File,
+    dst: &mut fs::File,
+    original: &Path,
+    target: &Path,
+    report: &dyn Fn(u64),
+) -> Result<u64> {
+    let mut done: u64 = 0;
+    loop {
+        let n = std::io::copy(&mut src.take(COPY_PROGRESS_EVERY), dst).map_err(|e| {
+            let mut err = AppError::from_io(e, "copy: copy range", Some(target));
+            if let Some(serde_json::Value::Object(detail)) = err.detail.as_mut() {
+                detail.insert(
+                    "original".into(),
+                    serde_json::Value::String(original.to_string_lossy().into_owned()),
+                );
+            }
+            err
+        })?;
+        if n == 0 {
+            return Ok(done);
+        }
+        done += n;
+        if n == COPY_PROGRESS_EVERY {
+            report(done);
+        }
+    }
+}
+
+/// Windows·macOS의 `std::io::copy`는 커널 복사 없이 작은 버퍼로 내려가므로 8 MB 버퍼로 직접 읽고 쓴다.
+#[cfg(not(target_os = "linux"))]
+fn copy_body(
+    mut src: &fs::File,
+    dst: &mut fs::File,
+    original: &Path,
+    target: &Path,
+    report: &dyn Fn(u64),
+) -> Result<u64> {
+    use std::io::Write;
+    let mut buf = vec![0u8; 8 * 1024 * 1024];
+    let mut done: u64 = 0;
+    let mut next_report = COPY_PROGRESS_EVERY;
+    loop {
+        let n = src
+            .read(&mut buf)
+            .map_err(|e| AppError::from_io(e, "copy: read", Some(original)))?;
+        if n == 0 {
+            return Ok(done);
+        }
+        dst.write_all(&buf[..n])
+            .map_err(|e| AppError::from_io(e, "copy: write", Some(target)))?;
+        done += n as u64;
+        if done >= next_report {
+            report(done);
+            next_report += COPY_PROGRESS_EVERY;
+        }
+    }
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {

@@ -407,3 +407,54 @@ fn hot_wal_of_an_external_file_is_copied_into_the_workcopy() {
     );
     b.close(true).unwrap();
 }
+
+/// 복사는 OS마다 경로가 다르다(Linux는 64 MB 조각의 `io::copy`, 그 밖은 8 MB 버퍼). 어느 쪽이든
+/// 사본이 원본과 바이트 단위로 같고, 진행률이 조각마다 늘며 마지막 보고가 파일 크기여야 한다.
+#[test]
+fn workcopy_copy_is_byte_exact_and_reports_progress_per_chunk() {
+    const MB: usize = 1024 * 1024;
+    let tmp = TempDir::new("큰 사본");
+    let original = tmp.join("큰 원본.db");
+    make_original(&original, "db-big", 1, 0);
+    {
+        let conn = rusqlite::Connection::open(&original).expect("open");
+        conn.execute_batch("CREATE TABLE b (x BLOB) STRICT")
+            .expect("blob table");
+        // 64 MB 조각 둘을 넘기고 끝이 조각 경계에 맞지 않게 한다. 값마다 달라야 어긋난 조각이 드러난다.
+        for i in 0..14u8 {
+            let blob: Vec<u8> = (0..10 * MB).map(|j| (j as u8) ^ i).collect();
+            conn.execute("INSERT INTO b (x) VALUES (?1)", [blob])
+                .expect("insert blob");
+        }
+    }
+    let info = jdr_core::workcopy::inspect_original(&original).expect("inspect");
+    assert!(info.size > 2 * 64 * MB as u64 && info.size % (64 * MB as u64) != 0);
+
+    let reports = std::cell::RefCell::new(Vec::<(u64, u64)>::new());
+    let prepared =
+        jdr_core::workcopy::prepare(&tmp.join("app"), &original, &info, false, &|done, total| {
+            reports.borrow_mut().push((done, total))
+        })
+        .expect("prepare");
+    assert!(!prepared.reused_dirty);
+    assert!(
+        std::fs::read(&original).expect("read original")
+            == std::fs::read(&prepared.db_path).expect("read copy"),
+        "사본이 원본과 바이트 단위로 같아야 한다"
+    );
+
+    let reports = reports.into_inner();
+    assert!(reports.iter().all(|&(_, total)| total == info.size));
+    let done: Vec<u64> = reports.iter().map(|&(d, _)| d).collect();
+    assert_eq!(
+        done.last().copied(),
+        Some(info.size),
+        "마지막 보고는 파일 크기"
+    );
+    assert!(
+        done.windows(2).all(|w| w[0] <= w[1]),
+        "진행률은 줄지 않는다: {done:?}"
+    );
+    let intermediate = done.iter().filter(|&&d| d < info.size).count();
+    assert!(intermediate >= 2, "64 MB마다 보고한다: {done:?}");
+}
