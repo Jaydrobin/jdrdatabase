@@ -48,6 +48,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --workspace   # 러스트 테스
 
 데스크톱 앱은 Rust stable과 Tauri 2 CLI(`devDependencies`)로 빌드한다. Linux는 `libwebkit2gtk-4.1-dev`·`libgtk-3-dev`가 필요하다. 작업 사본·`.bak`·저장 절차·클라우드 폴더 사용은 [docs/desktop.md](docs/desktop.md)에 있다.
 
+PR마다 `ci` 워크플로가 Linux에서 검사·빌드·검증·E2E와 성능 회귀 검사를 돌린다(문서만 바뀐 푸시는 성능 검사를 건너뛴다). Windows·macOS·Linux 세 OS의 데스크톱 검사(러스트 fmt·clippy·테스트, 실제 rusqlite 엔진 적합성, 데스크톱 E2E)는 자동으로 돌지 않는다. 데스크톱 코드를 바꿨다면 Actions 탭의 `desktop` 워크플로를 PR 브랜치에서 "Run workflow"로 돌리고, 릴리스 때는 `release` 워크플로가 세 OS에서 테스트를 거쳐 설치본을 만든다.
+
 성능 측정은 로컬에서는 8장의 절대 예산으로 판정하고, CI의 `perf` 잡은 같은 러너에서 잰 기준선(`test/perf/perf-baseline.json`) 대비 30% 이상 회귀를 실패로 본다. 측정값 요약은 `test-results/perf/summary.json`에 남는다.
 
 릴리스는 `release` 워크플로가 만든다. `v*` 태그를 푸시하거나, Actions 탭의 `release` 워크플로에서 "Run workflow"로 버전(예: `1.2.0`)을 입력하면 실행한 커밋에 `v<버전>` 태그를 만든다. 워크플로는 검사·빌드·검증을 거친 브라우저용 `jdrdatabase.html`과 Windows·Linux·macOS에서 빌드한 데스크톱 설치본(`.msi`·설치 프로그램 `.exe`, `.deb`·`.AppImage`·`.rpm`, `.dmg`), 설치 없이 실행하는 Windows 포터블 실행 파일 `jdrdatabase-desktop.exe`를 한 GitHub 릴리스에 첨부하고, 첨부 파일 전부의 SHA-256을 `SHA256SUMS`에 적는다. 설치본의 버전은 릴리스 버전의 숫자 부분(`X.Y.Z`)이고, 버전에 `-rc.1` 같은 꼬리표가 붙으면 프리릴리스로 올린다. 데스크톱 파일은 코드 서명을 하지 않는다. `dist/`는 저장소에 커밋하지 않는다.

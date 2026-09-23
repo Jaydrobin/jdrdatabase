@@ -156,7 +156,7 @@ Node.js 20 이상. 런타임 npm 의존성은 없다. `devDependencies`만 허�
 - [ ] 설계 결정을 바꿨다면 `DESIGN.md`의 D-항목 갱신이 같은 PR에 포함
 - [ ] `dist/`는 커밋하지 않음(CI 아티팩트로만 배포). 릴리스 태그에서만 첨부
 - [ ] 모드 문자열 비교가 허용 위치 밖에 없음 (`grep -rn "'native'\|'wasm'\|'desktop'" src/` 결과가 `main.js`, `db/engine.js`, 엔진 구현 파일, 테스트에만 있음)
-- [ ] Step 11 이후: `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, `npm run test:native` 통과. 브라우저·타우리 산출물이 CSP 태그 외 동일함을 `verify`가 확인
+- [ ] Step 11 이후 데스크톱 코드(`src-tauri/`, `db/engine-native.js`, `io/ipc-bridge.js`, `io/filesystem.js`)를 바꿨다면: 로컬에서 `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`, `npm run test:native` 통과. PR 검사(`ci`)는 Linux 브라우저 경로만 돌리므로, 세 OS 검사는 `desktop` 워크플로를 PR 브랜치에서 수동 실행해 초록을 확인한다(릴리스의 `release` 워크플로도 세 OS에서 테스트를 거친다). 브라우저·타우리 산출물이 CSP 태그 외 동일함을 `verify`가 확인
 
 ### 7.2 리뷰 관점 (리뷰어, 우선순위 순)
 
