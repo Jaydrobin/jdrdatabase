@@ -289,6 +289,73 @@ async function main() {
       `saved copies are not pending: ${JSON.stringify(leftover)}`,
     );
     step('saved: no pending workcopies left from this run');
+    await execute(
+      sessionId,
+      'const b = Array.from(document.querySelectorAll(".jdr-dialog button")).find((x) => x.textContent === "취소"); if (b) b.click();',
+    );
+
+    // 6. 작업 사본 모두 버리기(D-18, Step 13): dirty 사본 두 개를 남긴 뒤 "모두 버리기" → 목록이 비고 원본 파일은 그대로.
+    await hook(sessionId, 'hook.apply(a[0])', [cmd2]);
+    const secondBytes = await readFile(second);
+    await stopApp(sessionId);
+    sessionId = null;
+    sessionId = await startApp(binary);
+    const third = path.join(scratch, '셋째.db');
+    const created4 = await hook(sessionId, "hook.call('schema.create', { name: '셋' })");
+    const tableId3 = /** @type {{ tableId: string }} */ (created4).tableId;
+    const cmd3 = {
+      type: 'row.insert',
+      tableId: tableId3,
+      do: [{ sql: `INSERT INTO "${tableId3}" ("_created_at") VALUES ('now')` }],
+      undo: [{ sql: `DELETE FROM "${tableId3}"` }],
+      summary: 'insert',
+    };
+    await hook(sessionId, 'hook.apply(a[0])', [cmd3]);
+    await hook(sessionId, 'hook.setPickedPath(a[0])', [third]);
+    assert.equal(await hook(sessionId, 'hook.saveAs()'), true);
+    await hook(sessionId, 'hook.apply(a[0])', [cmd3]);
+    const thirdBytes = await readFile(third);
+    await stopApp(sessionId);
+    sessionId = null;
+    step('discard all: two dirty copies left behind');
+
+    sessionId = await startApp(binary);
+    await execute(sessionId, 'document.querySelector(\'[data-action="settings"]\').click();');
+    await waitFor(async () => {
+      const r = await workcopyRows(sessionId ?? '');
+      return r.some((x) => x.startsWith('둘째.db · ')) && r.some((x) => x.startsWith('셋째.db · '));
+    }, 'two dirty copies in settings');
+    const pending = (await workcopyRows(sessionId)).length;
+    await execute(
+      sessionId,
+      'document.querySelector(\'[data-action="workcopy-discard-all"]\').click();',
+    );
+    await waitFor(
+      async () =>
+        String(
+          await execute(
+            sessionId ?? '',
+            'const c = document.querySelector(\'[data-role="workcopy-discard"]\'); return c && !c.hidden ? c.textContent : "";',
+          ),
+        ).includes(`작업 사본 ${pending}개`),
+      'discard-all confirm row',
+    );
+    await execute(
+      sessionId,
+      'document.querySelector(\'[data-action="workcopy-discard-ok"]\').click();',
+    );
+    await waitFor(async () => (await workcopyRows(sessionId ?? '')).length === 0, 'list emptied');
+    assert.deepEqual(await readFile(second), secondBytes, '둘째.db 원본은 그대로');
+    assert.deepEqual(await readFile(third), thirdBytes, '셋째.db 원본은 그대로');
+    await execute(
+      sessionId,
+      'const b = Array.from(document.querySelectorAll(".jdr-dialog button")).find((x) => x.textContent === "취소"); if (b) b.click();',
+    );
+    // 다시 열어도 목록이 없다(사본이 실제로 지워졌다).
+    await execute(sessionId, 'document.querySelector(\'[data-action="settings"]\').click();');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.deepEqual(await workcopyRows(sessionId), []);
+    step(`discard all: ${pending} copies removed, originals unchanged`);
     console.log('[desktop] all checks passed');
   } catch (err) {
     failed = true;
