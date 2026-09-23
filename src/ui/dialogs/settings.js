@@ -147,6 +147,13 @@ export async function openSettingsDialog(deps) {
       const workcopyList = document.createElement('div');
       workcopyList.dataset.role = 'workcopy-list';
       workcopyList.hidden = true;
+      /** @param {HTMLElement} row */
+      const removeRow = (row) => {
+        row.remove();
+        if (workcopyList.childElementCount > 0) return;
+        workcopyTitle.hidden = true;
+        workcopyList.hidden = true;
+      };
       void store.listWorkcopies().then((entries) => {
         if (entries.length === 0) return;
         workcopyTitle.hidden = false;
@@ -166,8 +173,14 @@ export async function openSettingsDialog(deps) {
           open.type = 'button';
           open.className = 'jdr-dialog__button jdr-dialog__button--small';
           open.textContent = t('settings.workcopyOpen');
+          // 연 사본은 더 이상 복구를 기다리지 않는다. 행을 남겨 두면 대화상자가 열린 채로 그 사본의 "버리기"가
+          // 눌릴 수 있다(스토어가 막지만 누를 수 있는 버튼을 두지 않는다).
           open.addEventListener('click', () => {
-            void store.openWorkcopy(entry.key);
+            open.disabled = true;
+            void store.openWorkcopy(entry.key).then((ok) => {
+              if (ok) removeRow(row);
+              else open.disabled = false;
+            });
           });
           const drop = document.createElement('button');
           drop.type = 'button';
@@ -176,7 +189,7 @@ export async function openSettingsDialog(deps) {
           drop.addEventListener('click', () => {
             drop.disabled = true;
             void store.discardWorkcopy(entry.key).then((ok) => {
-              if (ok) row.remove();
+              if (ok) removeRow(row);
               else drop.disabled = false;
             });
           });

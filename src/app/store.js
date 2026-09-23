@@ -644,12 +644,34 @@ export function createStore(deps) {
   }
 
   /**
+   * 데스크톱 모드에서 지금 열린 작업 사본의 키. 설정의 작업 사본 목록이 이 사본을 "복구를 기다리는" 것으로
+   * 보이거나 버리지 않게 한다(러스트 `remove_workcopy`는 열린 사본이면 DB를 닫고 폴더를 지운다).
+   * @type {string | null}
+   */
+  let openWorkcopyKey = null;
+
+  /**
+   * `db.open`을 부르고 열린 작업 사본의 키를 기억한다. 스토어의 모든 열기는 이 함수를 거친다. 열기가 실패하면
+   * 앞 DB가 이미 닫혔을 수 있으므로 키를 먼저 비운다.
+   * @param {import('../db/worker.js').OpMap['db.open']['args']} args
+   * @param {CallOptions} [options]
+   * @returns {Promise<import('../db/worker.js').OpenResult>}
+   */
+  async function openDb(args, options) {
+    openWorkcopyKey = null;
+    const opened = await client.call('db.open', args, options);
+    openWorkcopyKey = opened.workcopy?.workcopyKey ?? null;
+    return opened;
+  }
+
+  /**
    * 데스크톱 모드: 지금 열린 dirty 작업 사본을 버린다(사용자가 미저장 변경 버리기를 확인한 뒤에만).
    */
   async function discardDirtyWorkcopy() {
     if (!nativeMode || !state.dirty) return;
     try {
       await client.call('db.close', { discardWorkcopy: true });
+      openWorkcopyKey = null;
     } catch (err) {
       notify.error(toStoreError(err));
     }
@@ -962,7 +984,7 @@ export function createStore(deps) {
         await discardDirtyWorkcopy();
       }
       try {
-        const opened = await client.call('db.open', options.dbId ? { dbId: options.dbId } : {});
+        const opened = await openDb(options.dbId ? { dbId: options.dbId } : {});
         tablock.release();
         setOpened({
           name: null,
@@ -1020,12 +1042,12 @@ export function createStore(deps) {
       /** @type {import('../db/worker.js').OpenResult} */
       let opened;
       try {
-        opened = await withNativeProgress(() => client.call('db.open', { originalPath }));
+        opened = await withNativeProgress(() => openDb({ originalPath }));
         if (opened.workcopy?.dirty) {
           const verdict = await judgeWorkcopy(opened.workcopy, name);
           if (verdict === 'discard') {
             opened = await withNativeProgress(() =>
-              client.call('db.open', { originalPath, discardWorkcopy: true }),
+              openDb({ originalPath, discardWorkcopy: true }),
             );
           }
         }
@@ -1079,7 +1101,7 @@ export function createStore(deps) {
           bytes = await fs.gunzip(bytes);
           if (!(await checkSize(bytes.byteLength))) return false;
         }
-        opened = await client.call('db.open', { bytes }, { transfer: [bytes.buffer] });
+        opened = await openDb({ bytes }, { transfer: [bytes.buffer] });
       } catch (err) {
         // 이전 DB는 이미 닫혔다. 사용 가능한 상태로 돌아가기 위해 새 DB를 연다.
         notify.error(toStoreError(err));
@@ -1686,7 +1708,10 @@ export function createStore(deps) {
     async listWorkcopies() {
       if (!nativeMode) return [];
       try {
-        return (await nativeFs('listWorkcopies')()).filter((e) => e.dirty);
+        // 열린 사본은 복구를 기다리지 않는다(이미 열려 있다). 여기서 빼야 목록에서 버려지지 않는다.
+        return (await nativeFs('listWorkcopies')()).filter(
+          (e) => e.dirty && e.key !== openWorkcopyKey,
+        );
       } catch (err) {
         notify.error(toStoreError(err));
         return [];
@@ -1701,7 +1726,7 @@ export function createStore(deps) {
       /** @type {import('../db/worker.js').OpenResult} */
       let opened;
       try {
-        opened = await client.call('db.open', { workcopyKey: key });
+        opened = await openDb({ workcopyKey: key });
       } catch (err) {
         notify.error(toStoreError(err));
         await store.newDatabase({ force: true });
@@ -1717,6 +1742,8 @@ export function createStore(deps) {
 
     async discardWorkcopy(key) {
       if (!nativeMode) return false;
+      // 러스트는 열린 사본을 버리라면 DB를 닫고 지운다. 화면은 그 DB가 열려 있다고 믿으므로 받지 않는다.
+      if (key === openWorkcopyKey) return false;
       try {
         await nativeFs('removeWorkcopy')(key);
         return true;
@@ -1784,7 +1811,7 @@ export function createStore(deps) {
     /** @type {import('../db/worker.js').OpenResult} */
     let opened;
     try {
-      opened = await client.call('db.open', { workcopyKey: fresh.key });
+      opened = await openDb({ workcopyKey: fresh.key });
     } catch (err) {
       notify.error(toStoreError(err));
       await store.newDatabase({ force: true });

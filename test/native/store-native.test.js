@@ -535,23 +535,58 @@ test('desktop: 저장한 적 없는 dirty 사본이 둘 이상이면 설정 목�
   const second = await setup();
   await apply(second.store, second.client, CREATE_T);
   await second.client.call('db.close', {});
+  second.client.close();
 
-  const entries = await second.store.listWorkcopies();
+  // 다음 실행. 스토어를 거치지 않은 닫기는 앱 종료뿐이므로 목록은 새로 뜬 앱에서 본다.
+  const third = await setup();
+  const entries = await third.store.listWorkcopies();
   const fresh = entries.filter((e) => (e.meta?.originalPath ?? null) === null);
   assert.ok(fresh.length >= 2, `저장한 적 없는 dirty 사본이 둘 이상이어야 한다(${fresh.length})`);
 
   // 시작 복구가 제안하지 않는 쪽(가장 최근이 아닌 것)도 키로 열 수 있다.
   const older = fresh[fresh.length - 1];
   assert.ok(older);
-  assert.equal(await second.store.openWorkcopy(older.key), true);
-  assert.equal(second.store.getState().dirty, true, '복구한 사본의 변경은 아직 파일에 없다');
+  assert.equal(await third.store.openWorkcopy(older.key), true);
+  assert.equal(third.store.getState().dirty, true, '복구한 사본의 변경은 아직 파일에 없다');
 
   // 버리면 목록에서 사라진다.
   const target = fresh.find((e) => e.key !== older.key);
   assert.ok(target);
-  assert.equal(await second.store.discardWorkcopy(target.key), true);
-  const after = await second.store.listWorkcopies();
+  assert.equal(await third.store.discardWorkcopy(target.key), true);
+  const after = await third.store.listWorkcopies();
   assert.ok(!after.some((e) => e.key === target.key), '버린 사본은 목록에 없다');
+  third.client.close();
+});
+
+test('desktop: 지금 열린 작업 사본은 목록에 나오지 않고 버릴 수 없다', async () => {
+  // 목록에서 사본을 연 뒤 같은 행의 "버리기"를 누르면 러스트가 열린 DB를 닫고 폴더를 지웠다. 화면은
+  // 복구한 변경이 열려 있다고 보여 주지만 모든 질의·저장이 E_DB_QUERY로 실패하고 그 변경은 사라졌다.
+  const first = await setup();
+  await apply(first.store, first.client, CREATE_T);
+  await apply(first.store, first.client, INSERT_TWO);
+  await first.client.call('db.close', {});
+  first.client.close();
+
+  const second = await setup();
+  const fresh = (await second.store.listWorkcopies()).filter(
+    (e) => (e.meta?.originalPath ?? null) === null,
+  );
+  const target = fresh[0];
+  assert.ok(target);
+  assert.equal(await second.store.openWorkcopy(target.key), true);
+  assert.equal(second.store.getState().dirty, true);
+
+  assert.ok(
+    !(await second.store.listWorkcopies()).some((e) => e.key === target.key),
+    '열린 사본은 "복구를 기다리는" 목록에 없다',
+  );
+  assert.equal(await second.store.discardWorkcopy(target.key), false, '열린 사본은 버리지 않는다');
+  assert.deepEqual(
+    await count(second.client, 'SELECT count(*) FROM t'),
+    [[2]],
+    '복구한 변경이 그대로 열려 있다',
+  );
+  await second.client.call('db.close', { discardWorkcopy: true });
   second.client.close();
 });
 
