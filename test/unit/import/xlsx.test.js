@@ -97,12 +97,12 @@ test('openXlsx: 헤더·행·병합·오류 셀·시트 선택·헤더 행·헤�
     '01234',
     null,
     1.5,
-    '1900-02-28',
+    60,
   ]);
   assert.deepEqual(rows[0]?.errorCells, [9]);
   assert.deepEqual(rows[1]?.cells.slice(4, 6), ['2024-02-29', '2024-02-29'], '00:00:00은 날짜만');
   // 1900 윤년 버그(Step 8 예외 처리): 엑셀의 일련번호 60은 달력에 없는 1900-02-29다. SheetJS는 60을
-  // 1900-02-28로, 61을 1900-03-01로 돌려준다(위임한 대로 두고 여기서 못박는다).
+  // 날짜로 바꾸지 않고 숫자 셀(`t: 'n'`)로 두며, 61은 1900-03-01로 돌려준다(위임한 대로 두고 여기서 못박는다).
   assert.equal(rows[1]?.cells[11], '1900-03-01', '일련번호 61');
   assert.deepEqual(rows[2]?.cells.slice(0, 2), ['병합', 'b']);
   assert.equal(rows[3]?.cells[0], '', '병합 범위의 나머지 칸은 비어 있다');
@@ -127,6 +127,8 @@ test('openXlsx: 헤더·행·병합·오류 셀·시트 선택·헤더 행·헤�
   assert.equal(unknownSheet.resolved.sheet, '데이터', '모르는 시트 이름은 첫 시트');
 });
 
+// 픽스처는 1904 체계의 일련번호 43834(= 1900 체계 45296 − 1462)로 2024-01-05를 담는다. 1904 보정을 빼먹는
+// 읽기(SheetJS 0.18.12의 `cellDates`)는 이것을 2020-01-04로 읽는다.
 test('openXlsx: 1904 날짜 체계는 같은 날짜로 읽힌다', async () => {
   const src = await openXlsx(new Blob([await fixture('date1904.xlsx')]), { format: 'xlsx' });
   assert.deepEqual(

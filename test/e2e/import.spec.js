@@ -319,14 +319,15 @@ test('XLSX → 새 테이블: 시트·헤더 행 선택, 날짜·수식·불리�
   await expect(
     page.locator('.jdr-grid__row[data-row="0"]:not([hidden]) .jdr-grid__cell[data-col="6"]'),
   ).toHaveText('✓');
-  // 7번째 열부터는 뷰포트 밖(열 가상화)이라 DB에서 확인한다: 수식은 계산값, 오류 셀은 NULL, 1900 윤년 버그.
+  // 7번째 열부터는 뷰포트 밖(열 가상화)이라 DB에서 확인한다: 수식은 계산값, 오류 셀은 NULL, 1900 윤년 버그
+  // (달력에 없는 일련번호 60은 숫자로 와서 윤년 열이 text가 되고, 날짜를 만들어 내지 않는다).
   const table = (await hook(page).state())?.tables.find((tb) => tb.name === '엑셀');
   const ids = table?.columns.map((c) => c.id) ?? [];
   const stored = await hook(page).query(
     `SELECT "${ids[7]}", "${ids[9]}", "${ids[10]}", "${ids[11]}" FROM "${table?.id}" ORDER BY "id" LIMIT 3`,
   );
   expect(stored.rows).toEqual([
-    [60, null, 1.5, '1900-02-28'],
+    [60, null, 1.5, '60'],
     [50, null, -2, '1900-03-01'],
     [80, null, 300, null],
   ]);

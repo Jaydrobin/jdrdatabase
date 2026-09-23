@@ -199,7 +199,8 @@ test('openSource·preview: xlsx는 시트 목록·헤더 행·병합·오류 셀
       'text',
       'text',
       'real',
-      'date',
+      // 윤년 열: 일련번호 60(달력에 없는 1900-02-29)이 숫자로 오므로 날짜 열이 되지 않는다
+      'text',
     ],
   );
   assert.deepEqual(
@@ -257,11 +258,33 @@ test('run: xlsx를 새 테이블로 — 날짜·시각·불리언·수식값·�
     '01234',
     null,
     1.5,
-    '1900-02-28',
+    '60',
   ]);
   assert.deepEqual(rows[1]?.slice(4, 8), ['2024-02-29', '2024-02-29T00:00:00', 0, 50]);
   assert.equal(rows[1]?.[11], '1900-03-01', '일련번호 61 = 1900-03-01');
   assert.deepEqual(rows[2]?.slice(0, 2), ['병합', 'b']);
+
+  // 윤년 열을 날짜로 지정해도 달력에 없는 날짜를 만들어 내지 않는다: 그 칸은 보고서에 변환 실패로 남는다.
+  const leap = await run({
+    engine,
+    file: await fixtureBlob('basic.xlsx'),
+    options: { format: 'xlsx', sheet: '데이터', headerRow: 1 },
+    mapping: { columns: [{ source: 11, name: '윤년', type: 'date' }] },
+    target: { kind: 'new', name: '윤년' },
+  });
+  assert.deepEqual(
+    leap.report.errors.filter((e) => e.column === '윤년').map((e) => e.rowIndex),
+    [2],
+  );
+  const tLeap = tables.requireTable(engine, leap.report.tableId);
+  assert.deepEqual(
+    rowsOf(
+      engine,
+      tLeap.id,
+      tLeap.columns.map((c) => c.id),
+    ).map((r) => r[0]),
+    [null, '1900-03-01'],
+  );
 
   const d1904 = await run({
     engine,
