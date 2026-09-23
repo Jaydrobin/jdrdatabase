@@ -169,11 +169,12 @@ export const DB_HUGE_CELL_CHARS = 102_400;
 const DB_BATCH_ROWS = 2_000;
 
 /**
- * 장문 셀 하나. 평균 약 300자, `DB_HUGE_CELL_RATIO` 비율로 100 KB 이상.
+ * 장문 셀 하나. 평균 약 300자, `DB_HUGE_CELL_RATIO` 비율로 100 KB 이상. 데스크톱 성능 측정(`run_batch`)도
+ * 픽스처와 같은 분포를 쓰도록 내보낸다.
  * @param {() => number} rand
  * @returns {string}
  */
-function longCell(rand) {
+export function longCell(rand) {
   const huge = rand() < DB_HUGE_CELL_RATIO;
   const target = huge
     ? DB_HUGE_CELL_CHARS + Math.floor(rand() * 20_000)

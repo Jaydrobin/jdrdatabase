@@ -54,6 +54,7 @@ npm run tauri:build                   # 설치본(src-tauri/target/release/bundl
 cargo test --manifest-path src-tauri/Cargo.toml --workspace   # 러스트 테스트(코어 + 앱)
 npm run test:native                   # 실제 rusqlite 엔진에 대한 JS 엔진 적합성 테스트
 npm run test:desktop                  # tauri-driver E2E(Linux: WebKitWebDriver + Xvfb, Windows: Edge Driver)
+node test/desktop/perf.mjs <경로>       # 5 GB(500만 행) 데스크톱 성능. DESIGN.md 8장 데스크톱 표를 로컬에서 판정한다. 경로에 파일이 없으면 만든다(디스크는 그 크기의 약 3배)
 ```
 
 필요한 것: Rust stable, Tauri 2 CLI(`devDependencies`의 `@tauri-apps/cli`), Linux는 `libwebkit2gtk-4.1-dev`·`libgtk-3-dev`(E2E는 `webkit2gtk-driver`·`xvfb`·`cargo install tauri-driver`), Windows는 WebView2(기본 설치. E2E는 WebView2 런타임과 같은 버전의 `msedgedriver.exe`를 받아 경로를 `JDR_NATIVE_DRIVER`로 주고 `cargo install tauri-driver`), macOS는 Xcode 명령줄 도구(tauri-driver가 macOS를 지원하지 않아 데스크톱 E2E가 없다). WebKitGTK 개발 라이브러리가 없는 환경에서는 `cargo test --manifest-path src-tauri/Cargo.toml -p jdr-core`로 코어만 검사할 수 있다.

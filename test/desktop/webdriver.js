@@ -37,20 +37,30 @@ function run(cmd, args, options = {}) {
   }
 }
 
-export function binaryPath() {
+/**
+ * 테스트 변형 바이너리 경로. `JDR_DESKTOP_BINARY`가 있으면 그것을 쓴다.
+ * @param {{ release?: boolean }} [options] 릴리스 프로필(성능 측정). 기본은 디버그(E2E)
+ */
+export function binaryPath(options = {}) {
   if (process.env.JDR_DESKTOP_BINARY) return process.env.JDR_DESKTOP_BINARY;
   const exe = process.platform === 'win32' ? 'jdrdatabase-desktop.exe' : 'jdrdatabase-desktop';
-  return path.join(TAURI_DIR, 'target', 'debug', exe);
+  return path.join(TAURI_DIR, 'target', options.release ? 'release' : 'debug', exe);
 }
 
-export async function buildTestApp() {
+/**
+ * 테스트 빌드(`dist/test/tauri`)를 담은 데스크톱 바이너리를 만든다.
+ * @param {{ release?: boolean }} [options] 릴리스 프로필. 디버그 프로필은 번들 SQLite(C)도 최적화 없이 컴파일해
+ *   저장·질의 시간이 제품과 다르므로 성능 측정은 릴리스로 한다
+ */
+export async function buildTestApp(options = {}) {
   step('build: dist/test/tauri/index.html');
   run(process.execPath, [path.join(ROOT, 'build', 'build.mjs'), '--test']);
-  step('build: debug desktop binary with the test variant');
+  step(`build: ${options.release ? 'release' : 'debug'} desktop binary with the test variant`);
   // npx 대신 CLI 진입 스크립트를 Node로 직접 부른다. Windows의 Node 20은 `.cmd`를 셸 없이 띄우지 않고
   // (CVE-2024-27980), 셸을 거치면 cmd.exe가 JSON 인자의 따옴표를 깨뜨린다.
   const cli = path.join(ROOT, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
-  run(process.execPath, [cli, 'build', '--debug', '--no-bundle', '--config', TEST_CONFIG], {
+  const profile = options.release ? [] : ['--debug'];
+  run(process.execPath, [cli, 'build', ...profile, '--no-bundle', '--config', TEST_CONFIG], {
     cwd: TAURI_DIR,
   });
 }
