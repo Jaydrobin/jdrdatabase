@@ -181,6 +181,27 @@ jobs:
         if: matrix.e2e && runner.os == 'Windows'
         run: npm run test:desktop
 
+      # Windows E2E가 실패하면 원인을 가르는 정보를 남긴다: 테스트 앱을 직접 띄워 15초 뒤에도 살아 있는지(죽었으면
+      # 종료 코드와 출력), 그리고 WebDriver가 쓰는 원격 디버깅 포트가 WebView2에서 열리는지.
+      - name: Windows app diagnostics (on E2E failure)
+        if: failure() && matrix.e2e && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = 'src-tauri\target\debug\jdrdatabase-desktop.exe'
+          if (-not (Test-Path $app)) { Write-Host "no binary at $app"; exit 0 }
+          $env:RUST_BACKTRACE = '1'
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
+          $out = Join-Path $env:RUNNER_TEMP 'app-out.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'app-err.txt'
+          $p = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Host "app exited with code $($p.ExitCode)" } else { Write-Host 'app is still running after 15 s' }
+          try { (Invoke-WebRequest -Uri 'http://127.0.0.1:9222/json/version' -TimeoutSec 5).Content } catch { Write-Host "no DevTools endpoint: $($_.Exception.Message)" }
+          Get-Process | Where-Object { $_.ProcessName -match 'jdrdatabase|msedgewebview2|msedgedriver|tauri-driver' } | Format-Table ProcessName, Id -AutoSize | Out-String | Write-Host
+          Write-Host '--- stdout ---'; Get-Content $out -ErrorAction SilentlyContinue
+          Write-Host '--- stderr ---'; Get-Content $err -ErrorAction SilentlyContinue
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+
       - name: Tauri bundle (release)
         run: npx tauri build
         working-directory: src-tauri
