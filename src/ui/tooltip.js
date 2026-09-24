@@ -5,7 +5,12 @@
  * - 대상은 `data-hint` 속성(i18n 키)을 가진 요소다. HTML `title`은 쓰지 않는다(키보드·터치에서 보이지 않고
  *   WCAG 1.4.13을 만족하지 못한다).
  * - 마우스는 올린 뒤 500 ms, 키보드 포커스(`:focus-visible`)는 즉시 보인다. 터치에는 보이지 않는다.
- * - Esc·포커스 이탈·포인터 이탈·누름으로 닫는다. Esc는 전파를 막지 않는다(대화상자·편집기의 Esc도 돈다).
+ * - Esc·포커스 이탈·포인터 이탈·누름으로 닫는다.
+ * - Esc: 툴팁이 보이는 동안의 첫 Esc는 툴팁만 닫고 소비한다(`window` 캡처에서 전파와 기본 동작을 막아 대화상자·
+ *   편집기가 받지 않는다). 다음 Esc가 전처럼 대화상자를 닫거나 편집을 취소한다. WAI-ARIA APG의 툴팁 패턴과
+ *   WCAG 1.4.13 "닫을 수 있음": 대화상자 안의 버튼은 키보드 포커스만으로 툴팁이 뜨므로, Esc가 둘 다 닫으면
+ *   툴팁을 닫으려다 대화상자를 잃는다. 조합 중(`isComposing`)의 Esc는 입력기의 것이라 건드리지 않는다.
+ *   툴팁이 없을 때의 Esc로 대화상자가 닫혀 포커스가 여는 버튼으로 돌아가면 그 버튼에는 띄우지 않는다.
  * - 스크롤: 마우스로 띄운 툴팁은 위치가 어긋나므로 닫는다. 키보드로 띄운 툴팁은 위치를 다시 잡고, 대상이 화면이나
  *   스크롤된 영역 밖으로 나갔을 때만 닫는다. Tab 포커스가 대상을 화면 안으로 굴리는 스크롤이 띄우자마자 닫지 않게.
  * - 누르면 닫고, 포인터가 누른 자리(그때 대상의 사각형)를 떠날 때까지 다시 띄우지 않는다. 요소가 아니라 자리로
@@ -54,6 +59,11 @@ let suppressed = null;
  * @type {Rect | null}
  */
 let pressed = null;
+/**
+ * 툴팁 없이 Esc를 처리하는 중(같은 태스크 안)인가. 그 Esc로 대화상자가 닫혀 포커스가 여는 버튼으로 돌아가도
+ * 툴팁을 띄우지 않는다(방금 누른 Esc가 닫으려던 것을 다시 띄우지 않는다).
+ */
+let escaping = false;
 /** 마우스로 띄운 툴팁인가(포인터 이탈 판정은 이때만 한다). */
 let byPointer = false;
 /** @typedef {{ left: number, top: number, right: number, bottom: number }} Rect */
@@ -256,6 +266,11 @@ function onPointerDown(ev) {
 function onFocusIn(ev) {
   const target = hintTarget(ev.target);
   if (!target || !focusVisible(target)) return;
+  if (escaping) {
+    // Esc로 닫힌 대화상자가 포커스를 돌려준 버튼: 포커스가 떠날 때까지 띄우지 않는다.
+    suppressed = target;
+    return;
+  }
   schedule(target, false);
 }
 
@@ -268,9 +283,24 @@ function onFocusOut(ev) {
 
 /** @param {KeyboardEvent} ev */
 function onKeydown(ev) {
-  if (ev.key !== 'Escape' || !current) return;
-  suppressed = current;
-  hide();
+  if (ev.key !== 'Escape' || ev.isComposing) return;
+  if (current && visible) {
+    // 보이는 툴팁: 이 Esc는 툴팁만 닫는다. 대화상자·편집기는 다음 Esc를 받는다.
+    suppressed = current;
+    hide();
+    ev.preventDefault();
+    ev.stopPropagation();
+    return;
+  }
+  // 500 ms 대기 중이면 띄우지 않는다. Esc는 그대로 흘려보낸다.
+  if (current) {
+    suppressed = current;
+    hide();
+  }
+  escaping = true;
+  window.setTimeout(() => {
+    escaping = false;
+  }, 0);
 }
 
 /**
@@ -333,7 +363,8 @@ export function mount(root) {
   root.addEventListener('pointerdown', onPointerDown, true);
   root.addEventListener('focusin', onFocusIn);
   root.addEventListener('focusout', onFocusOut);
-  root.addEventListener('keydown', onKeydown, true);
+  // 대화상자(document 캡처)보다 먼저 받아야 첫 Esc를 소비할 수 있다.
+  window.addEventListener('keydown', onKeydown, true);
   try {
     observer = new MutationObserver(onMutation);
   } catch {
@@ -348,7 +379,7 @@ export function mount(root) {
       root.removeEventListener('pointerdown', onPointerDown, true);
       root.removeEventListener('focusin', onFocusIn);
       root.removeEventListener('focusout', onFocusOut);
-      root.removeEventListener('keydown', onKeydown, true);
+      window.removeEventListener('keydown', onKeydown, true);
     },
   };
 }
@@ -363,4 +394,5 @@ export function unmount() {
   observer = null;
   suppressed = null;
   pressed = null;
+  escaping = false;
 }

@@ -447,3 +447,59 @@ test('툴팁: 포인터를 둔 채 단축키로 모달을 열면 배경 버튼�
   await page.keyboard.press('Escape');
   await expect(page.locator('.jdr-dialog')).toHaveCount(0);
 });
+
+test('툴팁: 대화상자 안에서 첫 Esc는 툴팁만 닫고, 다음 Esc가 대화상자를 닫으며 돌아간 버튼에는 다시 뜨지 않는다', async ({
+  page,
+}) => {
+  const tooltip = page.locator(TOOLTIP);
+  const dialog = page.locator('.jdr-dialog');
+  // 설정 버튼은 대화상자가 떠 있는 동안 꺼져 포커스를 잃으므로, 여는 버튼이 켜진 채인 필터 대화상자로 본다.
+  await createTableWith(page, '표', [{ name: '이름', type: 'text' }]);
+  const opener = page.locator('[data-action="filter"]');
+  await opener.click();
+  await expect(dialog).toBeVisible();
+  await page.mouse.move(5, 700);
+  // 툴팁이 있는 버튼까지 Tab으로 간다.
+  for (let i = 0; i < 20; i += 1) {
+    await page.keyboard.press('Tab');
+    const hinted = await page.evaluate(
+      () => document.activeElement instanceof HTMLElement && !!document.activeElement.dataset.hint,
+    );
+    if (hinted) break;
+  }
+  const focused = page.locator(':focus');
+  await expect(focused).toHaveAttribute('data-hint', /^hint\./);
+  const hint = (await focused.getAttribute('data-hint')) ?? '';
+  await expect(tooltip).toBeVisible();
+
+  // 조합 중의 Esc는 입력기의 것: 툴팁도 대화상자도 그대로다.
+  await focused.evaluate((el) => {
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(tooltip).toBeVisible();
+  await expect(dialog).toBeVisible();
+
+  // 첫 Esc: 툴팁만 닫는다. 대화상자와 포커스는 그대로다.
+  await page.keyboard.press('Escape');
+  await expect(tooltip).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(focused).toHaveAttribute('data-hint', hint);
+  // 다음 Esc: 대화상자를 닫고 포커스는 여는 버튼으로 돌아간다. 그 버튼의 툴팁은 다시 띄우지 않는다.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await page.waitForTimeout(300);
+  await expect(tooltip).toBeHidden();
+  // 포커스가 떠났다 돌아오면(키보드) 다시 뜬다.
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(opener).toBeFocused();
+  await expect(tooltip).toBeVisible();
+});
