@@ -173,9 +173,12 @@ export function createHeader(deps) {
     } finally {
       committing = false;
     }
+    // 확정을 기다리는 사이 다른 열의 편집기가 열렸으면(다른 이름 더블클릭의 첫 pointerdown이 이 확정을 시작한다)
+    // 그 편집기는 사용자가 지금 쓰는 것이다. 닫거나 포커스를 옮기는 것은 이 확정의 편집기일 때뿐이다.
+    if (renaming !== target) return;
     // 실패(스토어가 이미 알렸다): Enter는 편집기를 열어 두어 고칠 수 있게 하고, 포커스 이탈은 원래 이름으로 닫는다.
     if (ok || reason === 'blur') closeRename(reason === 'enter');
-    else if (renaming) input.focus();
+    else input.focus();
   }
 
   /** @param {KeyboardEvent} ev */

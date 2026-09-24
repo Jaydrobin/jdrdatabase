@@ -599,3 +599,21 @@ test('빈 행 편집 중 정렬 버튼을 누르면 포커스 이탈 확정이 �
   );
   expect(toasts.filter((text) => text.includes('빈 행의 입력을 닫았습니다'))).toEqual([]);
 });
+
+test('머리글 이름을 포커스 이탈로 확정하는 사이 다른 열의 이름 편집기를 열면, 그 편집기는 열린 채 포커스를 가진다', async ({
+  page,
+}) => {
+  await createTableWith(page, '이름표', [
+    { name: 'a', type: 'text' },
+    { name: 'b', type: 'text' },
+  ]);
+  const editor = page.locator('.jdr-grid__hrename');
+  await headerCell(page, 'a').locator('.jdr-grid__hname').dblclick();
+  await expect(editor).toBeFocused();
+  await editor.fill('AA');
+  // b의 이름 더블클릭: 첫 pointerdown이 a의 확정을 시작하고, 확정이 끝나기 전에 b의 편집기가 열린다(리뷰 N5).
+  await headerCell(page, 'b').locator('.jdr-grid__hname').dblclick();
+  await expect(headerCell(page, 'AA')).toHaveCount(1);
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('b');
+});
