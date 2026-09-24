@@ -278,6 +278,19 @@ export function toggleSort(sort, colId, append = false) {
 }
 
 /**
+ * 열 메뉴의 "오름차순·내림차순 정렬"(D-16). 다른 열의 정렬은 그대로 두고, 이 열이 목록에 있으면 그 자리에서
+ * 방향만 바꾸고 없으면 보조 정렬로 끝에 붙인다. 한 열에는 정렬 항목이 하나뿐이다.
+ * @param {SortSpec[]} sort
+ * @param {string} colId
+ * @param {'asc' | 'desc'} dir
+ * @returns {SortSpec[]}
+ */
+export function setSortDirection(sort, colId, dir) {
+  if (!sort.some((s) => s.colId === colId)) return [...sort, { colId, dir }];
+  return sort.map((s) => (s.colId === colId ? { colId, dir } : s));
+}
+
+/**
  * 살아 있지 않은 열을 가리키는 정렬·필터·숨김 항목을 뷰에서 뺀다(Step 6 예외 처리: 정렬 대상 열의 소프트 삭제).
  * @param {ViewSpec} viewSpec
  * @param {TableInfo} table

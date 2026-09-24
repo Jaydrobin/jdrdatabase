@@ -125,7 +125,6 @@ function previewCell(value) {
   const text = String(value);
   cell.textContent =
     text.length > CELL_PREVIEW_CHARS ? `${text.slice(0, CELL_PREVIEW_CHARS)}…` : text;
-  cell.title = text.length > CELL_PREVIEW_CHARS ? `${text.slice(0, 500)}` : '';
   return cell;
 }
 

@@ -5,6 +5,7 @@
  * Step 6: 표 도구 줄 — 검색 상자, 정렬·필터 대화상자, 뷰 선택·저장·삭제, 검색 인덱스 만들기·삭제.
  * Step 7: 가져오기 버튼. 숨은 `<input type="file">`을 열고 고른 파일로 가져오기 대화상자를 띄운다.
  * Step 9: 설정 버튼(대화상자는 `deps.openSettings`가 연다)과 표 도구 줄의 내보내기 버튼.
+ * Step 14: 도움말 버튼과 F1(D-19). 버튼과 선택 상자의 설명은 `data-hint`(`hint.<data-action>`)로 툴팁이 보인다.
  * 표 도구는 지금 고른 테이블에 대한 것이며 테이블이 없으면 숨긴다.
  * 사용자 데이터(파일 이름·뷰 이름)는 textContent로만 넣는다.
  */
@@ -16,6 +17,7 @@ import { formatInteger } from '../util/format.js';
 import { isDialogOpen } from './dialogs/dialog.js';
 import { confirmDeleteView, promptFilter, promptSort, promptViewName } from './dialogs/filter.js';
 import { openExportDialog } from './dialogs/export.js';
+import * as help from './dialogs/help.js';
 import { IMPORT_ACCEPT, IMPORT_INPUT_CLASS, openImportDialog } from './dialogs/import.js';
 
 /** @typedef {import('../app/store.js').Store} Store */
@@ -35,7 +37,7 @@ export const SEARCH_DEBOUNCE_MS = 300;
 
 /**
  * @param {string} label
- * @param {string} action data-action 값(E2E 셀렉터)
+ * @param {string} action data-action 값(E2E 셀렉터). 툴팁 키는 `hint.<action>`이다
  * @returns {HTMLButtonElement}
  */
 function makeButton(label, action) {
@@ -43,6 +45,7 @@ function makeButton(label, action) {
   button.type = 'button';
   button.className = 'jdr-toolbar__button';
   button.dataset.action = action;
+  button.dataset.hint = `hint.${action}`;
   button.textContent = label;
   return button;
 }
@@ -72,6 +75,7 @@ export function mountToolbar(parent, store, history, deps) {
   const settingsButton = makeButton(t('toolbar.settings'), 'settings');
   const undoButton = makeButton(t('toolbar.undo'), 'undo');
   const redoButton = makeButton(t('toolbar.redo'), 'redo');
+  const helpButton = makeButton(t('toolbar.help'), 'help-open');
 
   const fileName = document.createElement('span');
   fileName.className = 'jdr-toolbar__file';
@@ -108,6 +112,7 @@ export function mountToolbar(parent, store, history, deps) {
   const searchInput = document.createElement('input');
   searchInput.type = 'search';
   searchInput.className = 'jdr-toolbar__search';
+  // 텍스트 입력칸에는 툴팁을 달지 않는다(D-19). 레이블과 예시가 늘 보인다.
   searchInput.dataset.action = 'search';
   searchInput.setAttribute('aria-label', t('toolbar.searchLabel'));
   searchInput.placeholder = t('toolbar.searchPlaceholder');
@@ -123,6 +128,7 @@ export function mountToolbar(parent, store, history, deps) {
   const viewSelect = document.createElement('select');
   viewSelect.className = 'jdr-toolbar__view-select';
   viewSelect.dataset.action = 'view-select';
+  viewSelect.dataset.hint = 'hint.view-select';
   viewLabel.append(viewText, viewSelect);
   const viewSaveButton = makeButton(t('toolbar.viewSave'), 'view-save');
   const viewDeleteButton = makeButton(t('toolbar.viewDelete'), 'view-delete');
@@ -151,6 +157,7 @@ export function mountToolbar(parent, store, history, deps) {
     settingsButton,
     undoButton,
     redoButton,
+    helpButton,
     fileName,
     dirtyMark,
     readOnlyMark,
@@ -240,7 +247,11 @@ export function mountToolbar(parent, store, history, deps) {
         ? t('toolbar.searchIndexStale')
         : t('toolbar.searchIndexDisable')
       : t('toolbar.searchIndexEnable');
-    indexButton.title = table.ftsStale ? t('toolbar.searchIndexStaleHint') : '';
+    indexButton.dataset.hint = table.ftsEnabled
+      ? table.ftsStale
+        ? 'hint.search-index-stale'
+        : 'hint.search-index-disable'
+      : 'hint.search-index';
     // 외부(비STRICT) 테이블에는 인덱스를 만들지 않는다(D-07). LIKE 검색은 된다.
     indexButton.hidden = !table.strict;
     indexButton.disabled = !writable || busy;
@@ -446,6 +457,17 @@ export function mountToolbar(parent, store, history, deps) {
   const onRecent = () => void store.openRecent();
   const onSave = () => void store.save();
   const onSaveAs = () => void store.saveAs();
+  let helpOpen = false;
+  const onHelp = () => {
+    if (helpOpen) return;
+    helpOpen = true;
+    help
+      .open({ persistence: store.capabilities().persistence })
+      .catch((/** @type {unknown} */ err) => toasts.error(toAppError(err)))
+      .finally(() => {
+        helpOpen = false;
+      });
+  };
   const onUndo = () => void history.undo();
   const onRedo = () => void history.redo();
   newButton.addEventListener('click', onNew);
@@ -457,6 +479,7 @@ export function mountToolbar(parent, store, history, deps) {
   settingsButton.addEventListener('click', onSettings);
   undoButton.addEventListener('click', onUndo);
   redoButton.addEventListener('click', onRedo);
+  helpButton.addEventListener('click', onHelp);
   tools.addEventListener('click', onToolsClick);
   searchInput.addEventListener('input', onSearchInput);
   searchInput.addEventListener('compositionend', onSearchCompositionEnd);
@@ -466,7 +489,7 @@ export function mountToolbar(parent, store, history, deps) {
   // 모달이 떠 있으면 그 답을 기다리는 흐름(열기, 저널 복구)이 진행 중이다. 그 도중의 저장은
   // 아직 확정되지 않은 DB를 파일로 쓰고 저널을 비운다. 되돌리기도 같은 이유로 막는다.
   const unmountShortcuts = mountShortcuts(
-    { save: onSave, saveAs: onSaveAs, undo: onUndo, redo: onRedo },
+    { save: onSave, saveAs: onSaveAs, undo: onUndo, redo: onRedo, help: onHelp },
     { guard: () => !isDialogOpen() },
   );
 
@@ -502,6 +525,7 @@ export function mountToolbar(parent, store, history, deps) {
       settingsButton.removeEventListener('click', onSettings);
       undoButton.removeEventListener('click', onUndo);
       redoButton.removeEventListener('click', onRedo);
+      helpButton.removeEventListener('click', onHelp);
       tools.removeEventListener('click', onToolsClick);
       searchInput.removeEventListener('input', onSearchInput);
       searchInput.removeEventListener('compositionend', onSearchCompositionEnd);

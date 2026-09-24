@@ -344,6 +344,7 @@ export function createWasmEngine(options) {
         persistence: 'snapshot',
         cancellable: true,
         fts5: info?.compileOptions.includes('ENABLE_FTS5') ?? false,
+        compactsOnSave: false,
       };
     },
 
@@ -578,6 +579,20 @@ export function createWasmEngine(options) {
 
     async saveTo() {
       throw new AppError('E_UNSUPPORTED', 'saveTo is native-only; use snapshot() in wasm mode');
+    },
+
+    vacuum() {
+      requireUsable();
+      const lib = requireSqlite3();
+      const database = requireDb();
+      // VACUUM은 트랜잭션 안에서 돌 수 없다. `snapshot()`과 같은 이유로 장부(`txDepth`)가 아니라 sqlite에 묻는다.
+      if (txDepth > 0 || lib.capi.sqlite3_get_autocommit(database.pointer ?? 0) === 0) {
+        throw new AppError('E_DB_QUERY', 'vacuum inside transaction', { detail: { txDepth } });
+      }
+      // 진행 중인 문장이 있으면 VACUUM이 SQLITE_BUSY로 실패한다. 캐시의 문장은 모두 reset 상태지만
+      // VACUUM이 스키마를 다시 쓰므로 어차피 다시 준비된다. 비우고 시작해 두 조건을 함께 없앤다.
+      clearStatementCache();
+      execRaw('VACUUM');
     },
 
     interrupt() {

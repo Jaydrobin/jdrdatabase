@@ -1,17 +1,19 @@
 // @ts-check
 /**
  * 사이드바(Step 3): 테이블 목록과 선택한 테이블의 열 관리(추가·이름·타입·순서·소프트 삭제·복원).
- * 그리드(Step 4)가 오기 전까지 열 관리는 여기서 한다. 사용자 데이터(이름)는 textContent로만 넣는다.
+ * 머리글(D-16)이 한 열씩 고치는 경로라면, 여기는 여러 열을 연달아 고치거나 숨긴 열을 다루는 경로다.
+ * "+ 테이블"은 기본 열 30개를 가진 테이블을, "+ 열"은 자동 이름의 텍스트 열을 대화상자 없이 만든다(D-16).
+ * 사용자 데이터(이름)는 textContent로만 넣는다.
  * 이벤트 리스너는 위임으로 컨테이너에 한 번만 건다(행마다 익명 리스너를 달지 않는다).
  */
 import { t } from '../i18n/index.js';
 import { WARN_COLUMNS } from '../db/schema.js';
 import { toAppError } from '../util/errors.js';
+import { nextNames } from '../util/names.js';
 import {
-  confirmDeleteColumn,
-  promptChangeType,
+  changeColumnTypeFlow,
+  deleteColumnFlow,
   promptColumnName,
-  promptNewColumn,
   typeLabel,
 } from './dialogs/column.js';
 import { confirmDropTable, promptTableName } from './dialogs/table.js';
@@ -22,6 +24,9 @@ import { confirmDropTable, promptTableName } from './dialogs/table.js';
 /** @typedef {import('../db/tables.js').ColumnInfo} ColumnInfo */
 /** @typedef {import('./toast.js').Toasts} Toasts */
 
+/** "+ 테이블"이 만드는 기본 텍스트 열 수(D-16). 가져오기가 만드는 테이블에는 기본 열이 없다. */
+export const NEW_TABLE_COLUMNS = 30;
+
 /**
  * @typedef {object} Sidebar
  * @property {HTMLElement} el
@@ -30,7 +35,7 @@ import { confirmDropTable, promptTableName } from './dialogs/table.js';
 
 /**
  * @param {string} label
- * @param {string} action
+ * @param {string} action data-action 값. 툴팁 키는 `hint.<action>`이다(D-19)
  * @param {Record<string, string>} [data]
  * @returns {HTMLButtonElement}
  */
@@ -39,6 +44,7 @@ function makeButton(label, action, data = {}) {
   button.type = 'button';
   button.className = 'jdr-sidebar__button';
   button.dataset.action = action;
+  button.dataset.hint = `hint.${action}`;
   for (const [k, v] of Object.entries(data)) button.dataset[k] = v;
   button.textContent = label;
   return button;
@@ -46,7 +52,8 @@ function makeButton(label, action, data = {}) {
 
 /**
  * @param {HTMLElement} parent
- * @param {{ store: Store, commands: SchemaCommands, toasts: Toasts }} deps
+ * @param {{ store: Store, commands: SchemaCommands, toasts: Toasts, onColumnAdded?: (tableId: string, columnId: string) => void }} deps
+ *   `onColumnAdded`: "+ 열"이 만든 열로 그리드를 옮겨 머리글 이름 편집기를 연다(main.js가 그리드 호스트에 잇는다)
  * @returns {Sidebar}
  */
 export function mountSidebar(parent, deps) {
@@ -223,11 +230,17 @@ export function mountSidebar(parent, deps) {
     const column = table?.columns.find((c) => c.id === columnId) ?? null;
     switch (action) {
       case 'table-create': {
+        const taken = new Set(state.tables.map((tb) => tb.name));
         const name = await promptTableName({
           mode: 'create',
-          taken: state.tables.map((tb) => tb.name),
+          value: nextNames(t('table.defaultName'), taken, 1)[0] ?? '',
+          taken,
         });
-        if (name !== null) await commands.createTable({ name });
+        if (name === null) return;
+        const columns = nextNames(t('column.defaultName'), new Set(), NEW_TABLE_COLUMNS).map(
+          (columnName) => ({ name: columnName, type: /** @type {const} */ ('text') }),
+        );
+        await store.createTable(name, { columns });
         return;
       }
       case 'table-select':
@@ -251,12 +264,12 @@ export function mountSidebar(parent, deps) {
       case 'column-add': {
         const target = currentTable();
         if (!target) return;
-        const input = await promptNewColumn({ taken: liveNames(target) });
-        if (!input) return;
-        const result = await commands.addColumn(target.id, input);
-        if (result && result.columnCount >= WARN_COLUMNS) {
+        const result = await store.addDefaultColumn(target.id);
+        if (!result) return;
+        if (result.columnCount >= WARN_COLUMNS) {
           toasts.info('column.manyWarning', { count: result.columnCount });
         }
+        deps.onColumnAdded?.(target.id, result.columnId);
         return;
       }
       case 'column-rename': {
@@ -270,29 +283,9 @@ export function mountSidebar(parent, deps) {
         }
         return;
       }
-      case 'column-type': {
-        if (!table || !column) return;
-        const input = await promptChangeType({
-          name: column.name,
-          current: column.type,
-          choices: column.options?.choices,
-        });
-        if (!input) return;
-        // 10만 행 이상에서는 청크마다 진행률이 오고, 취소는 다음 청크 전에 롤백된다(Step 3 예외 처리).
-        const controller = new AbortController();
-        const result = await commands.changeColumnType(tableId, columnId, input, {
-          signal: controller.signal,
-          onProgress: (p) => {
-            toasts.progress('column.changeType.progress', { done: p.done, total: p.total }, () =>
-              controller.abort(),
-            );
-          },
-        });
-        toasts.progress(null);
-        if (result && result.nulled > 0)
-          toasts.info('column.changeType.nulled', { count: result.nulled });
+      case 'column-type':
+        if (table && column) await changeColumnTypeFlow({ commands, toasts, tableId, column });
         return;
-      }
       case 'column-up':
       case 'column-down': {
         if (!table || !column) return;
@@ -307,13 +300,9 @@ export function mountSidebar(parent, deps) {
         await commands.reorderColumns(tableId, ids);
         return;
       }
-      case 'column-delete': {
-        if (!table || !column) return;
-        if (await confirmDeleteColumn(column.name)) {
-          await commands.softDeleteColumn(tableId, columnId);
-        }
+      case 'column-delete':
+        if (table && column) await deleteColumnFlow({ commands, tableId, column });
         return;
-      }
       case 'column-restore':
         if (table && column) await commands.restoreColumn(tableId, columnId);
         return;

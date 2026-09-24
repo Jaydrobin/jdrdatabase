@@ -15,6 +15,7 @@ import { after, before, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { createNativeEngine, createPortCaller } from '../../src/db/engine-native.js';
 import { withCommonChecks } from '../../src/db/engine.js';
+import { defineCleanupContract } from '../unit/db/cleanup-contract.js';
 import { defineEngineContract } from '../unit/db/engine-contract.js';
 
 /** @typedef {import('../../src/db/engine.js').Engine} Engine */
@@ -82,6 +83,8 @@ async function openNativeEngine(bytes) {
 }
 
 defineEngineContract('native', openNativeEngine);
+// 데이터베이스 정리(Step 13 완료 기준): 같은 정리 시나리오를 rusqlite 엔진에 대해 돌린다.
+defineCleanupContract('native', openNativeEngine);
 
 test('native: 동기 응답이 처음 버퍼보다 크면 더 큰 버퍼로 다시 받는다', async () => {
   if (!caller) throw new Error('bridge is not ready');

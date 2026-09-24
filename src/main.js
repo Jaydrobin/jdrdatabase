@@ -26,6 +26,7 @@ import {
 import { createTabLock } from './io/tablock.js';
 import { createPrompts } from './ui/dialogs/conflict.js';
 import { confirmDialog, openDialog } from './ui/dialogs/dialog.js';
+import { openCleanupDialog } from './ui/dialogs/cleanup.js';
 import { openSettingsDialog } from './ui/dialogs/settings.js';
 import { mountLongtextPanel } from './ui/editor/longtext.js';
 import { mountGridHost } from './ui/grid/grid.js';
@@ -33,6 +34,7 @@ import { mountSidebar } from './ui/sidebar.js';
 import { mountStatusbar } from './ui/statusbar.js';
 import { mountToasts } from './ui/toast.js';
 import { mountToolbar } from './ui/toolbar.js';
+import * as tooltip from './ui/tooltip.js';
 import { base64ToBytes, formatBytes } from './util/bytes.js';
 import { AppError, toAppError } from './util/errors.js';
 import { formatInteger } from './util/format.js';
@@ -393,6 +395,14 @@ async function start(shell) {
           const s = await ready;
           return s.client.call(op, args);
         },
+        /**
+         * 열을 정해 테이블을 만들고 고른다(스토어의 `createTable`, D-16). "+ 테이블"은 기본 열 30개를 만들므로
+         * 특정 열 구성이 필요한 E2E(편집·그리드·뷰)가 쓴다. 저널·dirty에 반영된다.
+         * @param {string} name
+         * @param {import('./db/tables.js').NewColumn[]} columns
+         */
+        createTable: (name, columns) =>
+          store ? store.createTable(name, { columns }) : Promise.resolve(null),
         /** 지금 고른 테이블의 뷰 상태(Step 6 E2E용). */
         view: () => {
           if (!store) return null;
@@ -456,13 +466,23 @@ async function start(shell) {
   active.on('file:opened', syncSaveTimer);
 
   async function openSettings() {
-    const next = await openSettingsDialog({
+    const outcome = await openSettingsDialog({
       store: active,
       toasts: shell.toasts,
       settings: current,
       gzipSupported: filesystem.gzipSupported(),
     });
-    if (!next) return;
+    if (!outcome) return;
+    // 정리 버튼으로 닫혔으면 설정을 적용한 뒤 정리 대화상자를 연다(대화상자는 하나만 열린다).
+    if (outcome.openCleanup)
+      void applySettings(outcome.settings).then(() =>
+        openCleanupDialog({ store: active, toasts: shell.toasts }),
+      );
+    else await applySettings(outcome.settings);
+  }
+
+  /** @param {import('./app/settings.js').Settings} next */
+  async function applySettings(next) {
     current = next;
     active.setDeviceName(next.deviceName);
     active.setSaveGzip(next.saveGzip);
@@ -483,10 +503,13 @@ async function start(shell) {
 
   historyRef = history;
   mountToolbar(shell.toolbarHost, active, history, { toasts: shell.toasts, openSettings });
+  const schemaCommands = createSchemaCommands(active);
   const sidebar = mountSidebar(shell.body, {
     store: active,
-    commands: createSchemaCommands(active),
+    commands: schemaCommands,
     toasts: shell.toasts,
+    // "+ 열"은 대화상자 없이 끝나고, 그리드가 그 열로 옮겨 머리글의 이름 편집기를 연다(D-16).
+    onColumnAdded: (tableId, columnId) => gridHost?.startRename(tableId, columnId),
   });
   shell.body.prepend(sidebar.el);
   // 장문 편집기는 그리드 오른쪽의 사이드 패널이다. 확정은 셀 편집 커맨드 하나로 히스토리에 들어간다.
@@ -494,6 +517,8 @@ async function start(shell) {
     client: session.client,
     toasts: shell.toasts,
     onSave: async ({ target, oldValue, oldUpdatedAt, newValue }) => {
+      // 빈 행(rowId null)은 대상의 `commit`이 확정한다(편집 컨트롤러). 여기 오면 잘못 연 것이다.
+      if (target.rowId === null) return false;
       if (oldValue === newValue) return true;
       const result = await history.apply(
         editCell({
@@ -513,6 +538,7 @@ async function start(shell) {
     store: active,
     client: session.client,
     toasts: shell.toasts,
+    commands: schemaCommands,
     history,
     longtext,
     confirmIrreversible: ({ count }) =>
@@ -606,6 +632,8 @@ async function boot() {
   if (!root) throw new AppError('E_UNKNOWN', 'root element #app is missing');
   document.title = t('app.title');
   const shell = mount(root);
+  // 툴팁(D-19)은 대화상자까지 덮도록 body에 위임한다. 앱이 사는 동안 하나다.
+  tooltip.mount(document.body);
   // 셸을 띄운 뒤의 실패는 모두 잠금 화면으로 간다. 기능 감지·임베드 블록 읽기처럼
   // 엔진 기동 전에 던지는 것도 포함된다.
   try {

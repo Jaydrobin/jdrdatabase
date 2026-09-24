@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | 0.11 (초안) |
-| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정, 0.9: 2026-09-21 세션 G 내보내기 조각 스트림·gzip·자동 저장·백업 복원 확정, 0.10: 2026-09-21 세션 H 성능 회귀 판정·오류 주입·Worker 종료 잠금·접근성 검사 확정, 0.11: 2026-09-21 세션 I 네이티브 엔진의 동기 호출 중계·작업 사본 dirty 판정·러스트 크레이트 구성·데스크톱 저장 op 인자 확정) |
+| 문서 버전 | 0.12 |
+| 작성일 | 2026-09-19 (0.2: 2026-09-20, 0.3: 2026-09-20 세션 A 실측 반영, 0.4: 2026-09-20 세션 B 커맨드 형식·메타 스키마 확정, 0.5: 2026-09-20 세션 C 창 질의 형식·성능 픽스처 규격 확정, 0.6: 2026-09-20 세션 D 데이터 커맨드·배치 문장·행 읽기 op 확정, 0.7: 2026-09-21 세션 E 뷰 스펙·필터·정렬 빌더·검색 인덱스 단계·뷰 op 확정, 0.8: 2026-09-21 세션 F 가져오기 파이프라인·op 인자·저널 정지 확정, 0.9: 2026-09-21 세션 G 내보내기 조각 스트림·gzip·자동 저장·백업 복원 확정, 0.10: 2026-09-21 세션 H 성능 회귀 판정·오류 주입·Worker 종료 잠금·접근성 검사 확정, 0.11: 2026-09-21 세션 I 네이티브 엔진의 동기 호출 중계·작업 사본 dirty 판정·러스트 크레이트 구성·데스크톱 저장 op 인자 확정, 0.12: 2026-09-23 v2 사용성 묶음 설계 — 기본 시트·빈 행·열 머리글 조작, 데이터베이스 정리·앱 데이터 비우기, 도움말·툴팁(D-16~D-19, Step 12~14, 세션 N~P)) |
 | 대상 | 단일 HTML 파일로 배포되는 로컬 데이터베이스 관리 웹앱과, 같은 소스로 빌드하는 타우리(Tauri) 데스크톱 앱 |
 | 관련 문서 | `CLAUDE.md` (작성 규약·코드 점검), `README.md` |
 
@@ -83,6 +83,16 @@
 - 모바일 터치 최적화
 - 브라우저 모드에서 브라우저 메모리를 넘는 규모(수 GB)의 파일. 이 규모는 데스크톱 모드가 담당한다
 - 데스크톱 모드에서 원본 파일을 작업 사본 없이 직접 여는 방식, 그리고 CSV·XLSX 파서를 러스트로 옮기는 것(파서는 두 모드 모두 JS Worker)
+
+### 1.3 v2 사용성 목표
+
+v1을 실제로 써 본 결과, 스프레드시트처럼 바로 입력하기까지의 단계가 많고 일부 기능은 설명 없이 쓰기 어려웠다. v2 사용성 묶음(Step 12~14)의 목표는 다음과 같다.
+
+1. 새 테이블을 만들면 바로 입력할 수 있다. 기본 열 30개가 이름·타입을 묻지 않고 만들어지고, 마지막 행 아래의 빈 행 30줄에 값을 쓰면 그 자리에 행이 생긴다(D-16).
+2. 열 이름과 타입은 만든 뒤에 머리글에서 바꾼다. 열 추가는 대화상자 없이 끝난다(D-16).
+3. 삭제한 열을 파일에서 완전히 지우고 파일 크기를 줄일 수 있다(D-17). v1은 이 기능을 D-08에 적어 두고도 어느 Step에도 배정하지 않아 삭제 확인 문구만 이 기능을 안내하고 있었다.
+4. 앱이 이 기기에 남긴 데이터(데스크톱의 작업 사본, 브라우저의 직전 저장본)를 앱 안에서 비울 수 있다(D-18).
+5. 모든 버튼에 짧은 설명이 있고, 한 문장으로 설명되지 않는 개념은 도움말에서 찾을 수 있다(D-19).
 
 ---
 
@@ -174,7 +184,7 @@
 - 테이블 삭제(`tables.drop`)는 `undo`가 비어 있고 `irreversible: true`다. UI가 되돌릴 수 없음을 확인받고 히스토리를 비운다. `do`는 검색 인덱스 삭제(D-07) → 메타 정리 → `DROP TABLE` 순서다.
 - 메인 스레드는 undo/redo 스택(최대 200개)을 유지하고, 같은 커맨드를 저널(D-04)에 기록한다.
 - 대량 붙여넣기·행 다중 삭제는 하나의 복합 커맨드다. 되돌리기용 스냅샷이 10,000행을 넘으면 사용자에게 "되돌릴 수 없는 작업"임을 확인받고 히스토리를 비운다.
-- 열 삭제는 **소프트 삭제**다. `_jdr_columns.deleted_at`만 설정하고 물리 열은 남긴다. 되돌리기가 가능하고 비용이 0이다. 물리 `DROP COLUMN`은 "데이터베이스 정리(VACUUM)" 메뉴에서만 수행한다.
+- 열 삭제는 **소프트 삭제**다. `_jdr_columns.deleted_at`만 설정하고 물리 열은 남긴다. 되돌리기가 가능하고 비용이 0이다. 물리 열을 없애는 것은 "데이터베이스 정리"(D-17)뿐이며, 정리는 되돌릴 수 없는 커맨드다.
 - 예외: 가져오기(Step 7·8)는 커맨드가 아니다. 수십만 행을 커맨드 객체로 만들면 저널·되돌리기 상한을 모두 넘고 재생에 원본 파일이 필요하기 때문이다. `import.run`이 트랜잭션 하나로 직접 삽입하고, 성공 뒤 메인이 되돌리기 스택을 비우고 저널 기록을 멈춘 채 "지금 저장하세요"를 띄운다(Step 7 "가져오기는 커맨드가 아니다").
 
 ### D-09. 가져오기는 파서·추론·매핑·삽입의 4단계 파이프라인이며 파서는 행 이터레이터로 통일한다
@@ -227,7 +237,7 @@
 
 ```js
 init(opts)                     // wasm: { wasmBinary } / native: {}
-capabilities()                 // { mode, maxFileBytes, warnFileBytes, persistence, cancellable, fts5 }
+capabilities()                 // { mode, maxFileBytes, warnFileBytes, persistence, cancellable, fts5, compactsOnSave }
 open(source)                   // wasm: bytes / native: { originalPath }
 close()
 exec(sql, params)              // 읽기. 결과 행 배열. 1만 행 초과 거부
@@ -238,9 +248,11 @@ prepareCached(sql)             // wasm 전용 최적화. native는 no-op 핸들
 snapshot()                     // wasm: Uint8Array(sqlite3_serialize NOCOPY, 폴백 sqlite3_js_db_export) / native: E_UNSUPPORTED
 saveTo(originalPath, expected) // native 전용. VACUUM INTO 임시 → 원자적 교체
 interrupt()                    // 진행 중 문장 중단
+vacuum()                       // wasm: 트랜잭션 밖 VACUUM(데이터베이스 정리, Step 13) / native: E_UNSUPPORTED
 ```
 
 - 모드 선택은 시작 시 타우리 전역 객체(`window.__TAURI_INTERNALS__`)의 존재로 판정한다. 판정은 `main.js` 한 곳에서만 하고 결과를 스토어에 둔다. 다른 모듈은 `capabilities()`를 읽고 모드 문자열을 비교하지 않는다.
+- `compactsOnSave`는 저장이 파일의 빈 페이지를 없애는가다. native는 `VACUUM INTO`로 저장하므로 `true`, wasm은 `snapshot()`이 빈 페이지까지 그대로 직렬화하므로 `false`다. 데이터베이스 정리(D-17)가 이 값으로 `vacuum()`을 따로 부를지 정한다(Step 13에서 추가). `vacuum()`은 트랜잭션 밖에서만 도는 `VACUUM`을 위한 유일한 입구다. `run()`은 트랜잭션 밖의 쓰기를 거부하고 `VACUUM`은 트랜잭션 안에서 돌 수 없으므로 따로 둔다. native는 `compactsOnSave`가 참이라 부를 일이 없고 `E_UNSUPPORTED`다(러스트 명령을 늘리지 않는다).
 - 상한은 엔진이 보고한다. wasm은 `warnFileBytes` 700 MB, `maxFileBytes` 1.5 GB이고 native는 둘 다 `Infinity`다. 파일 열기·가져오기·붙여넣기의 크기 검사와 편집으로 커진 DB의 크기 경고(Step 10)는 모두 이 값을 기준으로 하며 UI 코드에 숫자를 두지 않는다.
 - Worker 안에서는 타우리 invoke를 직접 쓸 수 없다. `engine-native.js`는 Worker에서 실행되면 메인 스레드에 `engine:call` 메시지로 호출을 위임하고, 메인의 `io/ipc-bridge.js`가 invoke로 러스트 명령을 부른 뒤 `engine:result`로 되돌린다. 왕복이 한 번 늘어나므로 가져오기·붙여넣기는 `runBatch`로 1,000행을 한 번에 보낸다. 창 질의(200행)는 왕복 1회라 영향이 없다.
 - 인터페이스의 `exec`·`run`은 동기 함수이고 `query.js`·`tables.js`·`schema.js`·`command.js`는 그 반환값을 바로 쓴다. 네이티브 구현은 이 두 호출을 **앱의 엔진 프로토콜에 대한 동기 XHR**로 만족한다: 앱 크레이트가 `jdr` 커스텀 프로토콜(`register_asynchronous_uri_scheme_protocol`. 문서에서는 `convertFileSrc('call', 'jdr')`, 즉 `jdr://localhost/call` 또는 Windows의 `http://jdr.localhost/call`)을 등록하고, Worker의 `engine-native.js`가 `POST` 본문 `{ cmd, args }`(text/plain이라 CORS 사전 요청이 없다)와 질의 문자열 토큰(`app_info`가 프로세스마다 새로 준다)으로 부른다. 응답은 `{ ok, result | error }`이고 `Access-Control-Allow-Origin: *`를 단다(타우리 자체 IPC의 `ipc://` 프로토콜과 같은 방식). `open`·`close`·`runBatch`·`transaction`의 BEGIN/COMMIT/ROLLBACK·`saveTo`는 같은 주소에 fetch로 부른다. 러스트는 요청마다 스레드를 써서 긴 명령(수 GB 저장)이 WebView 스레드를 막지 않게 한다. **진행률은 메인 스레드가 폴링한다**: 이 프로토콜에는 진행률 채널이 없어 러스트의 보고가 Worker까지 오지 못하므로, 코어가 마지막 보고를 들고 있고(`Backend::last_progress`) 메인이 열기·저장 중 500 ms마다 `engine_call`로 `progress_peek`을 불러 상태바에 그린다(`store.withNativeProgress`). 그 명령은 커넥션 뮤텍스를 잡지 않아 도는 명령을 막지 않고, 폴링이 실패해도 작업 자체에는 영향이 없다(표시만 빠진다). 5 GB 파일이면 사본 복사가 수십 초, 저장이 그보다 길어 진행률이 없으면 앱이 멈춘 것처럼 보인다. Worker가 동기 XHR로 멈춰 있는 동안 메인은 자유롭고, 취소는 wasm 모드와 같이 배치 사이에서만 받는다.
@@ -261,6 +273,45 @@ interrupt()                    // 진행 중 문장 중단
 - `.bak` 복원은 엔진 op가 아니라 러스트 명령 `restore_backup(originalPath, targetPath)`(`<원본>.bak`을 고른 경로로 복사)이며, `backup_info(originalPath)`가 크기·시각을 준다. `io/filesystem.js`가 둘을 감싼다.
 - 데스크톱 모드에서 IPC가 실패하면 wasm 엔진으로 폴백하지 않는다. 폴백하면 상한이 조용히 되돌아와 사용자가 큰 파일을 열다 실패하게 되므로, `E_NATIVE_IPC`로 앱을 잠그고 원인을 보여 준다.
 - 하지 않는 것: 원본을 직접 여는 "직접 모드"는 v1에 없다(작업 사본 복사가 부담되는 수십 GB 파일은 v1.1에서 옵션으로 검토). CSV·XLSX 파서는 두 모드 모두 JS Worker에서 돌리며, 러스트 파서로 옮기는 것은 Step 11의 성능 측정 후 판단한다.
+
+### D-16. 새 테이블은 바로 입력할 수 있는 시트로 시작하고, 열 이름·타입은 머리글에서 바꾼다
+
+- **기본 열.** 사이드바의 "+ 테이블"은 텍스트 열 30개(`열 1` ~ `열 30`)를 가진 테이블을 커맨드 하나로 만든다(`tables.create`의 `columns`). 가져오기가 만드는 새 테이블은 기본 열 없이 원본의 열만 가진다. 테이블 이름 대화상자는 남기되 `테이블 n`을 미리 채워 Enter 한 번으로 끝나게 한다.
+- **자동 이름.** 이름은 i18n 형식 문자열(`column.defaultName` = `열 {n}`, `table.defaultName` = `테이블 {n}`)의 `n`을 1부터 올리며 이미 있는 이름을 건너뛴 가장 작은 번호로 정한다. 열은 살아 있는 열뿐 아니라 **소프트 삭제된 열의 이름도 건너뛴다.** `restoreColumn`은 같은 이름의 살아 있는 열이 있으면 복원을 거부하므로, 삭제한 `열 5`의 이름을 새 열이 가져가면 그 열을 되살릴 수 없게 된다.
+- **열 추가.** "+ 열"은 대화상자 없이 자동 이름의 텍스트 열을 끝에 붙이고, 그리드를 그 열로 옮겨 머리글의 이름 편집기를 연다(이름 전체 선택). 바로 이름을 입력하거나 Enter·Esc로 자동 이름을 그대로 둔다. 그 편집기에서 확정한 이름은 열 추가와 한 히스토리 항목이 되어, 되돌리기 한 번에 열이 사라진다(사용자에게 추가와 이름 짓기는 한 동작이다). 타입과 선택 항목은 머리글 메뉴의 "타입 변경"에서 바꾼다. v1의 열 추가 대화상자는 없앤다.
+- **빈 행.** 그리드는 마지막 행 아래에 **빈 행 30줄**을 그린다. 빈 행은 화면에만 있고 DB에는 없다. k번째 빈 행의 셀에 값을 확정하면 그 줄까지 k개 행을 만들고 마지막 행에 값을 넣는 커맨드 하나를 적용한다(앞의 k−1행은 빈 행이 된다). 대안을 버린 사유: 빈 행을 실제로 만들어 두면 행 수·내보내기·필터 결과에 빈 행이 섞이고, 한 행만 만들면 입력한 값이 위로 올라가 입력한 위치와 저장된 위치가 달라진다. 빈 행은 늘 id 순서의 끝에 있으므로 D-08의 "행은 언제나 id 순서의 끝에 붙는다"와 충돌하지 않는다.
+- 빈 행과 선택·붙여넣기. 모두 선택(`Ctrl+A`)은 실제 행만 고른다(실제 행이 없으면 첫 칸 하나). 붙여넣기에서 마지막 실제 행 아래(빈 행 자리)에 떨어지는 **끝부분의 빈 줄**(쓰는 칸이 모두 빈 줄)은 행을 만들지 않고 버린다. 값이 든 줄 사이의 빈 줄은 붙여넣은 자리를 지키므로 빈 행이 된다. 사유: 모두 선택이 빈 행 30줄을 고르면 복사한 내용에 빈 줄 30개가 붙고, 그것을 붙여넣을 때마다 값 없는 행 30개가 DB에 생긴다. 사용자가 빈 행까지 넓혀 고른 범위의 복사는 여전히 빈 행을 빈 칸으로 내지만(아래 Step 12 예외 처리), 붙여넣기 규칙 덕분에 그 내용을 다시 붙여넣어도 빈 행이 생기지 않는다.
+- 빈 행은 정렬·필터·검색이 **없는** 뷰에서만 그린다. 그런 뷰에서는 새 행이 입력한 자리에 보인다는 보장이 없다(Step 6 예외 처리). 읽기 전용 상태, 외부(비STRICT) 테이블, 살아 있는 열이 없는 테이블에도 그리지 않는다.
+- **머리글.** v1은 머리글 셀 어디를 클릭해도 정렬이 바뀌었다. v2의 머리글 셀은 [이름][정렬 버튼][메뉴 버튼 ▾][너비 조절 손잡이]로 나뉜다. 이름 더블클릭은 이름 편집, 정렬 버튼 클릭은 v1의 정렬 순환(없음 → 오름차순 → 내림차순 → 없음, Shift+클릭은 보조 정렬), 메뉴 버튼 클릭과 머리글 우클릭은 열 메뉴다. 이름 부분의 한 번 클릭은 아무것도 하지 않는다. 사유: `dblclick`은 `click` 두 번 뒤에 오므로 머리글 클릭 정렬을 남기면 이름을 편집하려 할 때마다 정렬이 두 번 바뀐다. 클릭 뒤 일정 시간을 기다려 구분하면 모든 정렬이 OS의 더블클릭 간격만큼 늦어진다. 이 앱이 따르는 NocoDB와 Airtable도 머리글 클릭으로 정렬하지 않는다.
+- **열 메뉴.** 이름 바꾸기, 타입 변경…, 오름차순 정렬, 내림차순 정렬, 정렬 해제, 열 숨기기, 열 삭제…. 읽기 전용이거나 외부 테이블이면 정렬·숨기기만 켜진다. 키보드로는 활성 셀에서 Shift+F10 또는 ContextMenu 키로 그 열의 메뉴를 연다. 그리드의 탭 정지는 v1처럼 하나이며, 머리글의 버튼은 `tabindex="-1"`이다.
+- 사이드바의 열 항목 버튼(이름, 타입, 삭제, 순서, 숨김, 복원)은 그대로 둔다. 여러 열을 연달아 고치거나 숨긴 열을 다룰 때의 경로다.
+
+### D-17. 데이터베이스 정리는 삭제한 열을 물리적으로 없애고 파일의 빈 공간을 줄이는 되돌릴 수 없는 작업이다
+
+- **대상.** 소프트 삭제된 열 가운데 사용자가 고른 열. 대화상자는 테이블별로 삭제된 열을 모두 체크된 채로 보여 주고, 체크를 풀면 그 열은 계속 복원할 수 있다. 고른 열이 없어도 실행할 수 있으며, 그때는 빈 공간 줄이기만 한다. 다만 `compactsOnSave`가 `true`인 엔진(native)에서는 저장이 이미 빈 공간을 없애므로 고른 열이 없으면 할 일이 없고 실행 버튼이 꺼진다(체크를 모두 풀었을 때도 같다). 재작성이 스키마를 그대로 옮길 수 없는 테이블(다른 도구가 더한 외래 키·인덱스·트리거·뷰·열 제약이 있는 테이블)은 대상이 아니다. 대화상자는 그 테이블의 삭제된 열을 체크 상자가 꺼진 채 이유와 함께 보인다(Step 13 예외 처리).
+- **테이블 재작성.** 고른 열이 있는 테이블마다 한 번 다시 쓴다: 남길 열로 새 STRICT 테이블 `_jdr_tmp_<테이블 id>` 생성 → `INSERT INTO … SELECT` → 원래 테이블 `DROP` → 새 테이블을 원래 이름으로 `RENAME`. `ALTER TABLE … DROP COLUMN`을 쓰지 않는 이유: 열마다 테이블 전체를 다시 쓰고, 트리거가 참조하는 열은 지울 수 없는데 검색 인덱스의 갱신 트리거(D-07의 `AFTER UPDATE OF <인덱스 열>`)가 삭제된 열을 참조하고 있을 수 있다. 검색 인덱스가 있는 테이블은 재작성 전에 인덱스를 지우고, 재작성 뒤 **지금의 검색 대상 열**로 다시 만든다. 오래된 인덱스(D-07의 `ftsStale`)도 이때 함께 바로잡힌다. 시스템 열(`id`, `_created_at`, `_updated_at`)의 값과 남는 열의 값·물리 타입·순서는 그대로다.
+- **커맨드.** 테이블마다 `column.purge` 커맨드 하나(`undo`가 비고 `irreversible: true`)를 만들고, 모든 테이블의 커맨드를 바깥 트랜잭션 하나 안에서 적용한다(커맨드마다 중첩 SAVEPOINT). 하나라도 실패하거나 취소되면 전부 롤백되어 정리 전 상태 그대로다. 메인은 테이블 삭제(D-08)처럼 히스토리를 비우고 커맨드들을 저널에 기록한다. 저널 재생은 `do` 방향이라 같은 재작성이 다시 일어난다.
+- **빈 공간 줄이기(`VACUUM`).** `compactsOnSave`가 `false`인 엔진(wasm)에서만 재작성 커밋 뒤에 실행한다. 트랜잭션 안에서 돌 수 없어 커맨드에 넣지 않고 저널에도 남기지 않는다. 논리 상태를 바꾸지 않으므로 재생할 필요가 없다. native는 저장이 `VACUUM INTO`라 저장한 파일에 빈 페이지가 없으므로 작업 사본을 줄이는 데 파일 크기에 비례하는 시간을 쓰지 않는다. 그래서 native의 작업 사본은 재작성 뒤 오히려 커지며, 완료 알림은 크기 변화를 보이지 않고 "저장하면 파일에서도 사라진다"만 알린다. `VACUUM`이 실패해도 재작성은 이미 커밋되었고 DB는 그대로 쓰고 저장할 수 있다.
+- **남는 사본.** 지운 열의 값은 저장하기 전의 원본 파일, 직전 저장본(브라우저의 IDB `backups`, 데스크톱의 `.bak`), 클라우드 드라이브의 버전 기록에 남아 있다. 정리 대화상자가 이것과 "파일은 저장해야 작아진다"를 실행 전에 알린다. 브라우저의 직전 저장본은 D-18로 지울 수 있다.
+- **위치.** 설정 대화상자의 "데이터베이스" 절에 "데이터베이스 정리…" 버튼을 둔다. 열 삭제 확인 문구(`column.delete.message`)가 이 위치를 가리키게 고친다.
+
+### D-18. 앱이 이 기기에 남긴 데이터는 설정에서 비운다
+
+- **데스크톱 모드.** 설정의 "복구를 기다리는 작업 사본" 목록에 "모두 버리기"를 둔다. 목록에 있는 사본(저장하지 않은 변경이 든 사본)을 하나씩 `removeWorkcopy`로 지운다. 지금 열린 DB의 사본은 목록에 없으므로 대상이 아니다. 저장이 끝난 사본은 기동 때 이미 지워지므로(`purge_clean`) 목록에 나타나지 않는다. 설정은 실제로 지워진 사본의 줄만 없애고, 목록을 다시 읽지 못했으면 아무것도 지우지 않은 것으로 보인다. 러스트 명령은 늘지 않는다.
+- **브라우저 모드.** 설정의 "직전 저장본" 절에 "이 브라우저의 직전 저장본 모두 지우기"를 둔다. 개수는 IDB 키 목록으로 센다. 크기는 값을 읽어야 알 수 있고 값 하나가 최대 200 MB이므로 세지 않으며, 대신 `navigator.storage.estimate()`(기능 감지)의 사이트 전체 사용량을 보여 준다.
+- **비우지 않는 것.** 저널(미저장 변경 기록)은 이 버튼으로 지우지 않는다. 저널은 복구의 유일한 사본이고, 저장하거나 복구 질문에서 "버리기"를 고르면 이미 비워진다. 최근 파일 핸들, `known_revisions`, 설정은 사용자 데이터의 내용을 담지 않는다.
+- **시크릿 모드.** 앱은 시크릿 모드인지 판정하지 않는다(표준 API가 없고, 저장소 할당량으로 추정하는 방법은 브라우저마다 다르다). 도움말(D-19)이 "시크릿 창을 모두 닫으면 복구 기록과 직전 저장본도 사라진다"를 브라우저의 일반적 동작으로 설명하고, 이 앱에서의 실측은 `docs/support-matrix.md`에 기록한다.
+
+### D-19. 설명은 툴팁과 도움말 두 층으로 둔다
+
+- **툴팁**은 버튼·선택 상자 하나가 무엇을 하는지 한 문장으로 말한다. **도움말 대화상자**는 한 문장으로 설명되지 않는 개념(열 삭제와 정리, 저장·복구, 여러 PC에서 쓰기, 검색 인덱스, 빈 행, 단축키)을 주제별로 담는다. 툴팁만으로는 개념을 담을 수 없고, 도움말만 있으면 버튼마다 찾아 읽어야 한다.
+- 툴팁은 HTML `title` 속성을 쓰지 않는다. `title`은 키보드 포커스와 터치에서 보이지 않고, 표시 지연·위치·닫기를 제어할 수 없어 WCAG 2.1의 1.4.13(추가 콘텐츠를 닫을 수 있고, 가리킬 수 있고, 유지되어야 함)을 만족하지 못한다. 공용 모듈 `ui/tooltip.js`가 마우스를 올린 뒤 500 ms 또는 키보드 포커스 즉시 보여 주고, Esc·포커스 이탈·포인터 이탈로 닫으며, 대상에 `aria-describedby`를 단다. 툴팁 요소는 문서에 하나다.
+- 툴팁 요소는 포인터 이벤트를 받지 않는다(`pointer-events: none`). 받으면 툴팁이 그 아래의 버튼·머리글을 덮어 클릭을 가로채고, 포인터가 툴팁 위에 있는 한 닫히지 않으므로 덮인 버튼을 누를 길이 없어진다. "가리킬 수 있음"은 좌표로 지킨다: 포인터가 대상을 떠나도 대상과 툴팁을 함께 감싼 사각형 안에 있는 동안은 닫지 않는다. 누르면(`pointerdown`) 닫고 포인터가 누른 자리(그때 대상의 사각형)를 떠날 때까지 다시 띄우지 않는다. 요소가 아니라 자리로 기억하는 까닭은 누른 결과로 대상이 다시 그려지면(머리글 정렬, 사이드바 목록) 포인터 아래에 새 노드가 생겨 브라우저가 그 노드에 `pointerover`를 다시 내기 때문이다. 마우스로 띄운 툴팁은 스크롤하면 위치가 어긋나므로 닫는다. 키보드로 띄운 툴팁은 스크롤을 따라 위치를 다시 잡고, 대상이 화면이나 스크롤된 영역 밖으로 나갈 때만 닫는다. Tab 포커스가 대상을 화면 안으로 굴리는 스크롤이 툴팁을 띄우자마자 닫지 않게 하기 위해서다. 모달 대화상자가 열렸는데 대상이 그 밖에 있으면(단축키로 대화상자를 연 경우) 닫는다.
+- Esc는 툴팁이 보이는 동안 툴팁만 닫는다. 그 첫 Esc는 `window`의 캡처 단계에서 소비해(전파와 기본 동작을 막는다) 열린 대화상자·편집기가 받지 않고, 다음 Esc가 전처럼 대화상자를 닫거나 편집을 취소한다. WAI-ARIA APG의 툴팁 패턴과 WCAG 1.4.13의 "닫을 수 있음"(포인터·포커스를 옮기지 않고 닫는 수단)을 따른다. 대화상자 안의 버튼은 키보드 포커스만으로 툴팁이 뜨므로, Esc가 둘 다 닫으면 툴팁을 닫으려다 입력하던 대화상자를 잃는다. 한글 조합 중(`isComposing`)의 Esc는 입력기의 것이라 건드리지 않는다. 툴팁이 없을 때의 Esc로 대화상자가 닫혀 포커스가 여는 버튼으로 돌아가면, 그 버튼의 툴팁은 포커스가 떠날 때까지 띄우지 않는다(방금 누른 Esc가 닫으려던 것을 다시 띄우지 않는다).
+- 툴팁을 다는 것은 버튼과 선택 상자다. 텍스트 입력칸(검색 상자, 이름 입력)에는 달지 않는다. 입력칸은 포커스를 얻으면 마우스로 눌렀어도 `:focus-visible`이어서 툴팁이 입력하는 내내 떠 있게 되고, 필요한 정보는 레이블·예시·설명 줄이 이미 늘 보여 준다(아래).
+- 문구는 i18n 키로만 둔다. 툴팁은 `hint.<data-action>`이고, `data-action`이 없는 요소(머리글의 정렬·메뉴 버튼, 고정 열 선택 상자)는 `hint.<요소 이름>`, 상태에 따라 하는 일이 바뀌는 버튼(검색 인덱스 만들기·삭제·오래됨)은 상태마다 키를 둔다. 도움말은 `help.<주제>.title`과 `help.<주제>.body`(빈 줄로 나눈 문단, `textContent`로 출력)다. 단축키 주제는 문구가 아니라 `app/shortcuts.js`의 단축키 표에서 만든다. 문구로 따로 쓰면 단축키를 바꿀 때 도움말이 어긋난다. 같은 까닭으로 툴팁 문구(`hint.*`)에도 키 조합을 적지 않는다. 단축키가 있는 요소는 툴팁이 표에서 그 조합을 찾아 도움말과 같은 형식(macOS는 `⌘`·`⇧`)으로 문구 뒤에 붙인다(`tooltip.withShortcut`). 앱이 가로채지 않고 브라우저·편집기가 처리하는 조합(그리드의 붙여넣기 Ctrl+V, 장문 편집기의 저장 Ctrl+Enter)도 표에 설명 전용 항목(`describeOnly`)으로 두어 도움말에 보인다. `resolveShortcut`은 설명 전용 항목을 고르지 않는다. `en.js`는 `ko.js`와 키가 같아야 하므로(D-14) 영어 문구도 함께 쓴다.
+- 저장·복구 주제는 모드마다 내용이 다르며 `capabilities().persistence`(`snapshot` / `native`)로 고른다(`help.saving.body` / `help.saving.bodyNative`).
+- 입력할 때 필요한 정보는 툴팁에 숨기지 않는다. 선택 항목 입력칸은 흐린 예시(placeholder, 예: `진행 중` / `완료` / `보류`)와 입력칸 아래의 설명 줄을 늘 보여 준다.
 
 ---
 
@@ -288,16 +339,21 @@ src/
       cache.js                   블록 캐시(D-06): 200행 블록 LRU 50개, 테이블 단위 무효화
       selection.js               셀·범위·행 선택 모델(순수 상태, DOM 없음)
       clipboard.js               TSV 직렬화·파싱(순수 함수)과 복사·붙여넣기 계획
-      editing.js                 편집 컨트롤러: 그리드 선택·편집기·클립보드·데이터 커맨드·히스토리를 잇는다
+      editing.js                 편집 컨트롤러: 그리드 선택·편집기·클립보드·데이터 커맨드·히스토리를 잇는다. 빈 행 확정(D-16)
+      header.js                  열 머리글(D-16): 정렬 버튼, 메뉴 버튼·우클릭 열 메뉴, 이름 더블클릭 편집기
     editor/
       inline.js                  인라인 편집기(input, 타입별 검증, IME 처리)
       longtext.js                사이드 패널 장문 편집기
     dialogs/
       dialog.js                  모달 기반(포커스 트랩, Esc, 버튼 행). 다른 대화상자가 이 위에 만들어진다
       table.js column.js filter.js import.js conflict.js
+      cleanup.js                 데이터베이스 정리(D-17): 테이블별 삭제된 열 선택, 남는 사본 안내, 진행률·취소
+      help.js                    도움말(D-19): 주제 목록과 본문, 단축키 표
       export.js                  내보내기(형식·CSV 옵션·뷰 적용·행 수 경고·진행률·취소)
-      settings.js                설정(기기 이름, 자동 저장, 압축 저장, 직전 저장본 내보내기)
+      settings.js                설정(기기 이름, 자동 저장, 압축 저장, 직전 저장본 내보내기·모두 지우기, 작업 사본 모두 버리기, 데이터베이스 정리)
     toolbar.js sidebar.js statusbar.js toast.js
+    menu.js                      공용 팝업 메뉴(role=menu, 화살표·Home·End·Enter·Esc, 닫을 때 포커스 복귀)
+    tooltip.js                   공용 툴팁(D-19): 호버 500 ms·키보드 포커스 표시, Esc 닫기, aria-describedby
   io/
     filesystem.js                File System Access + 폴백 다운로드 + 타우리 dialog/fs 추상화, gzip, 바이트 싱크(내보내기 조각 쓰기)
     ipc-bridge.js                메인 스레드에서 Worker의 engine:call 메시지를 타우리 invoke로 중계
@@ -317,6 +373,7 @@ src/
     views.js                     뷰(_jdr_views) 저장·삭제를 커맨드로, 목록·불러오기
     values.js                    논리 타입 ↔ 저장값 변환·검증
     search.js                    FTS5 인덱스 생성·삭제·질의
+    cleanup.js                   데이터베이스 정리(D-17): 정리 계획, 테이블 재작성 커맨드, 인덱스 재생성, VACUUM
   import/
     csv.js                       스트리밍 CSV 파서(인코딩·구분자 감지)
     xlsx.js                      SheetJS 어댑터
@@ -332,6 +389,7 @@ src/
     errors.js                    AppError, 오류 코드
     ids.js                       uuid, 물리 이름
     format.js                    숫자·날짜 표시
+    names.js                     자동 이름(D-16): 형식 문자열의 번호를 올리며 이미 있는 이름을 건너뛴다
     bytes.js                     base64, 크기 계산
   styles/
     app.css grid.css editor.css dialogs.css
@@ -351,7 +409,7 @@ build/
 docs/
   cloud-sync.md                  클라우드 왕복 사용 안내(PC A 저장·동기화 확인 → PC B 열기, 경고 메시지의 의미, 백업 복원)
   desktop.md                     데스크톱 앱 안내(작업 사본 위치, .bak, 저장 절차, 클라우드 폴더, 복구, 빌드·검사, 브라우저 모드와의 차이)
-  sessions.md                    세션별 검증 기록(5.0의 A~I와 점검 세션). 세션마다 절 하나, 미확인 항목은 "미확인"으로 남긴다
+  sessions.md                    세션별 검증 기록(5.0의 A~I, N~P와 점검 세션). 세션마다 절 하나, 미확인 항목은 "미확인"으로 남긴다
   support-matrix.md              브라우저·WebView API 가용성 실측표(R1, R8). 미확인 항목은 "미확인"으로 남긴다
 
 src-tauri/                       워크스페이스 루트이자 타우리 앱 크레이트(jdrdatabase-desktop)
@@ -378,7 +436,7 @@ src-tauri/                       워크스페이스 루트이자 타우리 앱 �
 
 test/
   unit/                          node:test. db/helpers.js는 엔진 테스트 공용 도우미(wasm 로드). db/engine-contract.js는 두 엔진이 공유하는 적합성 검사 본문. conventions.test.js는 CLAUDE.md 7.1의 grep 항목(innerHTML, 모드 문자열, SQL 문자열 연결)을 소스 검사로 고정한다
-  e2e/                           Playwright(브라우저). page-url.js가 산출물 URL을 정한다(기본 file://, `JDR_E2E_HTTP=1`이면 scripts/serve-dist.mjs의 http://localhost). a11y.spec.js는 axe 검사, fault.spec.js는 오류 주입(Step 10)
+  e2e/                           Playwright(브라우저). page-url.js가 산출물 URL을 정한다(기본 file://, `JDR_E2E_HTTP=1`이면 scripts/serve-dist.mjs의 http://localhost). a11y.spec.js는 axe 검사, fault.spec.js는 오류 주입(Step 10), sheet.spec.js는 기본 시트·빈 행·머리글(Step 12). schema-ui.js는 테이블·열 만들기 공용 도우미(훅으로 열 구성을 정한 테이블, "+ 테이블"·"+ 열"·열 메뉴의 UI 경로)
   native/                        `npm run test:native`(Step 11). engine-native.test.js가 실제 rusqlite 엔진(core의 jdr-ipc-stdio)에 대해 unit/db/engine-contract.js를 돌린다. bridge-worker.js가 worker_threads 안에서 io/ipc-bridge.js와 하네스 프로세스를 잇는다
   desktop/                       tauri-driver(WebDriver) E2E(Step 11). run.mjs가 테스트 변형(dist/test/tauri)을 담은 디버그 바이너리를 만들고 tauri-driver를 띄워 WebDriver 프로토콜을 직접 말한다(런타임 의존 없음). 파일 대화상자는 테스트 훅(`__jdrTest.setPickedPath`)으로 경로를 주입한다
   perf/                          성능 측정(`npm run test:perf`, playwright.perf.config.js). 30만 행 픽스처를 만들어 8장 예산을 잰다. report.js가 측정값을 test-results/perf/에 모으고 global-teardown.js가 perf-baseline.json(CI 러너 실측)과 비교해 30% 회귀를 실패로 본다. CI의 perf 잡이 푸시마다 돌린다
@@ -533,6 +591,11 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | G | 9 | 내보내기·gzip·백업·클라우드 안내 |
 | H | 10 | 성능·메모리·오류 주입·접근성 검증. 앞 세션의 결과를 새 컨텍스트에서 점검한다 |
 | I | 11 | 타우리 셸과 네이티브 엔진. Rust 툴체인, 플랫폼 CI, tauri-driver |
+| N | 12 | 기본 시트·빈 행·열 머리글(D-16). 그리드, 스키마 커맨드, 편집 컨트롤러를 함께 크게 고친다 |
+| O | 13 | 데이터베이스 정리·앱 데이터 비우기(D-17, D-18). 되돌릴 수 없는 작업이라 두 엔진(`npm run test:native`)과 데스크톱 E2E로 검증해야 하므로 Rust 툴체인이 필요하다 |
+| P | 14 | 툴팁·도움말(D-19). N·O가 만든 기능까지 설명해야 하므로 마지막에 둔다 |
+
+세션 J~M은 v1 병합 전의 점검 세션 이름으로 이미 쓰였으므로(`docs/sessions.md`) v2 묶음은 N부터 이름 붙인다.
 
 묶음 기준:
 1. 두 Step의 완료 기준이 서로를 필요로 하거나 같은 파일을 크게 공유하면 묶는다.
@@ -545,6 +608,12 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - 진행: 같은 브랜치에서 세션을 동시에 두 개 돌리지 않는다. 한 세션이 끝나 푸시된 뒤에 다음 세션을 시작한다.
 - 종료: Step 단위 커밋을 푸시하고, PR 설명에 세션 이름의 절을 추가해 묶음에 속한 모든 Step의 완료 기준을 항목별로 옮겨 적고 검증 결과를 표시한다. 검증하지 못한 항목은 "미확인"으로 남긴다.
 - 세션 도중 컨텍스트가 부족해지면 완료된 Step까지만 커밋·푸시하고 PR 설명에 기록한 뒤, 남은 Step은 같은 세션 이름의 후속 세션(예: B-2)으로 이어 간다. 완료 기준을 낮추어 끝내지 않는다.
+
+v2 묶음(N~P)의 브랜치와 PR:
+- A~I처럼 브랜치 하나와 PR 하나를 세 묶음이 함께 쓴다. 이 설계(문서 0.12)를 올린 작업 브랜치 `claude/busy-mayer-hv2g8x`와 그 PR이다. 사유: 세 묶음을 한 번에 검토하고 반영하기로 했고(사용자 결정), 설계와 구현이 한 PR에 있으면 리뷰어가 D-16~D-19와 코드를 함께 대조할 수 있다. 대가로 N이 끝나도 P까지 끝나야 `main`과 릴리스에 들어간다.
+- 원격 실행 환경은 세션마다 새 작업 브랜치 이름을 정해 주므로, 세션을 시작할 때 위 브랜치에서 이어 작업하라고 지시한다. 세션은 코드를 쓰기 전에 자기 작업 브랜치가 위 브랜치인지 확인하고, 다르면 사용자에게 먼저 묻는다. 다른 브랜치에 푸시하면 그 세션만 따로 PR이 생긴다.
+- 순서는 N → O → P이며, 앞 세션이 푸시되고 그 커밋의 CI가 초록인 뒤에 다음 세션을 시작한다. P의 도움말은 N·O의 동작을 설명하고, O의 정리 대화상자는 N이 바꾼 열 삭제 경로를 전제로 한다.
+- 병합은 세션 P까지 끝난 뒤 한 번이다. 조건은 A~I와 같다: CI 초록, 리뷰어 1명 승인, `docs/sessions.md`의 v2 절(설계 v2, N, O, P와 그 후속·점검 세션)에서 미확인 항목이 모두 해소됨.
 
 ### Step 0. 저장소 골격과 빌드·테스트 기반
 
@@ -735,11 +804,11 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `query.buildWhere(filterSpec, columns)` → `{ sql, params }`(연산자: `=`, `!=`, `<`, `>`, `<=`, `>=`, `contains`, `starts`, `empty`, `not_empty`, `in`). 값은 항상 바인딩한다. 텍스트 계열 열(`text`·`longtext`·`select`)의 비교는 `COLLATE NOCASE`, `contains`·`starts`는 `LIKE ... ESCAPE '\'`(텍스트가 아닌 열은 `CAST(... AS TEXT)`), `!=`는 빈 값도 포함(`IS NOT`), `empty`는 `IS NULL OR = ''`, `in`은 `IN (?, ...)`. 살아 있지 않은 열을 가리키는 조건은 무시한다(스토어가 곧 뷰에서 지운다). 값이 열 타입에 맞지 않으면 `E_VALUE_INVALID`.
 - `query.buildOrderBy(sortSpec, columns)` → SQL 조각. 타입에 맞는 정렬(숫자·불리언은 수치, 텍스트 계열은 `COLLATE NOCASE`, 날짜는 그대로), 빈 값은 항상 `NULLS LAST`, 마지막에 언제나 `"id"`. 살아 있지 않은 열은 무시한다.
 - `query.buildSearchWhere(table, q)`: 인덱스가 있고 3자 이상이면 `search.query`, 아니면 `search.fallbackLike`. `query.buildViewClauses(table, viewSpec)` → `{ where, params, orderBy, sorted, filtered }`가 필터·검색·정렬을 합친다. 창 질의·행 수·`query.rows`·되돌릴 수 없는 범위 커맨드(`deleteRowRange`·`clearRowRange`의 `clauses`)가 이것을 쓴다. 정렬·필터·검색이 하나라도 있으면 D-06의 id 탐색 빠른 경로는 쓰지 않는다.
-- `query.normalizeViewSpec(raw)`(Worker 경계를 넘어온 값의 형태 정리), `query.toggleSort(sort, colId, append)`(머리글 클릭: 없음 → 오름차순 → 내림차순 → 없음. `append`(Shift+클릭)면 다른 항목을 유지한다), `query.pruneViewSpec(spec, table)`(살아 있지 않은 열의 정렬·필터·숨김 항목 제거. 지운 것이 있으면 `changed: true`).
+- `query.normalizeViewSpec(raw)`(Worker 경계를 넘어온 값의 형태 정리), `query.toggleSort(sort, colId, append)`(머리글의 정렬 조작: 없음 → 오름차순 → 내림차순 → 없음. `append`(Shift+클릭)면 다른 항목을 유지한다), `query.pruneViewSpec(spec, table)`(살아 있지 않은 열의 정렬·필터·숨김 항목 제거. 지운 것이 있으면 `changed: true`).
 - `search.enable(engine, tableId, ctx)`(FTS5 external-content 테이블 + 트리거 생성 + 초기 인덱싱 진행률·취소), `search.disable(engine, tableId)`, `search.query(tableId, q)` → `"id" IN (SELECT rowid FROM fts WHERE fts MATCH ?)` 조각, `search.fallbackLike(columns, q)`, `search.searchableColumns(table)`. 생성·삭제는 커맨드를 돌려준다(RPC `search.enable`·`search.disable`).
 - `views.save(engine, tableId, { name, spec, viewId? })` → `{ viewId, cmd }`, `views.remove(engine, viewId)` → `{ cmd }`, `views.list(engine, tableId)`, `views.load(engine, viewId)`.
 - 스토어: `setSort`·`toggleSort`·`setFilter`·`setSearch`·`toggleHidden`·`clearFilters`·`applyView`·`saveView`·`deleteView`·`listViews`·`enableSearch`·`disableSearch`, `viewSpecOf(tableId)`. 테이블 목록을 다시 읽을 때와 뷰를 불러올 때 `pruneViewSpec`을 거친다.
-- UI: 머리글 클릭이 정렬을 바꾸고(Shift+클릭은 보조 정렬 추가) `aria-sort`와 순번을 표시한다. 도구 모음의 표 도구 줄에 검색 상자(입력 300 ms 디바운스, 조합 중에는 반영하지 않음), 정렬·필터 대화상자(키보드로 다중 정렬·조건 편집), 뷰 선택·저장·삭제, 검색 인덱스 만들기·삭제(진행률·취소)가 있다. 열 숨김·표시는 사이드바의 열 항목에서 한다.
+- UI: 머리글에서 정렬을 바꾸고(Shift+클릭은 보조 정렬 추가) `aria-sort`와 순번을 표시한다. 정렬 조작은 v1에서 머리글 셀 클릭이었고 Step 12부터 머리글의 정렬 버튼과 열 메뉴다(D-16). 도구 모음의 표 도구 줄에 검색 상자(입력 300 ms 디바운스, 조합 중에는 반영하지 않음), 정렬·필터 대화상자(키보드로 다중 정렬·조건 편집), 뷰 선택·저장·삭제, 검색 인덱스 만들기·삭제(진행률·취소)가 있다. 열 숨김·표시는 사이드바의 열 항목에서 한다.
 
 **예외 처리**
 - 필터 값이 열 타입과 맞지 않으면(숫자 열에 문자) 필터 UI에서 거부(`values.validate`의 사유 문구). Worker의 빌더도 같은 검증을 하며 `E_VALUE_INVALID`.
@@ -948,6 +1017,128 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 - `verify.mjs`가 브라우저 산출물과 타우리 산출물이 CSP 태그 외 동일함을 확인.
 - `docs/desktop.md`에 작업 사본 위치, `.bak` 파일, 클라우드 폴더 사용 절차, 브라우저 모드와의 차이(상한, 저널 대신 작업 사본)를 기술.
 
+### Step 12. 기본 시트, 빈 행, 열 머리글 조작
+
+**목표**: 새 테이블을 만들면 열 30개와 빈 행 30줄이 있는 시트가 바로 보이고, 빈 행에 입력하면 그 자리에 행이 생긴다. 열은 대화상자 없이 추가하고, 이름·타입·정렬은 머리글에서 바꾼다(D-16).
+
+**선행 조건**: 문서 0.12(같은 작업 브랜치의 첫 커밋들).
+
+**산출물**: `util/names.js`, `db/tables.js`(`create`의 `columns`), `db/schema.js`(열이 든 사용자 테이블 DDL), `ui/grid/grid.js`(빈 행, 머리글 배치), `ui/grid/header.js`, `ui/menu.js`, `ui/grid/editing.js`(빈 행 확정·붙여넣기), `ui/grid/clipboard.js`(`planPaste`의 `gapRows`), 빈 행까지의 이동 범위(`grid.js`가 `selection.setBounds`에 빈 행을 포함한 행 수를 넘긴다. `ui/grid/selection.js`는 바뀌지 않는다), `ui/editor/longtext.js`(빈 행의 `rowId: null`과 `commit`), `ui/sidebar.js`(+ 테이블·+ 열), `ui/dialogs/table.js`·`dialog.js`(이름 미리 채움·전체 선택), `ui/dialogs/column.js`(열 추가 대화상자 제거, 선택 항목 예시), `app/shortcuts.js`(열 메뉴 단축키), `app/store.js`, `app/commands.js`(`ghostRowInserts`), `i18n/ko.js`·`en.js`, `styles/grid.css`·`app.css`, 테스트 훅 `__jdrTest.createTable`(열 구성을 정한 테이블. E2E 공용 `test/e2e/schema-ui.js`가 쓴다)
+
+**주요 함수**
+- `names.nextNames(format, taken, count)` → `string[]`: `format`의 `{n}`을 1부터 올리며 `taken`(Set)에 없는 이름을 `count`개 돌려준다. 순수 함수. 호출자가 `t('column.defaultName')` 같은 형식 문자열을 넘긴다(Worker는 i18n을 모른다).
+- `tables.create(engine, { name, columns?, now? })`: `columns = [{ name, type, options? }]`(기본 빈 배열). 열은 `CREATE TABLE` 한 문장에 함께 선언하고(`schema.userTableDdl(tableId, columns)`, 물리 타입은 `schema.physicalType`), `_jdr_columns` 행은 `{ batch }` 단계 하나로 넣는다. 열 이름은 `normalizeName`으로 서로 겹치지 않는지 검사한다. `undo`는 v1과 같이 메타 삭제 → `DROP TABLE`. RPC `schema.create`의 인자도 같다. 열 30개의 물리 id는 `ids.newColumnId`로 서로 겹치지 않게 만든다.
+- 스토어: `store.createTable(name, { columns })`(만든 테이블을 고른다), `store.addDefaultColumn(tableId)` → `{ columnId, columnCount }`(자동 이름 + `text`로 `schema.addColumn`), `store.renameColumn(tableId, columnId, name, { mergeWithAdd? })`(머리글 이름 편집기의 확정).
+- 추가와 이름 합치기: "+ 열" 직후 열린 이름 편집기(`grid.startRename`)의 확정은 `mergeWithAdd`로 기록되고, 스토어가 커맨드 알림에 그 표시를 실어 보낸다. 히스토리는 되돌리기 스택의 맨 위가 **같은 열**의 `column.add`이고(스토어가 커맨드 알림에 추가·이름 바꾸기의 대상 열 id `columnId`를 싣고, 히스토리는 `column.add` 항목이 만든 열 id를 기억한다) 다시 실행 스택이 비어 있을 때만 두 커맨드를 `commands.mergeCommands(add, rename)`(`do`는 add → rename, `undo`는 rename의 undo → add의 undo, 한 트랜잭션)로 바꿔 한 항목으로 둔다. 조건이 맞지 않으면 따로 쌓는다. 저널에는 두 커맨드가 이미 차례로 기록되어 있고, 합친 항목을 되돌리면 그 역커맨드가 기록되므로 재생 결과가 같다. 머리글 더블클릭·메뉴·사이드바의 이름 바꾸기는 합치지 않는다. 스키마 op는 히스토리 큐 밖에서 돌므로, 히스토리의 적용·되돌리기·다시 실행은 먼저 시작한 스키마 op가 끝나 스택에 들어갈 때까지 기다린다(`store.schemaIdle()`). 이름 편집기의 포커스 이탈 확정은 도구 모음 버튼의 pointerdown에서, 되돌리기는 click에서 시작하므로 기다리지 않으면 되돌리기가 합치기 전의 스택을 읽고, 뒤늦게 들어온 확정이 다시 실행 스택을 비우며 없는 열의 이름 바꾸기가 스택에 남는다. 자동 이름의 `taken`은 그 테이블의 살아 있는 열과 소프트 삭제된 열의 이름 전부다. 새 테이블의 기본 열 수 `NEW_TABLE_COLUMNS = 30`은 `ui/sidebar.js`의 상수다.
+- 그리드 빈 행: `GHOST_ROWS = 30`(`ui/grid/grid.js`). `grid.ghostRowsEnabled()`는 뷰에 정렬·필터·검색이 없고, 쓰기 가능하고, STRICT 테이블이고, 살아 있는 열이 하나 이상일 때 참이다. 켜져 있으면 그리는 행 수는 `count + GHOST_ROWS`이고 `grid.isGhostRow(i)`는 `i >= count`다. 빈 행은 창 질의를 하지 않고 빈 셀로 그리며(`jdr-grid__row--ghost`), 행 번호는 `count + 1`부터 이어서 흐리게 보인다. 행 수 표시(`grid.rowCount`)는 실제 행 수만 센다. `aria-rowcount`는 머리글 + 실제 행 + 빈 행이고, 빈 행에는 `aria-label`(`grid.ghostRow`)을 단다.
+- 빈 행 확정(`ui/grid/editing.js`): 인라인·장문 편집기, 불리언 체크, 붙여넣기가 빈 행 `i`(`i >= count`)를 대상으로 하면 확정 시점의 `query.stats`로 `count`와 `maxId`를 읽어 새 id `maxId + 1 … maxId + (i − count + 1)`을 정하고(`commands.ghostRowInserts`) `commands.bulkEdit({ tableId, edits: [], inserts, now })` 하나로 적용한다. 마지막 행만 값을 가지고 나머지는 빈 행이다. 빈 값을 확정하면 만들 것이 없으므로 커맨드 없이 닫는다. 붙여넣기는 v1의 "범위를 넘으면 행을 자동 추가" 경로에 시작 위치가 빈 행인 경우를 더한다: `clipboard.planPaste`가 마지막 실제 행과 시작 행 사이의 빈 줄 수(`gapRows`)를 함께 돌려주고, 그 줄은 빈 행으로 만든다. `planPaste`는 마지막 실제 행 아래에 떨어지는 끝부분의 빈 줄(그리드 경계 안에서 쓰는 칸이 모두 빈 문자열인 줄)을 `rows`에서 빼고 그 수를 `trailingEmpty`로 돌려준다(D-16). 남은 줄이 없으면 아무것도 만들지 않는다. 되돌리기 한 번에 만들어진 행이 모두 사라진다. 장문 편집기는 빈 행에서 `rowId: null`로 빈 값을 열고, 확정은 대상의 `commit`(위 커맨드)이 맡는다. 편집기를 열어 둔 사이 다른 입력으로 그 줄까지 행이 생겼으면(확정 시점에 `i < count`) 그 자리의 실제 행 id를 확정 시점에 읽어 일반 셀 편집(`commands.editCell`)으로 저장한다. 편집기가 확정하지 못한 채 남지 않게 한다.
+- 머리글(`ui/grid/header.js`): `header.render(cell, column, sortEntry, { writable })`가 이름·정렬 버튼·메뉴 버튼·너비 조절 손잡이를 그린다. 이벤트는 머리글 행에 위임한다: 정렬 버튼 `click` → `store.toggleSort(tableId, colId, ev.shiftKey)`, 이름 `dblclick` → `header.openRename(colIndex)`, 메뉴 버튼 `click`·머리글 `contextmenu` → `header.openMenu(colIndex, anchor)`. 너비 조절 손잡이의 `dblclick`은 이름 편집을 열지 않는다. 머리글 버튼은 누를 때 포커스를 가져간다(막으면 열려 있던 셀 편집기의 blur 확정이 일어나지 않아 입력이 사라진다). 버튼은 탭 정지가 아니므로 정렬 뒤와 메뉴를 닫은 뒤에는 그리드 스크롤 영역으로 포커스를 돌려준다. 그리드가 머리글을 다시 만들 때는 `header.beforeBuild()`·`afterBuild()`가 열려 있는 이름 편집기를 떼었다가 새 칸에 붙인다(떼어 낼 때의 blur는 확정이 아니다).
+- `header.openRename(colIndex)`: 머리글 셀 위에 `input`을 놓고 이름 전체를 선택한다. Enter(조합 중이 아닐 때) → `store.renameColumn`(이름이 그대로면 커맨드를 만들지 않는다), Esc → 취소, 포커스 이탈 → 확정 시도. 검증은 `nameValidator`(살아 있는 열 이름)이며 실패하면 편집기를 닫지 않고 오류를 보인다. 포커스 이탈로 확정하다 실패하면 원래 이름으로 되돌리고 토스트를 띄운다. 닫힌 뒤 포커스는 그리드 스크롤 영역으로 돌아간다. 확정(`store.renameColumn`)을 기다리는 사이 다른 열의 편집기가 열렸으면(다른 이름 더블클릭의 첫 pointerdown이 포커스 이탈 확정을 시작한다), 확정이 끝난 뒤에는 새 편집기를 닫거나 포커스를 옮기지 않는다. 확정이 닫는 것은 자기가 확정한 편집기뿐이다.
+- `menu.open(anchor, items, { label?, returnFocus?, onClose? })`: `items[i] = { key, label, disabled?, danger?, run }`. `role="menu"`/`menuitem`, ↑↓·Home·End로 이동, Enter·Space로 실행, Esc·Tab·바깥 클릭으로 닫고 호출한 곳(`returnFocus`, 열 메뉴는 그리드 스크롤 영역)으로 포커스를 돌려준다. 열 메뉴 항목은 D-16의 순서이며 "타입 변경…"은 v1의 `promptChangeType`, "열 삭제…"는 `confirmDeleteColumn`을 그대로 쓴다(사이드바와 같은 경로를 `ui/dialogs/column.js`의 `changeColumnTypeFlow`·`deleteColumnFlow`로 공유한다). "오름차순·내림차순 정렬"은 다른 열의 정렬을 그대로 두고 그 열의 방향을 정한다(`query.setSortDirection`: 정렬 목록에 그 열이 있으면 그 자리에서 방향만 바꾸고, 없으면 보조 정렬로 끝에 붙인다). 메뉴는 여러 열 정렬을 쌓는 경로이고, 그 열 하나로 바꾸는 것은 정렬 버튼의 Shift 없는 클릭이다. "정렬 해제"는 정렬 목록에서 그 열만 뺀다(그 열이 정렬에 없으면 꺼진다).
+- 단축키: `app/shortcuts.js`에 그리드 범위 `Shift+F10`과 `ContextMenu` → `columnMenu`(활성 셀의 열. v1의 행동 이름처럼 camelCase). 편집기가 열려 있으면 처리하지 않는다(그리드 키 처리는 스크롤 영역에 포커스가 있을 때만 돈다).
+- 선택·이동: `selection.setBounds`는 실제 행 + 빈 행을 받으므로 화살표·PageDown으로 빈 행에 들어간다. `Ctrl+End`는 마지막 실제 행으로 간다. `Ctrl+A`(모두 선택)는 실제 행 전부와 모든 열을 고르고(`selection.selectRows(0, count − 1)`), 실제 행이 없으면 첫 칸(빈 행 첫 줄의 첫 열) 하나만 고른다.
+- 빈 행이 꺼지는 전환은 그리드가 편집 컨트롤러의 `hooks.onGhostDisabled()`로 알린다(같은 테이블의 다시 마운트에서 정렬·필터·검색이 켜질 때, 스토어의 `state:changed`로 읽기 전용이 될 때). 컨트롤러는 빈 행에 열려 있던 인라인·장문 편집기를 닫고 `grid.ghostClosed`를 알린다. 인라인 편집기가 이미 확정 중이면(정렬 버튼을 누른 pointerdown의 포커스 이탈 확정) 그 편집기는 닫지도 알리지도 않는다. 그 확정은 행을 만들며 끝나므로 "입력하던 값은 저장되지 않았다"는 안내가 사실과 달라진다.
+- 선택 항목 입력칸(`choicesField`): `placeholder = t('column.choicesPlaceholder')`(`진행 중\n완료\n보류`)와 입력칸 아래 설명 줄 `t('column.choicesHint')`("셀에서는 여기 적은 값 중 하나만 고를 수 있습니다. 한 줄에 하나씩 적습니다.")을 `aria-describedby`로 잇는다.
+
+**예외 처리**
+- 자동 이름이 Worker 검증에서 겹침(다른 경로로 같은 이름이 막 생김): `E_NAME_INVALID`. 스토어가 이름 목록을 다시 읽고 한 번만 다시 시도한다.
+- 열 수 상한: v1과 같다(1,000열 경고, SQLite 2,000열). "+ 열"이 1,000열을 넘기면 v1의 `column.manyWarning`을 띄운다.
+- 빈 행 확정값의 검증 실패: 편집기를 닫지 않는다. 커맨드는 검증을 통과한 뒤에만 만들므로 행이 생기지 않는다.
+- 빈 행 확정 커맨드가 Worker에서 실패: 트랜잭션이 롤백되어 행이 하나도 생기지 않는다. 캐시 무효화와 오류 토스트는 v1 커맨드 실패 경로와 같다.
+- 빈 행이 꺼지는 전환(정렬·필터·검색을 켬, 읽기 전용이 됨) 중 편집기가 빈 행에 열려 있음: 편집기를 닫고(값을 버림) 안내한다. 빈 행 자리가 더 이상 행을 가리키지 않는다. 인라인 편집기가 이미 확정 중이면 확정이 행을 만들며 끝나므로 닫지도 알리지도 않는다.
+- 빈 행 편집기를 열어 둔 사이 그 자리에 실제 행이 생김(다른 빈 행에 입력): 확정은 그 자리의 실제 행에 대한 셀 편집이다.
+- 선택 범위가 빈 행에 걸침: 복사는 빈 행을 빈 칸으로 내보낸다(그 내용을 빈 행에 붙여넣어도 끝의 빈 줄은 버려져 값 없는 행이 생기지 않는다). 지우기(Delete)·행 삭제는 실제 행 부분에만 적용하며, 선택이 빈 행뿐이면 아무것도 하지 않는다.
+- 이름 편집 중 그 열이 사라짐(저널 재생, 다른 커맨드의 되돌리기): `applyTable`이 머리글을 다시 그릴 때 편집기의 열 id가 없으면 편집기를 닫는다.
+- 이름 편집기와 IME: Enter·Esc 처리 전에 `event.isComposing`을 확인한다(CLAUDE.md 5.5).
+- 읽기 전용·외부 테이블: 이름 더블클릭은 편집기 대신 `file.readOnlyBlocked`를 알리고, 메뉴의 편집 항목은 꺼진다.
+- 행 수가 많아 스크롤 스케일링(D-05)이 켜진 테이블: 빈 행 30줄도 전체 높이에 포함한다.
+
+**완료 기준**
+- 단위: `names.nextNames` 경계(빈 목록, 중간 번호 빈자리, 소프트 삭제된 이름 건너뜀, `count` 여러 개).
+- 단위: 열 30개를 가진 `tables.create`와 빈 행 확정 커맨드(빈 행 k번째 → k행 생성)의 대칭성(적용 → 되돌리기 → DB 덤프 동일 → 다시 적용), 실제 wasm DB로.
+- E2E: "+ 테이블" → Enter → 열 `열 1`~`열 30`과 빈 행 30줄 표시 → 세 번째 빈 행에 입력 → 행 3개, 값은 3행 → 되돌리기 → 행 0개.
+- E2E: "+ 열" → `열 31` 생성과 머리글 이름 편집기 열림 → 한글 IME로 이름 확정. 삭제한 `열 5`가 있으면 새 열이 `열 5`를 쓰지 않음.
+- E2E: 우클릭과 Shift+F10으로 연 열 메뉴에서 타입을 선택으로 바꾸고 예시가 보이는 입력칸에 항목을 넣어 확정. 정렬 버튼 클릭·Shift+클릭으로 정렬 순환. v1의 머리글 클릭 정렬 E2E는 정렬 버튼 클릭으로 고친다(건너뛰지 않는다).
+- 성능: 30만 행 픽스처에서 8장의 스크롤 프레임 렌더·창 질의 예산 유지(빈 행은 끝부분에만 있고 질의를 늘리지 않는다).
+- 접근성: 열 메뉴와 이름 편집기가 열린 상태에서 axe `critical`·`serious` 0건.
+
+### Step 13. 데이터베이스 정리와 앱 데이터 비우기
+
+**목표**: 삭제한 열을 파일에서 완전히 지우고 브라우저 모드에서는 빈 공간을 줄인다(D-17). 데스크톱의 작업 사본과 브라우저의 직전 저장본을 설정에서 한 번에 비운다(D-18).
+
+**선행 조건**: 세션 N이 같은 브랜치에 푸시되고 그 커밋의 CI가 초록.
+
+**산출물**: `db/cleanup.js`, `db/schema.js`(임시 테이블 이름 `_jdr_tmp_<id>`), `db/engine-wasm.js`·`db/engine-native.js`·`db/engine.js`(`capabilities().compactsOnSave`, `vacuum()`), `db/worker.js`·`db/client.js`(`cleanup.plan`·`cleanup.run`), `app/store.js`(`planCleanup`·`runCleanup`·`discardAllWorkcopies`·`clearBackups`), `io/idb.js`(`keys`), `ui/dialogs/cleanup.js`, `ui/dialogs/settings.js`, `ui/dialogs/dialog.js`(본문에서 버튼 제출·버튼 끄기), `app/history.js`(`cleanup:done`), `i18n/ko.js`·`en.js`(`column.delete.message`를 정리 위치로 고침), `docs/desktop.md`·`docs/cloud-sync.md`(정리 뒤 저장해야 파일이 줄어듦, 남는 사본), 테스트
+
+**주요 함수**
+- `cleanup.plan(engine)` → `{ tables, dbBytes, freeBytes, compactsOnSave }`. `tables[i] = { tableId, name, columns: [{ id, name, type, deletedAt }], ftsEnabled, blocked }`는 소프트 삭제된 열이 있는 STRICT 테이블만 담는다. `blocked`는 `schemaBlocker`의 결과(정리할 수 없으면 `{ reason, object }`, 아니면 null)다. `freeBytes = freelist_count × page_size`. 읽기 op다.
+- `cleanup.schemaBlocker(engine, tableId)` → `{ reason, object } | null`: 재작성(`CREATE` → `INSERT … SELECT` → `DROP` → `RENAME`)이 스키마를 그대로 옮길 수 없는 테이블인가. 이 앱이 만든 테이블에는 검색 인덱스 말고 다른 스키마 객체가 없으므로, 아래가 있으면 다른 도구가 더한 것이다. `reason`은 `'foreign_key'`(이 테이블을 가리키는 다른 테이블의 외래 키 — `DROP TABLE`이 `ON DELETE CASCADE`·`SET NULL`을 실행해 그 테이블의 행을 지우거나 바꾼다 — 또는 이 테이블의 외래 키), `'index'`(`pragma_index_list`의 인덱스. UNIQUE 제약의 자동 인덱스 포함), `'trigger'`(`tbl_name`이 이 테이블이거나 본문이 이 테이블 id를 담은 트리거. 이 테이블의 검색 인덱스 트리거는 뺀다), `'view'`(정의가 이 테이블 id를 담은 뷰. 테이블 id는 `t_<8hex>`로 겹치지 않아 문자열 포함으로 판정한다), `'columns'`(`physicalColumns`가 거부하는 열, 숨은 열(`pragma_table_xinfo`의 `hidden`), `CREATE TABLE` 문에 `CHECK`·`COLLATE`·`DEFAULT`·`UNIQUE`·`REFERENCES`·`CONSTRAINT`·`AUTOINCREMENT`·`ASC`·`DESC`·`CONFLICT`·`AS`·`WITHOUT` 같은 열 제약이 있음)이고, `object`는 그 객체의 이름이다(표시용, 80자까지).
+- `cleanup.run(engine, { columns: [{ tableId, columnId }] }, ctx)` → `{ cmds, removedColumns, rebuiltIndexes, vacuumed, vacuumError, bytesBefore, bytesAfter }`. 순서: (1) 바깥 트랜잭션 안에서 쓰기 전에 요청한 열이 모두 소프트 삭제 상태인지와 테이블마다 `schemaBlocker`가 null인지 검사, (2) 같은 트랜잭션 안에서 테이블마다 `purgeCommand(target, columnIds)`를 만들어 `applyCommand`, (3) 커밋, (4) `compactsOnSave`가 `false`면 `engine.vacuum()`. `vacuumError`는 `VACUUM`이 실패했을 때의 직렬화된 오류이고 아니면 null이다(재작성은 이미 커밋되었으므로 던지지 않고 결과로 알린다). `bytesBefore`·`bytesAfter`는 `page_count × page_size`.
+- `cleanup.physicalColumns(engine, tableId)` → `[{ name, type, pk, notnull }]`: `pragma_table_info`의 cid 순서. 재작성이 지키는 "원래 순서"는 이 물리 순서다. `_jdr_columns.position`은 표시 순서라 타입 변경(새 물리 열은 끝에 붙는다)이나 열 순서 바꾸기 뒤에는 물리 순서와 다르다. 물리 타입은 STRICT가 허용하는 이름(`INT`·`INTEGER`·`REAL`·`TEXT`·`BLOB`·`ANY`)만 받고, 기본값이 선언된 열이 있으면 이 앱이 만든 테이블이 아니므로 `E_DB_QUERY`로 거부한다.
+- `cleanup.purgeCommand(target, columnIds)` → `Command`(`type: 'column.purge'`, `undo: []`, `irreversible: true`). `target`은 `TableInfo`에 `physical`(`physicalColumns`의 결과)을 더한 값이며, 순수 함수라 엔진을 받지 않는다. `do`: 검색 인덱스가 있으면 `dropSearchIndexStatements` → `CREATE TABLE _jdr_tmp_<id> (...) STRICT`(시스템 열 + 남는 물리 열, 물리 순서·물리 타입·`PRIMARY KEY`·`NOT NULL`) → `INSERT INTO _jdr_tmp_<id> (…) SELECT … FROM <id>` → `DROP TABLE <id>` → `ALTER TABLE _jdr_tmp_<id> RENAME TO <id>` → `_jdr_columns`에서 지운 열의 행 삭제 → 인덱스가 있었으면 D-07의 생성 문장과 `{ index }` 단계(지금 검색 대상 열, `fts_enabled`는 1로 남는다). 지운 열 때문에 검색 대상 열이 하나도 남지 않으면 인덱스를 다시 만들 수 없으므로 `fts_enabled = 0`으로 둔다(FTS5 테이블은 열이 하나 이상이어야 한다). 식별자는 모두 `quoteIdent`를 거친다.
+- RPC(6장 표): `cleanup.plan`(읽기 op라 언제나 허용)과 `cleanup.run`(배타 쓰기 op. 취소는 재작성·인덱싱 중에만, 전체 롤백). 메인은 `cleanup.run` 뒤 히스토리를 비우고 `cmds`를 저널에 넣는다.
+- 진행률: `{ phase: 'purge', done, total }`(테이블 단위), `{ phase: 'index', done, total }`(인덱스 재생성, D-08의 인덱싱 단계와 같음), `{ phase: 'vacuum', done: 0, total: 0 }`(개수 없음). 취소는 테이블 사이와 인덱싱 청크 사이에서 받으며 바깥 트랜잭션 전체를 롤백한다. `VACUUM`은 취소할 수 없다.
+- 스토어 `planCleanup()` → 계획 또는 null(실패는 알림). 스토어 `runCleanup(selection, callOptions)`: `cleanup.run` 뒤 `cmds`를 차례로 저널에 기록하고(히스토리를 거치지 않는 기록), `cleanup:done`을 내어 히스토리가 스택을 비우게 하고(`history.clear('cleanup')`. 가져오기의 `import:done`과 같은 방식), 캐시 무효화·테이블 목록 다시 읽기·그리드 다시 마운트, dirty 표시. 고른 열이 없어 `cmds`가 비면(`VACUUM`만) 논리 상태가 그대로이므로 히스토리를 비우지 않고 dirty만 표시한다(빈 공간이 줄어든 파일은 저장해야 남는다). 실패는 던진다(대화상자가 원인별 문구로 표시). 저장된 뷰의 스펙에 지운 열 id가 남는 것은 v1의 `pruneViewSpec`이 불러올 때 걸러 낸다.
+- `ui/dialogs/cleanup.js`: 테이블별 삭제된 열 목록(모두 체크. `blocked`인 테이블은 체크 상자를 끄고 체크하지 않은 채 이유 문구 `cleanup.blocked.<reason>`을 보인다), DB 크기와 줄일 수 있는 빈 공간, 되돌릴 수 없음과 히스토리가 비워짐, 남는 사본(D-17), "파일은 저장해야 작아진다". 대화상자는 취소 버튼에 포커스를 두고 연다(체크 상자 위의 Enter 한 번으로 되돌릴 수 없는 정리가 돌지 않게. 설정의 확인 줄과 같은 규칙). 체크된 열이 없고 `compactsOnSave`가 참이면 할 일이 없으므로 실행 버튼을 끈다(`dialog.js`의 `setEnabled`). 실행 중 진행률·취소(v1 내보내기 대화상자처럼 확인 버튼의 비동기 `validate`로 돌리고, 실행 중의 취소 버튼은 신호만 당긴다). 실패로 계획을 다시 읽어 목록을 다시 그려도 사용자가 푼 체크는 그대로 둔다(다시 체크되면 복원하려던 열이 다음 실행에서 지워진다). 완료·`VACUUM` 실패 알림은 대화상자가 닫힌 뒤가 아니라 실행이 끝난 자리에서 띄운다(다른 대화상자가 정리 대화상자를 밀어내도 결과를 알린다). 알림: 지운 열이 있으면 `cleanup.done`(`compactsOnSave`면 크기 없이 `cleanup.doneNative`), 빈 공간만 줄였으면 `cleanup.doneCompacted`, `VACUUM` 실패는 지운 열이 있으면 `cleanup.vacuumFailed`, 빈 공간 줄이기만 했으면 `cleanup.vacuumOnlyFailed`. `dbBytes × 2`가 `capabilities().maxFileBytes`를 넘으면 브라우저 메모리가 모자랄 수 있다는 경고를 실행 전에 보인다(실행은 허용).
+- 스토어 `discardAllWorkcopies()` → `{ removed, removedKeys, failed, listFailed }`: `listWorkcopies()`의 항목마다 `discardWorkcopy(key)`. 하나가 실패해도 나머지를 계속하고 실패한 항목은 목록에 남긴다. `removedKeys`는 실제로 지운 사본의 키이며 설정은 그 줄만 없앤다. 목록을 읽지 못하면 아무것도 지우지 않고 `listFailed: true`(오류는 알림)다.
+- 스토어 `clearBackups()` → `{ removed }`: `idb.keys('backups')`의 개수를 보고 `idb.clear('backups')`. 설정 대화상자는 개수와 `navigator.storage.estimate()`(기능 감지. 없으면 표시하지 않음)를 보여 주고 확인을 받는다.
+- 설정 대화상자: "데이터베이스" 절(정리 버튼. 계획에 `blocked`가 아닌 테이블이 없고 `compactsOnSave`가 `true`면 꺼짐), 직전 저장본 절의 "모두 지우기"(`persistence === 'snapshot'`일 때), 작업 사본 절의 "모두 버리기"(목록이 있을 때). 대화상자는 한 번에 하나만 열리므로(v1 `dialog.js`) 모두 지우기·모두 버리기의 확인은 설정 대화상자 안의 확인 줄(개수·사용량 문구와 확인·취소 버튼)로 받는다. 정리 버튼은 설정을 저장하는 것과 같이 대화상자를 닫고(기기 이름 검사를 거친다) 정리 대화상자를 연다. 그래서 `dialog.js`의 `body` 콜백은 두 번째 인자로 `{ submit(value) }`를 받는다.
+
+**예외 처리**
+- 요청한 열이 이미 복원되었거나 없음: `E_DB_QUERY`로 거부하고 아무것도 바꾸지 않는다. 대화상자는 계획을 다시 읽는다(사용자가 푼 체크는 유지).
+- 재작성이 스키마를 그대로 옮길 수 없는 테이블(`schemaBlocker`: 다른 도구가 더한 외래 키·인덱스·트리거·뷰·열 제약): 계획이 `blocked`로 표시하고 대화상자는 그 열을 고를 수 없게 한다. 계획 뒤에 생겼으면 `cleanup.run`이 트랜잭션 안에서 쓰기 전에 다시 검사해 `E_DB_QUERY`(`detail.reason: 'unexpected_schema'`, `tableId`, `blocked`)로 거부하고 아무것도 바꾸지 않는다(새 오류 코드는 두지 않는다). 특히 `ON DELETE CASCADE`·`SET NULL` 외래 키가 가리키는 테이블을 `DROP`하면 다른 테이블의 행이 지워지거나 바뀌므로 반드시 거부한다.
+- 재작성 중 실패(`E_MEM`, `E_DISK_FULL`, `E_DB_QUERY`): 바깥 트랜잭션 롤백. 문구에 "정리 전 상태 그대로이며 원본 파일도 바뀌지 않았다"를 넣는다(CLAUDE.md 5.6).
+- 취소: 같은 롤백, `E_IMPORT_CANCELLED`와 같은 문구 체계.
+- `VACUUM` 실패(`E_MEM` 등): 재작성은 커밋된 상태로 둔다. "삭제한 열은 지웠지만 빈 공간은 줄이지 못했다. 저장은 할 수 있다"로 알린다. 고른 열 없이 빈 공간 줄이기만 하다 실패했으면 "빈 공간을 줄이지 못했다. 데이터베이스는 그대로이며 저장할 수 있다"로 알린다.
+- 정리는 배타 쓰기 op다(6장). 가져오기·내보내기·저장 중이면 `E_DB_BUSY`.
+- 읽기 전용 상태·외부 테이블: 계획에 외부 테이블이 없고, 읽기 전용이면 정리 버튼이 꺼진다.
+- 저널이 멈춘 상태(가져오기 뒤, 상한): v1 규칙대로 기록하지 않는다. 정리 뒤 저장을 재촉하는 배너는 그대로다.
+- 작업 사본 버리기 실패(파일 잠금 등): 그 항목의 오류를 목록에 표시하고 나머지는 계속한다. 원본 파일은 건드리지 않았음을 문구에 적는다. 목록 자체를 읽지 못하면(IPC 실패) 아무것도 지우지 않고 목록의 줄도 그대로 둔다(지운 것처럼 보이지 않게).
+- IDB 없음(`E_ENV_NO_IDB`): 직전 저장본 절 자체가 비활성이다. `clear` 실패: "보관본은 그대로다"를 적고 `E_UNKNOWN`으로 감싸 알린다.
+
+**완료 기준**
+- 단위(wasm, 실제 DB): 정리 뒤 `pragma_table_info`에 지운 열이 없고, 남은 열과 시스템 열의 값이 정리 전 덤프와 같다. 검색 인덱스가 있던 테이블은 트리거가 다시 있고 검색 결과가 같다. 오래된 인덱스는 `ftsStale`이 거짓이 된다.
+- 단위: 두 번째 테이블의 재작성에 실패를 주입하면 DB 덤프가 정리 전과 같다. 테이블 사이 취소도 같다.
+- 단위: 큰 열을 지운 뒤 정리하면 wasm에서 `page_count`가 줄어든다. `compactsOnSave`가 참인 엔진에서는 `VACUUM`을 부르지 않는다.
+- 단위: 저널에 기록된 `column.purge` 커맨드를 새 DB 사본에 재생하면 같은 스키마·데이터가 된다.
+- 네이티브: 같은 정리 시나리오를 `npm run test:native`로 rusqlite 엔진에 대해 통과.
+- E2E(브라우저): 열 삭제 → 설정 → 정리 → 저장 → 다시 열기 → 물리 열이 없음. 직전 저장본 모두 지우기 → 설정에 "직전 저장본이 없습니다".
+- 데스크톱 E2E(tauri-driver, Linux): dirty 사본 두 개를 남긴 뒤 "모두 버리기" → 목록이 비고 원본 파일이 그대로.
+- 성능(기록만): 30만 행 픽스처에서 장문 열 하나를 지운 뒤 정리에 걸린 시간과 렌더러 메모리 최고 수위를 `npm run test:perf` 기록에 남긴다.
+
+### Step 14. 툴팁과 도움말
+
+**목표**: 모든 버튼·선택 상자에 한 문장 설명이 키보드로도 보이고, 개념은 도움말 대화상자에서 찾을 수 있다(D-19).
+
+**선행 조건**: 세션 O가 같은 브랜치에 푸시되고 그 커밋의 CI가 초록.
+
+**산출물**: `ui/tooltip.js`, `ui/dialogs/help.js`, `ui/toolbar.js`(도움말 버튼, 검색 인덱스 버튼의 `title`을 상태별 툴팁으로), `ui/sidebar.js`·`ui/grid/grid.js`·`ui/grid/header.js`·`ui/dialogs/settings.js`·`ui/dialogs/filter.js`·`ui/editor/longtext.js`(툴팁 연결), `ui/dialogs/import.js`(미리보기 칸의 `title` 제거), `ui/dialogs/dialog.js`(처음 포커스를 받을 요소, 포커스 트랩이 `tabindex="-1"` 버튼을 건너뜀), `main.js`(`tooltip.mount`), `app/shortcuts.js`(F1과 `describe`), `i18n/ko.js`·`en.js`(`hint.*`, `help.*`, `shortcut.*`), `styles/app.css`, `test/unit/conventions.test.js`(툴팁 규칙), `CLAUDE.md` 5.5(툴팁 규칙), `docs/support-matrix.md`(F1, 비활성 버튼의 포인터 이벤트, 시크릿 모드의 IDB 수명)
+
+**주요 함수**
+- `tooltip.mount(root)` / `tooltip.unmount()`: 문서에 툴팁 요소 하나(`role="tooltip"`)를 만들고 `root`(`main.js`가 `document.body`를 넘긴다. 대화상자도 body에 붙는다)에 `pointerover`·`pointerout`·`pointerdown`·`focusin`·`focusout`·`keydown`을 위임한다. 대상은 `data-hint` 속성(i18n 키)을 가진 요소다. 마우스는 500 ms 뒤, 키보드 포커스(`:focus-visible`)는 즉시 보인다. 터치 포인터(`pointerType === 'touch'`)에는 보이지 않는다. 보일 때 대상에 `aria-describedby`를 달고 숨길 때 뗀다(대상이 이미 가진 id는 남긴다). 숨긴 툴팁은 문구를 비운다. 위치는 보일 때 대상의 `getBoundingClientRect` 한 번과 툴팁 크기 한 번으로 정한다: 대상 아래, 화면 밖으로 나가면 위, 가로는 화면 안으로 민다. 툴팁 위로 포인터를 옮겨도 닫히지 않는다(WCAG 1.4.13, 보이는 동안만 `pointermove`로 대상·툴팁을 감싼 사각형을 확인한다). 누르면 닫고 누른 자리를 포인터가 떠날 때까지 다시 띄우지 않는다. 스크롤은 마우스로 띄운 툴팁을 닫고, 키보드로 띄운 툴팁은 위치를 다시 잡는다(대상이 보이는 영역 밖으로 나가면 닫는다). 보이는 툴팁이 있을 때의 첫 Esc는 `window` 캡처 리스너가 소비해 툴팁만 닫는다(대화상자·편집기는 다음 Esc를 받는다. 조합 중의 Esc는 건드리지 않는다). 모달 대화상자가 열리면 그 밖의 대상에 뜬 툴팁을 닫는다. 단축키가 있는 요소의 문구 뒤에는 `shortcuts.shortcutForHint(hintKey)`의 조합을 붙인다.
+- `help.open({ topic?, persistence })`: 왼쪽 주제 목록, 오른쪽 본문. `persistence`는 호출자(도구 모음)가 `store.capabilities().persistence`를 넘긴다(대화상자는 스토어를 모른다). 주제 목록은 세로 탭(`role="tablist"`, `aria-orientation="vertical"`)이며 고른 탭만 탭 정지(`tabindex="0"`)이고 ↑↓·Home·End로 옮기면 그 주제를 보인다. 대화상자가 열리면 고른 탭이 포커스를 받는다(`openDialog`의 `initialFocus`). 버튼은 "닫기" 하나다. 주제는 `basics`(테이블·열·빈 행), `types`(열 타입과 선택 항목 예시), `columns`(숨기기·삭제·복원·데이터베이스 정리와 정리할 수 없는 테이블), `sortFilter`, `search`(검색 인덱스와 3자 규칙), `views`, `importExport`, `saving`(모드별), `multiPc`(revision 경고. `docs/cloud-sync.md`의 요약), `appData`(D-18의 비우기, 시크릿 모드의 일반적 동작), `shortcuts`. 본문 문단은 `help.<주제>.body`를 빈 줄로 나눠 `p` 요소에 `textContent`로 넣는다.
+- `shortcuts.describe({ mac? })` → `{ keys, labelKey }[]`: `SHORTCUTS` 표의 항목마다 표시용 키 조합(`Ctrl+Shift+S` 등, `mac`이면 `⌘`·`⇧`)과 `shortcut.<action>` 설명 키. `mac`을 주지 않으면 `navigator.platform`(기능 감지)으로 정한다. 도움말의 단축키 주제가 이 목록만으로 그려지며, 같은 행동의 조합 여럿(다시 실행의 Ctrl+Shift+Z와 Ctrl+Y)은 한 줄에 모은다. 표에는 앱이 처리하지 않는 설명 전용 항목(`describeOnly`: 그리드 붙여넣기 Ctrl+V, 장문 편집기 저장 Ctrl+Enter)도 있으며 `resolveShortcut`은 이 항목을 고르지 않는다.
+- `shortcuts.shortcutForHint(hintKey, { mac? })` → `string | null`: 툴팁 키(`hint.save` 등)에 대응하는 행동(`HINT_SHORTCUTS`)의 조합을 `describe`와 같은 형식으로, 여럿이면 ` / `로 이어 돌려준다. 단축키가 없는 요소는 `null`이다.
+- 도구 모음의 "도움말" 버튼(`data-action="help-open"`)과 단축키 F1(`SHORTCUTS`의 문서 범위 행동 `help`. 모달이 떠 있으면 v1의 문서 단축키처럼 도움말을 열지 않지만, 브라우저의 기본 동작(Chrome의 도움말 탭)은 그때도 막는다). 인라인 셀 편집기·머리글 이름 편집기 안의 F1도 도움말을 연다. 편집기는 편집 키를 그리드로 보내지 않으려고 전파를 막지만 F1은 통과시킨다. 이때 편집은 확정하지도 버리지도 않고 남으며, 도움말을 닫으면 포커스가 편집기로 돌아와 이어진다(대화상자가 가져간 포커스는 "다른 곳 클릭"이 아니므로 blur 확정을 하지 않는다). F1을 브라우저·WebView가 가로채면 버튼만 남는다. 실측은 `docs/support-matrix.md`에 적는다.
+
+**예외 처리**
+- 비활성(`disabled`) 버튼은 포커스를 받지 않고 일부 브라우저에서 포인터 이벤트도 내지 않는다. 비활성 버튼의 툴팁이 보이는지 브라우저별로 실측해 적고, 보이지 않는 환경에서는 "왜 꺼졌는지"를 도움말 주제로 대신한다. `disabled`를 `aria-disabled`로 바꾸는 것은 이 Step에서 하지 않는다(키보드 동작이 바뀐다).
+- 툴팁을 띄운 요소가 DOM에서 사라짐(그리드 다시 마운트, 대화상자 닫힘): 다음 `focusout`·`pointerout`을 기다리지 않고 요소 연결 여부를 확인해 숨긴다. 보이는 동안만 `MutationObserver`(`root`의 자식 목록)를 걸어 확인하고, 500 ms 대기가 끝날 때도 확인한다. 가상 그리드는 스크롤마다 노드를 바꾸므로 숨긴 동안에는 관찰하지 않는다.
+- 가져오기 미리보기 칸은 v1에서 긴 값의 앞 500자를 `title`로 보였다. 툴팁 문구는 i18n 키뿐이라 사용자 값을 담지 않으므로 이 `title`은 없앤다. 미리보기는 앞부분과 말줄임을 보이고, 전체 값은 가져온 뒤 그리드·장문 편집기에서 본다.
+- 모달 대화상자 위의 툴팁: 툴팁 요소는 최상위 쌓임 순서에 두고, 대화상자의 포커스 트랩에 걸리지 않는다(툴팁은 포커스를 받지 않는다). 포인터를 버튼에 둔 채 단축키(F1, Ctrl+Shift+S)로 모달이 열리면 배경 버튼의 툴팁이 대화상자 위에 남으므로, 보이는 동안의 `MutationObserver`가 모달(`[aria-modal="true"]`)을 보면 대상이 그 안에 있는지 확인해 밖이면 닫는다.
+- 누른 뒤 대상이 다시 그려짐(머리글 정렬 버튼, 사이드바의 숨기기·보이기): 새 노드가 포인터 아래에서 `pointerover`를 받아도 포인터가 누른 자리를 떠나기 전에는 띄우지 않는다.
+- Tab 포커스가 일으킨 스크롤(사이드바 열 목록의 아래쪽 버튼): 키보드로 띄운 툴팁은 스크롤 뒤 위치를 다시 잡는다.
+- 도움말 대화상자는 v1 모달 기반(`dialog.js`)을 쓴다. 포커스 트랩·Esc·닫을 때 포커스 복귀가 같다.
+- 누락된 문구 키: `t()`는 키 자체를 보여 주므로 화면에서 드러나지만, 단위 테스트가 먼저 잡는다(아래).
+
+**완료 기준**
+- 단위(`conventions.test.js`): `src/ui`에 `.title =`과 `setAttribute('title'` 0건. `data-action`을 가진 모든 버튼이 `data-hint`를 가지며 그 키가 `ko.js`·`en.js`에 있다. 모든 `help.<주제>.title`·`.body`와 `shortcut.<action>` 키가 두 파일에 있다.
+- 단위: `shortcuts.describe()`가 `SHORTCUTS`의 모든 항목을 담는다. 설명 전용 항목(Ctrl+V, Ctrl+Enter)은 `resolveShortcut`이 고르지 않는다. `hint.*` 문구에 키 조합이 없고, `HINT_SHORTCUTS`의 키·행동이 문구 파일과 표에 있다.
+- E2E: 마우스 호버 500 ms 뒤 툴팁 표시, 키보드 Tab 포커스로 즉시 표시, Esc로 숨김, `aria-describedby` 연결. 대화상자 안에서 툴팁이 보일 때 첫 Esc는 툴팁만 닫고 두 번째 Esc가 대화상자를 닫으며, 돌아간 버튼에 툴팁이 다시 뜨지 않는다. 누른 뒤 다시 그려진 대상에 툴팁이 다시 뜨지 않는다. Tab 포커스가 일으킨 스크롤 뒤에도 키보드 툴팁이 남는다. 단축키로 연 모달 뒤의 툴팁은 닫힌다. F1은 대화상자가 떠 있을 때·셀 편집 중에도 기본 동작이 막히고, 편집 중에는 도움말을 열었다 닫으면 편집이 이어진다. 앱을 띄우고 대화상자·메뉴를 차례로 열어 DOM에 `data-hint` 없는 `[data-action]`(텍스트 입력칸 제외)과 `[title]`이 0건이고 모든 `data-hint` 키가 두 문구 파일에 있다. 도움말 열기 → 모든 주제 표시 → Esc로 닫고 포커스가 도움말 버튼으로 돌아옴. 저장 주제가 브라우저 모드 문구다.
+- 데스크톱 E2E: 저장 주제가 작업 사본·`.bak` 문구다.
+- 접근성: 툴팁 표시 상태와 도움말 대화상자에서 axe `critical`·`serious` 0건, 툴팁 명도 대비 4.5:1.
+- `dist/jdrdatabase.html` 크기 변화를 `verify` 출력으로 기록(도움말 문구 두 언어분).
+
 ---
 
 ## 6. RPC 프로토콜 (D-11)
@@ -977,7 +1168,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `db.close` | | | |
 | `schema.list` | | `{ tables }`(3장 `tables.list`) | |
 | `schema.adopt` | | `{ meta, tables }`. `unmanaged`로 열린 파일에 메타를 만들고 기존 테이블을 등록 | 불가 |
-| `schema.create` / `schema.rename` / `schema.drop` / `schema.addColumn` / `schema.renameColumn` / `schema.reorderColumns` / `schema.softDeleteColumn` / `schema.restoreColumn` / `schema.changeColumnType` | 3장 `tables` 함수와 1:1 | `{ cmd, ... }`. 적용된 D-08 커맨드를 돌려주어 메인이 히스토리·저널에 넣는다 | 타입 변경만 가능 |
+| `schema.create` / `schema.rename` / `schema.drop` / `schema.addColumn` / `schema.renameColumn` / `schema.reorderColumns` / `schema.softDeleteColumn` / `schema.restoreColumn` / `schema.changeColumnType` | 3장 `tables` 함수와 1:1. `schema.create`는 `{ name, columns? }`이며 `columns`로 기본 열을 함께 만든다(D-16, Step 12) | `{ cmd, ... }`. 적용된 D-08 커맨드를 돌려주어 메인이 히스토리·저널에 넣는다 | 타입 변경만 가능 |
 | `query.window` | `{ tableId, viewSpec, offset, limit, seq }` | `{ rows, columnIds, seq, elapsedMs }`. `rows[i] = { id, cells, lengths }`이고 `cells[j]`는 `columnIds[j]` 열의 값(text·longtext는 `substr(1, 256)` 미리보기), `lengths[j]`는 미리보기가 잘렸을 때만 전체 문자 수, 아니면 null. `columnIds`는 소프트 삭제·숨김을 뺀 살아 있는 열의 표시 순서. `limit`은 1만 이하. `elapsedMs`는 Worker 측 질의 시간(8장 측정용) | 불가(짧음) |
 | `query.count` | `{ tableId, viewSpec }` | `{ count, elapsedMs }`. 뷰 조건(필터·검색)을 포함한 행 수. Worker가 쓰기 일련번호와 뷰 조건을 키로 캐시한다 | |
 | `query.row` | `{ tableId, rowId, colIds }` | `{ row }`. `row = { id, cells, createdAt, updatedAt }`(`cells`는 열 id → 전문 값, `createdAt`·`updatedAt`은 시스템 열)이고 없는 행이면 `row: null`. `colIds`를 비우면 살아 있는 열 전부 | |
@@ -992,12 +1183,14 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `import.preview` | `{ file, options }`. `file`은 Blob(File)이며 구조화 복제로 넘긴다(메인은 바이트를 읽지 않는다). `options = { format: 'csv' \| 'xlsx', encoding?, delimiter?, hasHeader?, sheet?, headerRow? }`. 빠진 값은 Worker가 감지한다 | `{ format, encoding, delimiter, hasHeader, sheets?, sheet?, headerRow?, headers, sample, sampleRows, exhausted, inferred, warnings }`. `sample`은 앞 20행, `inferred[i] = { type, confidence, examples }`, `warnings[i] = { kind: 'encoding' \| 'ragged' \| 'unterminated_quote' \| 'merged' \| 'error_cells' \| 'empty_headers', count? }` | 가능 |
 | `import.run` | `{ file, options, mapping, target, policy }`. `target = { kind: 'new', name } \| { kind: 'existing', tableId }`, `mapping = { columns: [{ source, name?, type?, columnId?, policy? }] }`, `policy = 'null' \| 'text' \| 'abort'`(열에 정책이 없을 때의 기본) | `{ report }`. `report = { tableId, inserted, skipped, nulled, errors[], demoted[] }`. 진행 이벤트 `{ phase: 'insert', done, total }`(`total`은 행 수를 미리 알 때만 0보다 큼). 커맨드를 돌려주지 않는다(Step 7 "가져오기는 커맨드가 아니다") | 가능(전체 롤백) |
 | `export.stream` | `{ tableId, viewSpec, format: 'csv' \| 'xlsx', options? }`. `options = { encoding?: 'utf-8-bom' \| 'utf-8', delimiter?, formulaGuard? }`(CSV) | 조각 이벤트 `{ id, chunk }`(transfer) 0회 이상 뒤 `{ rows, bytes, blobCells }`. 진행 이벤트 `{ phase: 'export', done, total }`. 배타 op(Step 9 "내보내기는 Worker가 조각으로 흘려보낸다") | 가능(페이지 사이, `E_IMPORT_CANCELLED`) |
+| `cleanup.plan` | | `{ tables, dbBytes, freeBytes, compactsOnSave }`(Step 13 `cleanup.plan`). `tables[i] = { tableId, name, columns: [{ id, name, type, deletedAt }], ftsEnabled, blocked }`는 소프트 삭제된 열이 있는 STRICT 테이블. `blocked`는 재작성이 스키마를 옮길 수 없으면 `{ reason: 'foreign_key' \| 'index' \| 'trigger' \| 'view' \| 'columns', object }`, 아니면 null(Step 13 `schemaBlocker`). 읽기 op | |
+| `cleanup.run` | `{ columns: [{ tableId, columnId }] }`. 비어 있으면 빈 공간 줄이기만 | `{ cmds, removedColumns, rebuiltIndexes, vacuumed, vacuumError, bytesBefore, bytesAfter }`. `cmds`는 테이블마다 되돌릴 수 없는 `column.purge` 커맨드이며 메인이 저널에 넣고 히스토리를 비운다. 진행 이벤트 `{ phase: 'purge' \| 'index' \| 'vacuum', done, total }`. 배타 op(D-17). `blocked`인 테이블의 열을 요청하면 쓰기 전에 `E_DB_QUERY`(`reason: 'unexpected_schema'`)로 거부 | 가능(재작성·인덱싱 중. 전체 롤백, `E_IMPORT_CANCELLED`). `VACUUM`은 불가 |
 
 데스크톱 모드에서 Worker의 엔진 구현은 메인에 `engine:call` / `engine:result` 메시지로 SQL 호출을 위임한다. 이는 RPC와 별개의 내부 채널이며 위 표에 넣지 않는다. 형식은 `{ callId, op, args, buffer? }` / `{ callId, ok, result | error }`이고 진행률은 `{ callId, progress }`다. `buffer`(`SharedArrayBuffer`)가 있으면 동기 호출이며 응답은 메시지가 아니라 그 버퍼(머리 8바이트: 상태 Int32, 길이 Int32. 이어서 UTF-8 JSON)에 쓰고 `Atomics.notify`로 알린다. 상태는 1 = 성공, 2 = 오류(본문은 직렬화된 오류), 3 = 버퍼 부족(길이 칸에 필요한 바이트 수. Worker가 그 크기의 새 버퍼로 `{ callId, fetch: true, buffer }`를 보내면 브리지가 보관한 응답을 다시 쓴다). Worker의 RPC 디스패처는 `callId`가 있는 메시지를 무시하고 엔진 구현이 받는다.
 
 `db.save`가 성공한 뒤의 dirty 해제와 쓰기 op 뒤의 dirty 기록은 Worker가 `capabilities().persistence === 'native'`일 때만 한다(D-15). 브라우저 모드의 파일에는 `dirty` 키가 생기지 않는다.
 
-규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`)와 `db.snapshot`·`db.close`·`export.stream`은 서로 배타적이며 동시에 오면 `E_DB_BUSY`(`export.stream`은 읽기지만 페이지 사이에서 이벤트 루프로 돌아오므로 쓰기가 끼어들면 앞뒤 페이지가 다른 상태를 본다). `query.*`, `schema.list`, `views.list`, `import.preview`(파싱만 하고 DB는 읽기만 한다)는 언제나 허용된다(읽기).
+규칙: Worker는 상태를 "열린 DB 하나"만 가진다. `db.open` 중에 다른 요청이 오면 `E_DB_BUSY`. 쓰기 op(`command.apply`, `schema.*` 중 `schema.list` 외 전부, `views.save`·`views.delete`, `import.run`, `search.enable`·`search.disable`, `cleanup.run`)와 `db.snapshot`·`db.close`·`export.stream`은 서로 배타적이며 동시에 오면 `E_DB_BUSY`(`export.stream`은 읽기지만 페이지 사이에서 이벤트 루프로 돌아오므로 쓰기가 끼어들면 앞뒤 페이지가 다른 상태를 본다). `query.*`, `schema.list`, `views.list`, `cleanup.plan`, `import.preview`(파싱만 하고 DB는 읽기만 한다)는 언제나 허용된다(읽기).
 
 `db.snapshot`·`db.close`가 배타인 이유: 둘 다 트랜잭션 상태를 전제로 한다(스냅샷은 트랜잭션 밖에서만 뜰 수 있고, 닫기는 연결을 없앤다). 쓰기 op는 청크 사이에서 이벤트 루프로 돌아오므로 그 틈에 저장 요청이 끼어들 수 있고, 끼어들면 중첩 SAVEPOINT 이름이 겹쳐 롤백이 깨진다. 파일에는 아무것도 쓰이지 않았는데 `revision`·`saved_by`만 올라간 DB가 남는 것이 최악이다. 긴 작업 중의 저장은 큐에 넣지 않고 거절하며, UI가 "작업이 끝난 뒤 다시 저장하세요"로 안내한다.
 
@@ -1031,7 +1224,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_PASTE_TOO_LARGE` | 100만 셀 초과 | 예 | CSV 가져오기 안내 |
 | `E_UNDO_LIMIT` | 되돌리기 스냅샷 초과 | 예 | 확인 후 히스토리 비움 |
 | `E_IMPORT_ENCODING` | 깨진 문자 비율 초과(미리보기 `warnings`의 `encoding`. 던지지 않고 문구만 쓴다) | 예 | 인코딩 재선택 |
-| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경, 검색 인덱스 생성, 내보내기) | 예 | 롤백 결과 안내(가져오기 전 상태 그대로 / 내보내기 파일은 만들어지지 않음) |
+| `E_IMPORT_CANCELLED` | 사용자 취소(가져오기, 열 타입 변경, 검색 인덱스 생성, 내보내기, 데이터베이스 정리) | 예 | 롤백 결과 안내(가져오기 전 상태 그대로 / 내보내기 파일은 만들어지지 않음 / 정리 전 상태 그대로) |
 | `E_XLSX_ENCRYPTED` / `E_XLSX_CORRUPT` | 파일 문제 | 예 | 거부 |
 | `E_GZIP_UNSUPPORTED` | `CompressionStream`·`DecompressionStream` 없음(`.db.gz` 저장·열기) | 예 | 비압축 안내. 저장은 스냅샷 전에 멈춰 revision이 오르지 않는다 |
 | `E_QUOTA` | IDB 용량 초과 | 예 | 백업·저널 생략 안내. 백업 생략은 다음 저장 성공까지 상태바에 남는다 |
@@ -1042,8 +1235,10 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | `E_ORIGINAL_CHANGED` | 열린 뒤 원본이 디스크에서 바뀜 | 예 | 덮어쓰기 / 다른 이름으로 저장 / 취소 |
 | `E_UNKNOWN` | 분류되지 않은 예외(아래 원칙 3) | 아니오 | 콘솔에 전체 스택, 저장 후 다시 시작 권고 |
 
+v2 사용성 묶음(Step 12~14)은 새 오류 코드를 두지 않는다. 데이터베이스 정리의 실패는 원인에 따라 `E_MEM`·`E_DISK_FULL`·`E_DB_QUERY`·`E_IMPORT_CANCELLED`·`E_DB_BUSY`로 알리고, 문구에 정리 전 상태 그대로임을 넣는다(Step 13).
+
 원칙:
-1. 데이터 유실 가능성이 있는 경로(저장, 삭제, 가져오기 취소)는 실패 시 **원본이 어떤 상태인지**를 메시지에 반드시 포함한다.
+1. 데이터 유실 가능성이 있는 경로(저장, 삭제, 가져오기 취소, 데이터베이스 정리)는 실패 시 **원본이 어떤 상태인지**를 메시지에 반드시 포함한다.
 2. Worker에서 던진 오류는 직렬화하여 메인에서 같은 `AppError`로 복원한다.
 3. 예상 못 한 예외(`E_UNKNOWN`)는 콘솔에 전체 스택을 남기고, 사용자에게는 "저장 후 다시 시작"을 권한다. 조용히 삼키지 않는다.
 
@@ -1067,6 +1262,7 @@ Step은 설계·검증의 단위이고, 세션은 구현·검증의 단위다. S
 | 산출물 크기 | 6 MB 이하 | `verify.mjs` |
 | 최대 힙(300 MB DB 저장 시점) | 1.2 GB 이하 | 스냅샷 동안 렌더러 프로세스 RSS의 최고 수위(Linux `/proc`의 VmHWM을 직전에 `clear_refs`로 되돌려 잰다. Worker의 wasm 메모리 포함. 100 ms 간격 표본은 스냅샷의 짧은 봉우리를 잡을지가 표본 시점에 달려 같은 코드가 857 MB와 1,164 MB를 오갔다) |
 | 30만 행 CSV 내보내기 | 예산 없음(기록만) | `export.stream` 시작 → 다운로드 완료 |
+| 30만 행 테이블의 데이터베이스 정리(장문 열 하나 삭제 뒤) | 예산 없음(기록만, Step 13) | `cleanup.run` 왕복과 그동안의 렌더러 메모리 최고 수위 |
 
 데스크톱 모드(Step 11)는 같은 UI 예산에 아래를 더한다. 측정 환경은 위와 같고, 픽스처는 500만 행 × 20열(약 5 GB DB)이다.
 
@@ -1108,5 +1304,7 @@ CI의 기준선 비교가 판정하는 항목은 `test/perf/report.js`의 `GATED
 | R7 | STRICT 테이블이 아닌 외부 SQLite 파일 편집 | 타입 혼재 | "관리 대상 등록" 시 읽기 전용 기본, 변환 마법사는 v1.1 |
 | R8 | WebView별 차이(WKWebView의 IndexedDB·CompressionStream, WebKitGTK 버전)와 tauri-driver의 macOS 미지원 | 데스크톱 기능 일부가 플랫폼별로 다르고 macOS E2E 자동화 불가 | 기능 감지, 지원 매트릭스에 데스크톱 열 추가, macOS는 수동 점검 목록 |
 | R9 | rusqlite `bundled` 빌드의 컴파일 플래그(FTS5, `VACUUM INTO` 지원 버전)와 JS 쪽 SQLite 버전 불일치 | 같은 SQL이 한 모드에서만 실패 | 두 엔진의 `sqlite_version()`·`compile_options`를 테스트로 고정하고 차이를 문서화 |
+| R10 | 데이터베이스 정리(D-17)의 테이블 재작성과 `VACUUM`이 브라우저 모드에서 DB 크기만큼 메모리를 더 쓴다 | 큰 DB의 정리가 `E_MEM`으로 실패 | 실패는 전체 롤백이라 데이터는 안전하다. 실행 전에 `dbBytes × 2`와 `maxFileBytes`를 비교해 경고하고 데스크톱 앱을 안내한다. Step 13의 성능 기록으로 실제 최고 수위를 확인한다 |
+| R11 | 머리글 클릭 정렬을 정렬 버튼으로 옮긴 변경(D-16)이 v1 사용자의 습관과 다름 | 정렬하는 법을 잃음 | 정렬 버튼을 늘 보이게 두고 툴팁·도움말(D-19)로 알린다. 도구 모음의 정렬 대화상자는 그대로다 |
 
 미확정: 기본 파일 확장자를 `.db`로 할지 `.jdr.db`로 할지(현재 `.db`). 자동 저장의 기본값은 세션 G에서 "꺼짐"으로 확정했다(정본 파일이 있어야만 동작하고, 켜면 30초~5분 간격을 설정에서 고른다).

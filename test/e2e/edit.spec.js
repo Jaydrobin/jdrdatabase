@@ -8,6 +8,7 @@
 import { expect, test } from '@playwright/test';
 import { delayTransport } from './delay-transport.js';
 import { PAGE_URL } from './page-url.js';
+import { addColumnUi, createTableWith, headerCell } from './schema-ui.js';
 
 /**
  * @typedef {object} TestHook
@@ -43,42 +44,16 @@ function hook(page) {
 }
 
 /**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- * @param {string} typeLabel
- */
-async function addColumn(page, name, typeLabel) {
-  await page.click('[data-action="column-add"]');
-  const dialog = page.locator('.jdr-dialog');
-  await dialog.locator('input').fill(name);
-  await dialog.locator('select').selectOption({ label: typeLabel });
-  await dialog.getByRole('button', { name: '추가' }).click();
-  await expect(page.locator('.jdr-sidebar__column-name', { hasText: name })).toBeVisible();
-}
-
-/**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- */
-async function createTable(page, name) {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill(name);
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await expect(page.locator('.jdr-grid__empty')).toHaveText(
-    '열이 없습니다. 사이드바의 "+ 열"로 추가하세요.',
-  );
-}
-
-/**
  * 텍스트·정수·장문·불리언 열과 행 20개.
  * @param {import('@playwright/test').Page} page
  */
 async function seed(page) {
-  await createTable(page, '고객');
-  await addColumn(page, '이름', '텍스트');
-  await addColumn(page, '나이', '정수');
-  await addColumn(page, '본문', '장문');
-  await addColumn(page, '활성', '참/거짓');
+  await createTableWith(page, '고객', [
+    { name: '이름', type: 'text' },
+    { name: '나이', type: 'integer' },
+    { name: '본문', type: 'longtext' },
+    { name: '활성', type: 'boolean' },
+  ]);
   const state = await hook(page).state();
   const table = state?.tables[0];
   if (!table) throw new Error('table missing');
@@ -218,13 +193,15 @@ test('되돌리기·다시 실행: 셀 편집과 열 추가를 단축키와 버�
   await page.keyboard.press('Control+y');
   await expect(cell(page, 0, 0)).toHaveText('changed');
 
-  // 스키마 커맨드(열 추가)도 히스토리에 들어온다.
-  await addColumn(page, '비고', '텍스트');
+  // 스키마 커맨드도 히스토리에 들어온다. "+ 열"의 추가와 이름 편집기의 확정은 한 항목이라(D-16)
+  // 되돌리기 한 번에 열이 사라지고, 다시 실행 한 번에 이름까지 돌아온다.
+  await addColumnUi(page, '비고');
   await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveText('비고');
   await page.click('[data-action="undo"]');
   await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveCount(0);
   await expect(page.locator('.jdr-sidebar__column-name', { hasText: '비고' })).toHaveCount(0);
   await page.click('[data-action="redo"]');
+  await expect(headerCell(page, '비고')).toHaveCount(1);
   await expect(page.locator('.jdr-grid__hcell[data-col="4"]')).toHaveText('비고');
   await expect(page.locator('[data-action="redo"]')).toBeDisabled();
   await expect(page.locator('[data-action="undo"]')).toBeEnabled();
@@ -232,8 +209,11 @@ test('되돌리기·다시 실행: 셀 편집과 열 추가를 단축키와 버�
 
 test('1,000 × 20 TSV 붙여넣기 → 되돌리기 → 다시 실행', async ({ page }) => {
   test.setTimeout(120_000);
-  await createTable(page, '표');
-  for (let i = 0; i < 20; i += 1) await addColumn(page, `열${i + 1}`, '텍스트');
+  await createTableWith(
+    page,
+    '표',
+    Array.from({ length: 20 }, (_, i) => ({ name: `열${i + 1}`, type: 'text' })),
+  );
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 0개');
 
   const tsv = Array.from({ length: 1000 }, (_, r) =>
@@ -245,19 +225,20 @@ test('1,000 × 20 TSV 붙여넣기 → 되돌리기 → 다시 실행', async ({
   await page.keyboard.press('Control+v');
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 1,000개');
   await expect(cell(page, 0, 0)).toHaveText('값1-1');
-  await page.locator('.jdr-grid__scroller').evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-    el.scrollLeft = el.scrollWidth;
-  });
+  // 맨 끝에는 빈 행 30줄이 있다(D-16). Ctrl+End는 마지막 실제 행의 마지막 열로 간다.
+  await page.keyboard.press('Control+End');
   await expect(cell(page, 999, 19)).toHaveText('값1000-20');
   await expect(page.locator('.jdr-toast--info').last()).toContainText('1,000행 × 20열');
-  // 테이블 생성 1건 + 열 추가 20건 + 붙여넣기 1건.
-  expect(await hook(page).history()).toEqual({ undo: 22, redo: 0, busy: false });
+  // 테이블 생성(열 20개 포함) 1건 + 붙여넣기 1건.
+  expect(await hook(page).history()).toEqual({ undo: 2, redo: 0, busy: false });
 
   await page.keyboard.press('Control+z');
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 0개');
   await page.keyboard.press('Control+Shift+z');
   await expect(page.locator('.jdr-grid__rowcount')).toHaveText('행 1,000개');
+  // 되돌려 행이 0개일 때도 빈 행 30줄이 남아 스크롤 위치가 0으로 돌아가지 않는다. 첫 행의 끝 열로 간다.
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('End');
   await expect(cell(page, 0, 19)).toHaveText('값1-20');
   const state = await hook(page).state();
   const table = state?.tables[0];

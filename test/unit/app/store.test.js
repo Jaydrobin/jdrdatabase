@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { createHistory } from '../../../src/app/history.js';
 import { createStore } from '../../../src/app/store.js';
 import { formatBytes } from '../../../src/util/bytes.js';
 import { AppError } from '../../../src/util/errors.js';
@@ -577,6 +578,57 @@ test('runSchemaOp: 커맨드를 저널에 넣고 dirty, 테이블 목록 갱신�
   await store.saveAs();
   assert.equal(store.getState().dirty, false);
   await client.call('db.close');
+  client.close();
+});
+
+test('createTable·addDefaultColumn(D-16): 기본 열, 자동 이름은 삭제된 열도 건너뛰고, 이름 겹침은 한 번 다시 시도', async () => {
+  const { store, client, notices } = await setup();
+  const tableId = await store.createTable('테이블 1', {
+    columns: [
+      { name: '열 1', type: 'text' },
+      { name: '열 2', type: 'text' },
+    ],
+  });
+  assert.ok(tableId);
+  assert.equal(store.getState().currentTableId, tableId, '만든 테이블을 고른다');
+  const columnNames = () =>
+    (store.getState().tables.find((tb) => tb.id === tableId)?.columns ?? []).map((c) => [
+      c.name,
+      c.deletedAt === null,
+    ]);
+  assert.deepEqual(columnNames(), [
+    ['열 1', true],
+    ['열 2', true],
+  ]);
+
+  const third = await store.addDefaultColumn(tableId);
+  assert.equal(third?.columnCount, 6, '시스템 열 3 + 사용자 열 3');
+  // `열 2`를 소프트 삭제하면 새 열은 그 이름을 가져가지 않는다(가져가면 삭제한 열을 복원할 수 없다).
+  const second = store.getState().tables[0]?.columns[1]?.id ?? '';
+  await store.runSchemaOp('schema.softDeleteColumn', { tableId, columnId: second });
+  await store.addDefaultColumn(tableId);
+  assert.deepEqual(columnNames(), [
+    ['열 1', true],
+    ['열 2', false],
+    ['열 3', true],
+    ['열 4', true],
+  ]);
+
+  // 스토어가 모르는 사이 다른 경로가 `열 5`를 만들었다: Worker가 거부하면 목록을 다시 읽고 `열 6`으로.
+  await client.call('schema.addColumn', { tableId, name: '열 5', type: 'text' });
+  const before = notices.length;
+  const retried = await store.addDefaultColumn(tableId);
+  assert.ok(retried);
+  assert.deepEqual(
+    columnNames().map((c) => c[0]),
+    ['열 1', '열 2', '열 3', '열 4', '열 5', '열 6'],
+  );
+  assert.equal(notices.length, before, '다시 시도해 성공하면 오류를 알리지 않는다');
+
+  assert.equal(await store.renameColumn(tableId, retried.columnId, '메모'), true);
+  assert.equal(columnNames().at(-1)?.[0], '메모');
+  assert.equal(await store.renameColumn(tableId, retried.columnId, '열 1'), false);
+  assert.equal(notices.at(-1)?.value, 'E_NAME_INVALID');
   client.close();
 });
 
@@ -1419,5 +1471,113 @@ test('오류 주입(Step 10): 파일 쓰기 중 예외는 E_FILE_WRITE로 알리
     (await client.call('engine.exec', { sql: 'SELECT s FROM t ORDER BY id' })).rows,
     [['하나'], ['둘']],
   );
+  client.close();
+});
+
+test('runCleanup(D-17): 커맨드를 저널에 넣고 히스토리를 비우며 dirty, 지운 열은 목록에서 사라진다', async () => {
+  const { store, client, autosave } = await setup();
+  const history = createHistory({
+    client,
+    store,
+    notify: { error: () => {}, info: () => {} },
+  });
+  const tableId = await store.createTable('정리 표', {
+    columns: [
+      { name: '남김', type: 'text' },
+      { name: '지움', type: 'longtext' },
+    ],
+  });
+  assert.ok(tableId);
+  const gone = store.getState().tables.find((t) => t.id === tableId)?.columns[1]?.id ?? '';
+  await store.runSchemaOp('schema.softDeleteColumn', { tableId, columnId: gone });
+  assert.ok(history.state().undo >= 2, '정리 전에는 되돌릴 것이 있다');
+  const plan = await store.planCleanup();
+  assert.deepEqual(
+    plan?.tables.map((t) => t.columns.map((c) => c.id)),
+    [[gone]],
+  );
+  let done = 0;
+  store.on('cleanup:done', () => {
+    done += 1;
+  });
+  const result = await store.runCleanup([{ tableId, columnId: gone }]);
+  assert.equal(result?.removedColumns, 1);
+  assert.equal(done, 1);
+  assert.deepEqual(history.state(), { undo: 0, redo: 0, busy: false }, '히스토리를 비운다');
+  assert.equal(store.getState().dirty, true);
+  const journal = await autosave.recoverable(store.getState().meta.db_id ?? '');
+  assert.equal(journal?.commands.at(-1)?.type, 'column.purge', '저널 끝에 정리 커맨드');
+  assert.ok(
+    !store
+      .getState()
+      .tables.find((t) => t.id === tableId)
+      ?.columns.some((c) => c.id === gone),
+    '테이블 목록을 다시 읽어 지운 열이 없다',
+  );
+  history.dispose();
+  client.close();
+});
+
+test('runCleanup: 고른 열이 없으면 빈 공간만 줄이고 히스토리는 그대로, 읽기 전용이면 거부', async () => {
+  const { store, client, autosave } = await setup();
+  const history = createHistory({
+    client,
+    store,
+    notify: { error: () => {}, info: () => {} },
+  });
+  await store.createTable('표');
+  const undoBefore = history.state().undo;
+  const dbId = store.getState().meta.db_id ?? '';
+  const journalBefore = (await autosave.recoverable(dbId))?.commands.length ?? 0;
+  const result = await store.runCleanup([]);
+  assert.equal(result?.vacuumed, true);
+  assert.deepEqual(result?.cmds, []);
+  assert.equal(history.state().undo, undoBefore, '논리 상태가 그대로라 히스토리를 비우지 않는다');
+  assert.equal((await autosave.recoverable(dbId))?.commands.length ?? 0, journalBefore);
+  assert.equal(store.getState().dirty, true, '저장해야 파일이 작아진다');
+  history.dispose();
+  client.close();
+
+  // 앱보다 새로운 스키마의 파일(읽기 전용)은 정리하지 않는다.
+  const newer = await setup();
+  await newer.client.call('engine.exec', {
+    sql: "UPDATE _jdr_meta SET value = '999' WHERE key = 'schema_version'",
+  });
+  const { bytes } = await newer.client.call('db.snapshot', {});
+  assert.equal(await newer.store.openPicked(pickedFile('newer.db', bytes)), true);
+  assert.equal(newer.store.getState().readOnly, 'newerSchema');
+  assert.equal(await newer.store.runCleanup([]), null);
+  assert.ok(newer.notices.some((n) => n.value === 'file.readOnlyBlocked'));
+  newer.client.close();
+});
+
+test('clearBackups·backupCount(D-18): 모든 파일의 직전 저장본을 지우고 저널은 그대로, 실패는 E_UNKNOWN과 보관본 유지 문구', async () => {
+  const { store, client, idb, notices } = await setup();
+  assert.ok(idb);
+  await idb.put('backups', 'db-a', { name: 'a.db', bytes: new Uint8Array(4), at: 1 });
+  await idb.put('backups', 'db-b', { name: 'b.db', bytes: new Uint8Array(4), at: 2 });
+  await idb.add('journal', { dbId: 'db-a', cmd: {} });
+  assert.equal(await store.backupCount(), 2);
+  assert.deepEqual(await store.clearBackups(), { removed: 2 });
+  assert.equal(await store.backupCount(), 0);
+  assert.equal((await idb.getAll('journal')).length, 1, '저널은 지우지 않는다');
+
+  await idb.put('backups', 'db-c', { name: 'c.db', bytes: new Uint8Array(4), at: 3 });
+  const broken = { ...idb, clear: async () => Promise.reject(new Error('quota')) };
+  const failing = await setup({ idb: broken });
+  assert.equal(await failing.store.clearBackups(), null);
+  assert.deepEqual(failing.notices.at(-1), {
+    kind: 'error',
+    value: 'E_UNKNOWN',
+    key: 'backup.clearFailed',
+  });
+  assert.equal(await failing.store.backupCount(), 1, '보관본은 그대로다');
+  failing.client.close();
+
+  const none = await setup({ idb: null });
+  assert.equal(await none.store.backupCount(), null);
+  assert.equal(await none.store.clearBackups(), null);
+  none.client.close();
+  void notices;
   client.close();
 });

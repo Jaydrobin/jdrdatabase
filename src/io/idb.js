@@ -24,6 +24,7 @@ export const STORE_NAMES = Object.freeze(
  * @property {(store: StoreName, value: unknown) => Promise<number>} add 자동 증가 키 스토어(journal)에 추가하고 키를 돌려준다
  * @property {(store: StoreName, key: IDBValidKey) => Promise<void>} delete
  * @property {(store: StoreName, options?: { limit?: number }) => Promise<Array<{ key: IDBValidKey, value: unknown }>>} getAll 키 오름차순
+ * @property {(store: StoreName) => Promise<IDBValidKey[]>} keys 키 목록(오름차순). 값을 읽지 않으므로 큰 값(직전 저장본은 최대 200 MB)이 있는 스토어의 개수를 셀 때 쓴다
  * @property {(store: StoreName) => Promise<void>} clear
  * @property {() => void} close
  */
@@ -101,6 +102,7 @@ function wrap(db) {
       ]);
       return keys.map((key, i) => ({ key, value: values[i] }));
     },
+    keys: (store) => run(store, 'readonly', (s) => s.getAllKeys()),
     clear: (store) => run(store, 'readwrite', (s) => s.clear()).then(() => undefined),
     close: () => db.close(),
   };
@@ -186,6 +188,7 @@ export function createMemoryIdb() {
       const limited = options.limit ? entries.slice(0, options.limit) : entries;
       return limited.map(([key, value]) => ({ key, value: structuredClone(value) }));
     },
+    keys: async (store) => [...s(store).keys()].sort(compare),
     clear: async (store) => {
       s(store).clear();
     },

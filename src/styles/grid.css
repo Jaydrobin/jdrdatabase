@@ -228,20 +228,109 @@
   user-select: none;
 }
 
-/* 정렬 표시와 필터 결과 없음(Step 6) */
+/* 머리글(D-16): [이름][정렬 버튼][메뉴 버튼][너비 조절 손잡이]. 칸 클릭은 정렬하지 않는다. */
 .jdr-grid__hcell[data-col] {
-  cursor: pointer;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding-right: 6px;
   user-select: none;
 }
 
+.jdr-grid__hcell[data-col][hidden] {
+  display: none;
+}
+
 .jdr-grid__hname {
-  display: inline;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jdr-grid__hbtn {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--jdr-fg-muted);
+  cursor: pointer;
+}
+
+.jdr-grid__hbtn:hover {
+  border-color: var(--jdr-border);
+  background: var(--jdr-bg);
+  color: var(--jdr-fg);
+}
+
+/* 정렬하지 않은 열의 정렬 버튼. 기호는 문구가 아니라 장식이다(이름은 aria-label). */
+.jdr-grid__hbtn--sort:not(.jdr-grid__hbtn--sorted)::before {
+  content: '⇅';
+}
+
+.jdr-grid__hbtn--menu::before {
+  content: '▾';
 }
 
 .jdr-grid__hsort {
-  margin-left: 4px;
   font-size: 11px;
   color: var(--jdr-accent);
+}
+
+/* 머리글 이름 편집기. 칸 전체를 덮는다. */
+.jdr-grid__hrename {
+  position: absolute;
+  inset: 2px 4px;
+  z-index: 3;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border: 2px solid var(--jdr-accent);
+  border-radius: 4px;
+  background: var(--jdr-bg);
+  font: inherit;
+  font-weight: 400;
+  color: var(--jdr-fg);
+  outline: none;
+}
+
+.jdr-grid__hrename[aria-invalid='true'] {
+  border-color: var(--jdr-danger);
+}
+
+/* 이름 편집기의 오류 문구. 편집 오버레이(머리글 아래) 위에서 열 왼쪽에 붙는다. */
+.jdr-grid__hrename-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  max-width: 320px;
+  padding: 4px 8px;
+  border: 1px solid var(--jdr-danger);
+  border-radius: 4px;
+  background: var(--jdr-danger-bg);
+  font-size: 12px;
+  color: var(--jdr-fg);
+}
+
+.jdr-grid__hrename-error[hidden] {
+  display: none;
+}
+
+/* 빈 행(D-16): 화면에만 있는 행. 행 번호는 이어서 보이되 기울여 실제 행과 구분한다. 색을 더 흐리게 하면
+   명도 대비(4.5:1)를 잃는다. */
+.jdr-grid__row--ghost .jdr-grid__cell--rownum {
+  font-style: italic;
+}
+
+.jdr-grid__row--ghost {
+  border-bottom-style: dashed;
 }
 
 .jdr-grid__nomatch {

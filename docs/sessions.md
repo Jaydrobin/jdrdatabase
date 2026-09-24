@@ -1,6 +1,6 @@
 # 세션별 검증 기록
 
-`DESIGN.md` 5.0의 세션 묶음(A~I)과 그 사이의 점검 세션이 무엇을 검증했고 무엇을 검증하지 못했는지를 쌓는 파일이다. 세션을 끝낼 때마다 절을 하나 더하고, 그 절에 해당 Step의 "완료 기준"을 항목별로 옮겨 적어 각각 어떻게 확인했는지 적는다. 확인하지 못한 것은 **미확인**으로 표시한다(`CLAUDE.md` 7.1·7.3·9장).
+`DESIGN.md` 5.0의 세션 묶음(A~I, N~P)과 그 사이의 점검·설계 세션이 무엇을 검증했고 무엇을 검증하지 못했는지를 쌓는 파일이다. 세션을 끝낼 때마다 절을 하나 더하고, 그 절에 해당 Step의 "완료 기준"을 항목별로 옮겨 적어 각각 어떻게 확인했는지 적는다. 확인하지 못한 것은 **미확인**으로 표시한다(`CLAUDE.md` 7.1·7.3·9장).
 
 다음 세션은 이 파일에 쌓인 "미확인" 항목을 이어받는다. 항목은 세션 D부터 누적으로 이월되므로 마지막 절만 읽으면 앞 세션 것이 빠진다. 통독하는 대신 아래 grep으로 줄 번호를 모아 필요한 줄의 앞뒤 맥락만 읽는다. 병합 전에는 모든 절의 미확인 항목이 해소됐는지 확인한다.
 
@@ -38,6 +38,11 @@ grep -n 미확인 docs/sessions.md
 | K | CI 유지보수(concurrency, 문서 전용 변경 건너뛰기) | 완료(코드 푸시·문서 전용 푸시 양쪽 실측. main 푸시 경로는 미확인. PR 실행의 concurrency 취소는 세션 L에서 실측) |
 | L | 누적 미확인 항목 정리(SheetJS 0.20.3, 두 탭·인덱스 배지·작업 사본 목록 E2E, `E_MEM`·concurrency 실측, 5 GB 데스크톱 성능, Windows E2E 시도) | 완료(작업 사본 목록의 데이터 유실 버그 수정. Windows E2E는 WebView2 인자 문제로 되돌림, 작업 사본 복사는 성능 예산 초과로 제안 대기. 둘 다 세션 M에서 처리) |
 | M | 세션 L이 남긴 결정 세 건(작업 사본 복사 Linux 적용, `E_MEM` 안내 분리와 크기 경고, Windows 데스크톱 E2E) | 완료(Windows 데스크톱 E2E 전 시나리오 통과. 앱 안의 5 GB 복사는 여전히 예산 초과, Windows·macOS 복사 속도 미확인) |
+| 설계 v2 | DESIGN.md 0.12(D-16~D-19, Step 12~14), CLAUDE.md 7.3·8 | 완료 |
+| N | 12 (기본 시트·빈 행·열 머리글) | 완료(완료 기준 전부 실측. 실제 한글 IME·스크린 리더·Firefox·Safari는 미확인) |
+| O | 13 (데이터베이스 정리·앱 데이터 비우기) | 완료(완료 기준 전부 실측. 데스크톱 E2E는 Linux만, 정리 대화상자의 취소·목록 다시 읽기·실패 문구 표시는 E2E 미확인) |
+| P | 14 (툴팁·도움말) | 완료(완료 기준 전부 실측. 데스크톱은 Linux만, Firefox·Safari·스크린 리더·실제 시크릿 창은 미확인) |
+| v2 점검 | 세션 N·O·P 산출물 코드 점검과 수정 | 완료(결함 18건 수정. 데스크톱 E2E·성능 측정은 이 세션에서 돌리지 못해 미확인) |
 
 ## 기록
 
@@ -1656,3 +1661,300 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 - **Windows 데스크톱에서 E2E가 닿지 않는 것**: 파일 대화상자(자동화 불가), 내보내기 경로 싱크(`sink_write` raw 본문), single-instance, CompressionStream은 **미확인**입니다. macOS WKWebView는 tauri-driver가 지원하지 않아 전부 **미확인**입니다.
 - **크기 경고와 저장 실패 문구의 다른 브라우저 동작**: 한계 수치는 Chromium 실측입니다. Firefox·Safari에서 NOMEM과 탭 종료 중 어느 것이 먼저 오는지는 세션 L의 항목 그대로 **미확인**입니다.
 - 세션 L까지의 나머지 미확인 목록(SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, 한글 파일 이름의 `<a download>`, Firefox·Safari, 스크린 리더·실제 한글 IME 등)은 그대로 **미확인**입니다.
+
+### 설계 v2 (Step 12~14 설계) — 2026-09-23
+
+커밋: `docs(design)` v2 사용성 묶음 설계(`fc0eaa6`), `docs(design)` 단일 브랜치·PR 규칙(`65c60c2`). 코드는 바꾸지 않았다.
+
+사용자가 v1을 써 본 뒤 요청한 일곱 가지를 설계 결정과 Step으로 옮겼다.
+
+- **D-16 / Step 12(세션 N)**: 새 테이블 기본 텍스트 열 30개, 화면에만 있는 빈 행 30줄(k번째 빈 행에 쓰면 k행을 만드는 커맨드 하나), 대화상자 없는 "+ 열"(자동 이름은 소프트 삭제된 열 이름도 건너뜀), 머리글 이름 더블클릭 편집과 열 메뉴(우클릭·▾·Shift+F10), 선택 항목 입력칸의 예시·설명 줄. 머리글 클릭 정렬은 `dblclick`과 충돌하므로 정렬 버튼으로 옮겼다(R11).
+- **D-17 / Step 13(세션 O)**: 데이터베이스 정리. 테이블당 한 번 재작성(`DROP COLUMN`은 검색 인덱스 트리거가 참조하는 열을 지울 수 없음), 테이블마다 되돌릴 수 없는 `column.purge` 커맨드를 바깥 트랜잭션 하나로, 새 엔진 능력 `compactsOnSave`가 거짓일 때만 `VACUUM`.
+- **D-18 / Step 13**: 데스크톱 작업 사본 "모두 버리기", 브라우저 직전 저장본 "모두 지우기". 저널은 복구의 유일한 사본이라 대상에서 뺐다.
+- **D-19 / Step 14(세션 P)**: `title` 속성 대신 공용 툴팁(키보드 포커스에서도 보임)과 도움말 대화상자. 단축키 주제는 `app/shortcuts.js` 표에서 생성.
+- **진행 방식**: 세 묶음이 이 작업 브랜치(`claude/busy-mayer-hv2g8x`)와 PR 하나를 공유하고, N → O → P 순서로 앞 세션의 푸시와 CI 초록 뒤에 시작하며, P가 끝난 뒤 한 번 병합한다(사용자 결정. `DESIGN.md` 5.0, `CLAUDE.md` 7.3·8). 세션 이름 J~M은 이미 쓰였으므로 N부터.
+- **문서와 테스트의 관계**: `conventions.test.js`가 6장 RPC 표와 `worker.js`를 대조하므로 새 op `cleanup.plan`·`cleanup.run`은 표가 아니라 Step 13 본문에 두었다. 처음에 표에 넣었을 때 그 테스트가 빨강인 것을 보고 옮겼다. 세션 O가 구현과 같은 PR에서 표에 넣는다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 365개 통과.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` 3,860,804 bytes(변화 없음, 문서만 바꿈).
+- [x] `npm run test:e2e`: 70개 통과.
+- [x] `CLAUDE.md` 7.1: 새 오류 코드 없음(7장에 명시). 새 RPC op는 아직 구현하지 않았으므로 6장 표에 넣지 않았다.
+
+**미확인 (세션 N~P가 이어받음)**
+
+- 이 절의 설계는 모두 구현 전이다. 빈 행·머리글 조작의 실제 사용감, 정리의 메모리 최고 수위(R10), F1 단축키와 비활성 버튼 툴팁의 브라우저별 동작, 시크릿 모드의 IDB 수명은 **미확인**이며 각 Step의 완료 기준에서 실측한다.
+
+### 세션 N (Step 12: 기본 시트·빈 행·열 머리글) — 2026-09-23
+
+커밋: `b89411f` docs(design) → `96fbeb6` refactor(ui) → `8807f57` feat(db) → `0a16f80` feat(grid) → `e0ae6ea` test(perf)(빈 행 끝 점프) → `c7728f7` docs(session) → `cc60dd3` docs(design)(열 메뉴 정렬, 추가와 이름 합치기) → `e68545f` feat(grid) → 이 커밋 docs(session).
+
+시작 상태: 작업 브랜치 `claude/busy-mayer-hv2g8x`가 원격 `ca22c21`과 같았고 `npm run check`(365개)가 초록이었습니다. 원격 실행 환경이 정해 준 브랜치도 같은 이름이라 따로 묻지 않았습니다. 설계 v2 절의 미확인(빈 행·머리글의 실제 사용감)은 아래 완료 기준에서 실측했습니다.
+
+**설계에서 구현 중에 정한 것(`b89411f`, DESIGN.md Step 12에 반영)**
+
+- 열 메뉴 단축키의 행동 이름을 설계 문구의 `column-menu` 대신 기존 행동 이름 표기에 맞춘 `columnMenu`로 했습니다.
+- 머리글 버튼(정렬·▾)은 누를 때 포커스를 가져갑니다. 처음에는 `mousedown`에서 포커스를 막았는데, 그러면 열려 있던 셀 편집기의 blur 확정이 일어나지 않고 정렬로 인한 다시 마운트가 편집기를 닫아 **입력이 조용히 사라졌습니다**(`view.spec.js`의 "편집 중 정렬 버튼 클릭" 회귀 테스트가 빨강으로 잡음). 막지 않고, 버튼이 탭 정지가 아니므로 정렬 뒤·메뉴를 닫은 뒤 그리드로 포커스를 돌려줍니다.
+- 열 메뉴의 "오름차순·내림차순 정렬"은 다른 열의 정렬을 그대로 두고 그 열의 방향을 정합니다(`query.setSortDirection`: 정렬 목록에 그 열이 있으면 그 자리에서 방향만, 없으면 보조 정렬로 끝에). "정렬 해제"는 그 열만 뺍니다. 설계가 정하지 않았던 부분이라 사용자와 정했습니다. 목록을 그 열 하나로 바꾸는 것은 정렬 버튼의 Shift 없는 클릭입니다.
+- 빈 행 확정은 확정 시점의 `query.stats`로 행 수·`maxId`를 읽습니다. 빈 값 확정은 커맨드를 만들지 않습니다. 붙여넣기는 `planPaste`의 `gapRows`로 사이의 빈 줄을 만듭니다. `Ctrl+End`는 마지막 실제 행으로 갑니다.
+- "+ 열" 직후 이름 편집기에서 확정한 이름은 열 추가와 한 히스토리 항목이라 되돌리기 한 번에 열이 사라집니다(사용자 결정). Worker에는 새 op를 두지 않았습니다. 이름 확정이 `mergeWithAdd`로 기록되고, 히스토리가 스택 맨 위의 같은 테이블 `column.add`와 `commands.mergeCommands`로 합칩니다(다시 실행 스택이 비어 있을 때만). 저널에는 `column.add`, `column.rename`, 합친 항목의 역커맨드가 차례로 남아 재생 결과가 같습니다. 머리글 더블클릭·메뉴·사이드바의 이름 바꾸기는 합치지 않습니다.
+
+**한 일**
+
+1. **Worker(`8807f57`)**: `util/names.nextNames`, `schema.userTableDdl(tableId, columns)`, `tables.create`의 `columns`(DDL 한 문장 + `_jdr_columns` 배치 단계 하나, 이름·타입·항목·열 상한 검증), RPC `schema.create`의 `columns`.
+2. **리팩터링(`96fbeb6`)**: 사이드바의 타입 변경·삭제 흐름을 `dialogs/column.js`의 `changeColumnTypeFlow`·`deleteColumnFlow`로 옮겼습니다(동작 불변). 열 메뉴가 같은 흐름을 씁니다.
+3. **UI(`0a16f80`)**: 스토어 `createTable`·`addDefaultColumn`(소프트 삭제된 이름도 건너뜀, `E_NAME_INVALID`면 목록을 다시 읽고 한 번만 재시도)·`renameColumn`. 사이드바 "+ 테이블"(미리 채운 `테이블 n`, 전체 선택, 열 30개)·"+ 열"(대화상자 없음, v1 열 추가 대화상자와 문구 삭제). 그리드 빈 행(`GHOST_ROWS = 30`, `ghostRowsEnabled`·`isGhostRow`, 창 질의 없음, 흐린 이어지는 행 번호, `aria-rowcount`에 포함, `aria-label`). `ui/grid/header.js`(정렬 버튼, ▾, 우클릭 메뉴, 이름 더블클릭 편집기, 머리글을 다시 만들 때 편집기 이동), `ui/menu.js`(`role="menu"`, 화살표·Home·End·Enter·Space·Esc·Tab, 포커스 복귀), 편집 컨트롤러의 빈 행 확정(인라인·장문·불리언·붙여넣기)과 빈 행에 걸친 선택 처리, 선택 항목 입력칸의 예시·설명 줄, 테스트 훅 `__jdrTest.createTable`.
+4. **E2E 정리**: "+ 테이블"이 열 30개를 만들고 열 추가 대화상자가 없어져 기존 spec 6개(38개 테스트)가 깨졌습니다. 열 구성이 필요한 spec은 훅으로 그 열만 가진 테이블을 만들고(`test/e2e/schema-ui.js`), `schema.spec.js`는 새 UI 경로(머리글 이름 편집기, 열 메뉴의 타입 변경·삭제, 사이드바 경로)로 다시 썼습니다. 빈 행 때문에 바뀐 단언: `aria-rowcount`(+30), 캔버스 높이(+30줄), "끝까지 스크롤하면 마지막 행" → 마지막 빈 행과 그 30줄 위의 마지막 실제 행. 건너뛴 테스트는 없습니다.
+
+**완료 기준 (Step 12)**
+
+- [x] 단위: `names.nextNames` 경계 — `test/unit/util/names.test.js`: 빈 목록, 중간 번호 빈자리, 소프트 삭제된 이름 건너뜀, `count` 여러 개, `{n}` 없는 형식 거부. 스토어 쪽은 `store.test.js`의 "createTable·addDefaultColumn(D-16)"이 삭제된 `열 2`를 건너뛰는 것과, 스토어가 모르는 `열 5`가 생겼을 때 Worker 거부 → 재시도로 `열 6`이 되는 것(오류 알림 없음)을 실제 wasm DB로 확인합니다.
+- [x] 단위: 열 30개 `tables.create`의 대칭성 — `tables.test.js` "create + columns: 기본 열 30개…": 적용 → 되돌리기 → 덤프 동일 → 다시 적용, `pragma_table_info`의 물리 열 30개·TEXT, id 30개가 서로 다름. 빈 행 확정 커맨드 — `commands.test.js` "빈 행 확정(D-16)": 빈 테이블의 k = 3 → 행 3개(값은 3행), 적용 → 되돌리기 → 덤프 동일 → 다시 적용, 행이 있을 때 `maxId` 뒤로 이어짐, 되돌리면 0행. RPC 경계는 `rpc.test.js`.
+- [x] E2E: "+ 테이블" → Enter → `열 1`~`열 30`과 빈 행 30줄 → 세 번째 빈 행 입력 → 행 3개·값은 3행 → 되돌리기 → 행 0개 — `sheet.spec.js` 첫 테스트. 주의: Playwright의 `keyboard.type`은 자판에 없는 글자(한글)에 keydown을 내지 않아 "셀에서 바로 타이핑" 시작은 ASCII로 하고 한글은 편집기 안에 `insertText`로 넣었습니다.
+- [x] E2E: "+ 열" → `열 31`과 이름 편집기(이름 전체 선택) → 한글 IME 시뮬레이션으로 확정(조합 중 Enter는 확정하지 않음). 삭제한 `열 5`가 있으면 새 열은 `열 31`(`열 5`가 아님)이고 `열 5`를 복원할 수 있음 — `sheet.spec.js` 둘째 테스트. IME는 `compositionstart`·`isComposing` keydown·`insertText`로 흉내 낸 것입니다(실제 IME는 미확인, 아래).
+- [x] E2E: 우클릭과 Shift+F10(그리고 ContextMenu 키)으로 연 열 메뉴에서 타입을 선택으로 바꾸고 예시(placeholder)·설명 줄(`aria-describedby`)이 보이는 입력칸에 항목 입력 → 확정. 열 메뉴 정렬이 다른 열의 정렬을 지우지 않음(없는 열은 끝에, 있는 열은 그 자리에서 방향만), 정렬 버튼 클릭·Shift+클릭 순환 — `sheet.spec.js` 넷째 테스트. "+ 열"의 추가와 이름이 되돌리기·다시 실행 한 번씩으로 오가는 것은 둘째 테스트와 `edit.spec.js`. v1의 머리글 클릭 정렬 E2E(`view.spec.js` 3개)는 정렬 버튼 클릭으로 고쳤고, 머리글 이름을 눌러도 정렬되지 않는 단언을 더했습니다.
+- [x] 성능: 30만 행 픽스처에서 스크롤 프레임 렌더 p95 **1.8 ms**(두 번째 실행 2.0 ms, 예산 16), 창 질의 최대 **26.3 ms**(두 번째 35.2 ms, 예산 50), 300 MB 열기 1,898 ms. `grid.perf.spec.js`에 맨 끝 점프를 더해 마지막 빈 행이 보이고 창 질의가 많아야 2블록만 늘어나는 것을 단언했습니다(빈 행은 질의하지 않음).
+- [x] 접근성: 열 메뉴·이름 편집기(오류 문구 표시 상태 포함)·빈 행이 보이는 상태에서 axe `critical`·`serious` 0건 — `a11y.spec.js` "axe(D-16)". 빈 행 번호는 색을 흐리게 하면 명도 대비(4.5:1)를 잃어 기울임으로 구분했습니다.
+
+**예외 처리 (Step 12) 대응**
+
+- 자동 이름 겹침 → 목록 다시 읽고 한 번 재시도: 스토어 단위 테스트.
+- 열 수 상한: "+ 열"이 1,000열을 넘기면 `column.manyWarning`(기존 경로 그대로. 1,000열 E2E는 돌리지 않았습니다), `tables.create`의 상한 초과 거부는 단위 테스트.
+- 빈 행 확정값 검증 실패 → 편집기 유지, 행 없음: `sheet.spec.js` "빈 행 예외"(정수 열에 `abc`).
+- 빈 행 확정 커맨드가 Worker에서 실패 → 롤백은 v1 `history.apply` 경로 그대로입니다. 실패 주입 E2E는 두지 않았습니다(단위의 커맨드 대칭성으로 롤백 가능성만 확인).
+- 빈 행이 꺼지는 전환 중 편집기가 빈 행에 있음 → 닫고 `grid.ghostClosed`: 장문 편집기에서 정렬을 켜는 경로로 E2E. 인라인 편집기는 정렬·필터·검색을 켜려면 포커스가 떠나 blur 확정이 먼저 일어나므로(빈 값이면 행을 만들지 않음) 이 경로에 닿지 않습니다. 읽기 전용이 되는 전환(다른 탭 점유)은 `state:changed` → `refreshGhost`로 구현했지만 **E2E로는 확인하지 않았습니다(미확인)**.
+- 선택이 빈 행에 걸침 → 복사는 빈 칸, 지우기·행 삭제는 실제 행만, 빈 행뿐이면 무동작: `sheet.spec.js` "빈 행 예외".
+- 이름 편집 중 열이 사라짐 → `afterBuild`가 닫음: 코드 경로만 있고 **E2E 미확인**(저널 재생·되돌리기를 편집 중에 일으키기 어려움).
+- 이름 편집기와 IME: `isComposing` 확인(E2E).
+- 읽기 전용·외부 테이블: 이름 더블클릭은 안내, 메뉴는 정렬·숨기기만, 빈 행 없음 — `schema.spec.js` 외부 파일 테스트.
+- 스크롤 스케일링이 켜진 테이블(행 × 32 px > 1,000만 px, 약 31만 행 이상)에서 빈 행 30줄을 전체 높이에 포함: `layout()`이 빈 행을 포함한 행 수를 쓰므로 스케일링 계산에 들어갑니다. 31만 행 이상 픽스처로는 **실측하지 않았습니다(미확인)**.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **379개** 통과(365 + 이름 5, 테이블 2, 빈 행 확정 1, 스토어 1, 단축키 1, 정렬 방향 1, 커맨드 합치기 2, 히스토리 합치기 1). 중간 커밋 `96fbeb6`(365)·`8807f57`(372)도 각각 따로 check 초록.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,879,996 bytes**(설계 v2 기록 3,860,804에서 **+19,192 bytes**: 머리글·메뉴·빈 행 코드와 두 언어 문구). 외부 참조 0, vendor 체크섬 OK.
+- [x] `npm run test:e2e`: **77개** 통과(기존 70 + `sheet.spec.js` 6 + `a11y.spec.js` 1).
+- [x] `npm run test:perf`: 7개 중 6개 통과. **`search.perf.spec.js`의 LIKE가 1,083 ms로 로컬 예산(1초)을 넘었습니다.** 이 PR의 회귀가 아닌 근거: 같은 컨테이너에서 기준 커밋 `ca22c21`과 이 브랜치를 번갈아 두 번씩 돌린 A/B에서 기준 커밋도 1,167·1,101 ms, 이 브랜치 1,053·1,116 ms였습니다(보정값 776~834 ms로 이 컨테이너가 이날 느림). 이 항목은 세션 E·H부터 "예산 경계"(959~998 ms)로 기록된 것이고, 이 세션은 질의 경로를 바꾸지 않았습니다. CI는 보정된 기준선 비교로 판정합니다. 성능은 `e0ae6ea`에서 쟀고, 그 뒤 `e68545f`는 열 메뉴의 정렬 목록 계산과 히스토리 항목 합치기만 바꿔 렌더·창 질의 경로와 무관하므로 다시 재지 않았습니다.
+- [x] `npm run test:native`: **29개** 통과(실제 rusqlite 엔진, Rust 1.94로 이 컨테이너에서 빌드). 데스크톱 코드는 바꾸지 않았지만 `tables.create`의 배치 단계가 데스크톱 모드에서 `run_batch`로 가므로 돌렸습니다(`c7728f7`에서. `e68545f`는 메인 스레드만 바꿈). `test:desktop`(tauri-driver)은 돌리지 않았습니다(**미확인**).
+- [x] CI(`ci` 워크플로의 `check-build-e2e`·`perf` 두 잡, `perf`는 보정된 기준선 비교): `c7728f7`(run 35885501832)과 `b1d0399`(run 35891394582) 모두 **초록**. LIKE 항목도 CI에서는 기준선 대비 회귀가 아닙니다.
+- [x] CLAUDE.md 7.1: 새 오류 코드 없음. 새 RPC op 없음(`schema.create`의 인자만 늘었고 6장 표에 이미 적혀 있음). `src/db`의 `${`는 `quoteIdent`·`physicalType`을 거친 식별자뿐(`conventions.test.js` 통과). `innerHTML` 새 사용 없음. 모드 문자열 비교 추가 없음. `dist/` 커밋 없음. 데스크톱 코드(`src-tauri/`, `engine-native.js`, `ipc-bridge.js`, `filesystem.js`)는 바꾸지 않았습니다.
+
+**이어받은 미확인 항목의 결과**
+
+- 설계 v2의 "빈 행·머리글 조작의 실제 사용감": Chromium headless에서 위 E2E와 스크린샷으로 확인했습니다. 사람이 실제로 써 본 사용감은 리뷰어 확인이 필요합니다.
+- 세션 E 점검의 "머리글 정렬은 마우스 전용"(645행): Shift+F10·ContextMenu로 여는 열 메뉴에 정렬 항목이 있어 키보드로 정렬할 수 있게 됐습니다(E2E).
+- 설계 v2의 나머지(정리의 메모리 최고 수위, F1과 비활성 버튼 툴팁, 시크릿 모드의 IDB 수명)는 세션 O·P의 몫이라 그대로입니다.
+
+**미확인 (후속에서 이어받음)**
+
+- **실제 한글 IME**(macOS·Windows의 입력기)로 머리글 이름을 입력·확정하는 것, 그리고 빈 행 셀에서 한글로 바로 타이핑을 시작하는 것(첫 keydown이 `Process`로 오는 경우)은 **미확인**입니다. E2E는 조합 이벤트를 흉내 냈습니다.
+- 읽기 전용이 되는 전환(다른 탭 점유 중 `state:changed`)에서 빈 행 편집기가 닫히는 것, 이름 편집 중 열이 사라질 때 편집기가 닫히는 것: 코드 경로만 있고 **미확인**.
+- 31만 행 이상(스크롤 스케일링)에서 빈 행이 끝에 보이는 것: **미확인**.
+- 열 메뉴·빈 행의 스크린 리더 낭독(NVDA·VoiceOver), Firefox·Safari에서의 우클릭·Shift+F10 동작: **미확인**.
+- LIKE 검색 로컬 예산 초과: 기준 커밋도 같은 값이라 이 세션의 회귀는 아니지만, 8장 예산 경계 항목으로 **이 컨테이너에서 예산을 넘는 상태**입니다. 8장 측정 환경(4코어 노트북)에서의 값은 **미확인**입니다.
+- 세션 M까지의 나머지 미확인 목록(SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사, macOS WKWebView 등)은 그대로 **미확인**입니다.
+
+### 세션 O (Step 13: 데이터베이스 정리·앱 데이터 비우기) — 2026-09-23
+
+커밋: `b455b6e` docs(design) → `bd09d76` feat(db) → `ea8862c` feat(ui) → `bf71c53` test → 이 커밋 docs(session).
+
+시작 상태: 로컬 작업 브랜치가 원격보다 뒤(`ca22c21`)여서 원격 `59aae7c`(세션 N의 마지막 커밋)로 fast-forward 했습니다. 원격 실행 환경이 정해 준 브랜치도 `claude/busy-mayer-hv2g8x`라 따로 묻지 않았습니다. 그 상태에서 `npm run check`(379개)가 초록이었고, `59aae7c`의 `ci` 실행(run 35892429415)도 초록이었습니다(선행 조건). 이어받은 미확인 가운데 이 세션의 몫은 설계 v2 절의 "정리의 메모리 최고 수위(R10)"였습니다(아래 성능).
+
+**설계에서 구현 중에 정한 것(`b455b6e`, DESIGN.md D-15·Step 13·6장에 반영)**
+
+- 엔진 인터페이스에 `vacuum()`을 더했습니다. `VACUUM`은 트랜잭션 안에서 돌 수 없는데 `run()`은 트랜잭션 밖의 쓰기를 거부하므로 입구가 따로 있어야 했습니다. native는 `compactsOnSave`가 참이라 부를 일이 없어 `E_UNSUPPORTED`이고, 러스트 명령은 늘지 않았습니다.
+- `purgeCommand(target, columnIds)`의 `target`은 `TableInfo`에 `physical`(`physicalColumns`가 `pragma_table_info`로 읽은 cid 순서)을 더한 값입니다. 재작성이 지키는 "원래 순서"는 물리 순서인데, `_jdr_columns.position`은 표시 순서라 타입 변경 뒤에는 물리 순서와 다릅니다. 물리 타입은 STRICT가 허용하는 이름만 받고, 기본값·복합 기본 키가 있는 테이블(이 앱이 만들지 않은 형태)은 `E_DB_QUERY`로 거부합니다.
+- 지운 열 때문에 검색 대상 열이 하나도 남지 않으면 FTS5 테이블을 다시 만들 수 없으므로 `fts_enabled = 0`으로 둡니다.
+- `VACUUM` 실패는 재작성이 커밋된 뒤라 던지지 않고 결과의 `vacuumError`로 알립니다(던지면 메인이 커맨드를 저널에 넣지 못합니다).
+- 스토어는 커맨드를 히스토리를 거치지 않고 저널에 기록한 뒤 `cleanup:done`을 내고, 히스토리가 그 이벤트로 스택을 비웁니다(가져오기의 `import:done`과 같은 방식). 고른 열이 없어 `VACUUM`만 했으면 히스토리를 비우지 않고 dirty만 표시합니다.
+- 대화상자는 한 번에 하나만 열리므로 모두 지우기·모두 버리기의 확인은 설정 대화상자 안의 확인 줄로 받습니다. 정리 버튼은 기기 이름 검사를 거쳐 설정을 저장하는 것과 같이 닫고 정리 대화상자를 엽니다. 이를 위해 `dialog.js`의 `body` 콜백이 두 번째 인자 `{ submit(value) }`를 받습니다.
+
+**한 일**
+
+1. **Worker(`bd09d76`)**: `db/cleanup.js`(`plan`·`physicalColumns`·`purgeCommand`·`run`), `schema.tmpTableFor`(`_jdr_tmp_<id>`), `tables.dropSearchIndexStatements` export, 두 엔진의 `capabilities().compactsOnSave`와 `vacuum()`, RPC `cleanup.plan`(읽기)·`cleanup.run`(배타 쓰기, 진행률 `purge`·`index`·`vacuum`, 취소), DESIGN.md 6장 표.
+2. **UI(`ea8862c`)**: 스토어 `planCleanup`·`runCleanup`·`discardAllWorkcopies`·`backupCount`·`clearBackups`, `io/idb.js`의 `keys`, `ui/dialogs/cleanup.js`, 설정 대화상자의 "데이터베이스" 절·직전 저장본 "모두 지우기"(개수는 IDB 키, 사용량은 `navigator.storage.estimate`의 기능 감지)·작업 사본 "모두 버리기", 두 언어 문구 39개와 `column.delete.message`(정리 위치), `docs/cloud-sync.md`·`docs/desktop.md`(정리 뒤 저장해야 작아짐, 남는 사본, 모두 지우기·버리기).
+3. **측정·데스크톱 E2E(`bf71c53`)**: `test/perf/cleanup.perf.spec.js`(기록만), `test/desktop/run.mjs`의 6번 시나리오.
+
+**완료 기준 (Step 13)**
+
+- [x] 단위(wasm, 실제 DB): 정리 뒤 `pragma_table_info`에 지운 열이 없고, 남은 열과 시스템 열의 값이 정리 전과 같다(물리 순서까지). 검색 인덱스가 있던 테이블은 트리거 셋이 다시 있고 검색 결과가 같으며, 넣은 행·고친 행이 검색에 반영된다. 타입 변경으로 낡은 인덱스는 `ftsStale`이 거짓이 되고 새 텍스트 열이 인덱스에 들어간다 — `test/unit/db/cleanup-contract.js`의 "run: 지운 열이…", "run: 검색 인덱스는…".
+- [x] 단위: 두 번째 테이블의 재작성(`INSERT INTO "_jdr_tmp_<둘째>"`)에 `E_MEM`을 주입하면 DB 덤프(`_jdr_meta` 제외)가 정리 전과 같고 이어서 다시 정리할 수 있다. 테이블 사이 취소(`purge` 진행률 1/2에서 abort)도 `E_IMPORT_CANCELLED`와 같은 덤프.
+- [x] 단위: 20 KB × 200행 장문 열을 지운 뒤 정리하면 wasm에서 크기가 3 MB 넘게 줄고 `freelist_count`가 0이다. `compactsOnSave`가 참인 엔진(native, 또는 참이라고 보고하게 감싼 wasm)에서는 `vacuum()`을 부르지 않는다. `VACUUM` 실패를 주입하면 재작성은 커밋되고 `vacuumError`로 알린다.
+- [x] 단위: 시드의 모든 변경(테이블 생성·행 넣기·검색 인덱스·타입 변경·소프트 삭제)과 정리의 `column.purge`를 구조화 복제해 새 DB에 `do` 방향으로 재생하면 덤프(FTS 그림자 테이블 포함)가 같다.
+- [x] 네이티브: 같은 계약 9개를 `npm run test:native`가 rusqlite 엔진에 대해 통과(엔진 적합성의 `vacuum` 검사, 스토어의 모두 버리기 포함 40개).
+- [x] E2E(브라우저): 열 삭제(확인 문구가 설정의 "데이터베이스 정리…"를 가리킴) → 설정 → 정리 → 저장(다운로드) → 새 DB → 다시 열기 → 물리 열이 `id`·`_created_at`·`_updated_at`·남긴 열뿐이고 값이 그대로. 히스토리 0. 직전 저장본 모두 지우기(IDB에 두 파일의 보관본을 넣어 둠) → 확인 줄에 "2개(모든 파일)"와 사용량 → 취소하면 그대로 → 지우면 설정에 "직전 저장본이 없습니다", 다시 열어도 같음 — `test/e2e/cleanup.spec.js` 3개. 셋째 테스트는 체크를 푼 열이 남아 복원되는 것과, 빈 기기 이름이면 정리 버튼이 설정에 머무는 것.
+- [x] 데스크톱 E2E(tauri-driver, Linux): 원본이 있는 dirty 사본 두 개(`둘째.db`, `셋째.db`)를 남기고 앱을 다시 띄워 설정 → "모두 버리기" → 확인 줄 "작업 사본 2개" → 확인 → 목록이 비고 두 원본이 바이트 단위로 그대로, 설정을 다시 열어도 목록 없음. 이 컨테이너에 `webkit2gtk-driver`·`libwebkit2gtk-4.1-dev`·`xvfb`(apt)와 `tauri-driver` 2.0.6(cargo)을 설치해 `xvfb-run npm run test:desktop`으로 돌렸고, 기존 시나리오 1~5도 모두 통과했습니다(2분 13초).
+- [x] 성능(기록만): 30만 행 픽스처(314,286,080 bytes)에서 장문 열 하나를 지운 뒤 `cleanup.run` **3,618 ms**(`test:perf` 전체 실행에서는 1,329 ms), 렌더러 메모리 최고 수위 **1,265 MiB**(VmHWM, 연 직후 805 MiB), 크기 314,286,080 → 176,160,768 bytes. `cleanup-300k.cleanupMs`로 남기고 최고 수위는 기준선 비교의 바이트 항목이 되지 않게 `info.cleanupHwm`에 두었습니다.
+
+**예외 처리 (Step 13) 대응**
+
+- 요청한 열이 이미 복원되었거나 없음 → `E_DB_QUERY`, 아무것도 바뀌지 않음: 계약 테스트(복원된 열, 살아 있는 열, 없는 열, 없는 테이블, 섞인 요청). 대화상자는 그 오류에서 계획을 다시 읽고 `cleanup.stale` 문구를 보입니다. 이 다시 읽기는 **E2E로 확인하지 않았습니다(미확인)**.
+- 재작성 중 실패(`E_MEM` 등) → 롤백, "정리 전 상태 그대로이며 원본 파일도 바뀌지 않았다": 롤백은 계약 테스트, 문구는 `cleanup.failed`. `E_DISK_FULL`(native 재작성 중 디스크 부족)은 주입하지 않았습니다(**미확인**).
+- 취소 → 같은 롤백, `cleanup.cancelled`: Worker 쪽은 계약 테스트. 대화상자의 취소 버튼(실행 중 신호만 당기고, `vacuum` 단계에서는 닫히지 않음)은 **E2E 미확인**입니다. 작은 픽스처에서는 정리가 취소보다 먼저 끝나 재현이 어렵습니다.
+- `VACUUM` 실패 → 재작성은 커밋, `cleanup.vacuumFailed` 경고: 결과는 계약 테스트, 토스트는 **UI 미확인**.
+- 배타 op: 가져오기가 도는 동안 `cleanup.run`은 `E_DB_BUSY`, `cleanup.plan`은 허용 — `rpc.test.js`.
+- 읽기 전용·외부 테이블: 계획에 비STRICT 테이블은 없고, 스토어의 `runCleanup`은 읽기 전용이면 `file.readOnlyBlocked`로 거부(새 스키마 파일로 단위 테스트). 설정의 정리 버튼이 읽기 전용에서 꺼지는 것은 코드 경로만 있고 **E2E 미확인**.
+- 저널이 멈춘 상태: `recordCommand`가 v1 규칙대로 기록하지 않습니다. 정리와의 조합을 따로 테스트하지는 않았습니다(**미확인**, v1 경로 그대로).
+- 작업 사본 버리기 실패 → 그 항목만 남기고 나머지 계속, 원본 무손상: `store-native.test.js`(한 키에 `E_FILE_LOCKED` 주입). 설정 줄에 원인 문구가 붙는 것은 **UI 미확인**.
+- IDB 없음 → 백업 개수·지우기 null, 버튼 숨김; `clear` 실패 → `E_UNKNOWN`과 `backup.clearFailed`("보관본은 그대로"), 보관본 유지 — `store.test.js`.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **397개** 통과(379 + 정리 계약 9 + 순수 함수 3 + 엔진 적합성 `vacuum` 1 + RPC 2 + 스토어 3. 기존 테스트는 `capabilities`와 배타 op 목록의 기대값만 고쳤습니다). 중간 커밋 `bd09d76`(394)도 따로 초록.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,906,811 bytes**(세션 N 3,879,996에서 **+26,815 bytes**: 정리 모듈·대화상자와 두 언어 문구). 외부 참조 0, vendor 체크섬 OK.
+- [x] `npm run test:e2e`: **80개** 통과(77 + `cleanup.spec.js` 3).
+- [x] `npm run test:native`: **40개** 통과(29 + 정리 계약 9 + 엔진 `vacuum` 1 + 스토어 모두 버리기 1).
+- [x] `npm run test:desktop`(Linux WebKitGTK, Xvfb): 전 시나리오 통과(위).
+- [x] `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`(27개): 통과. 러스트 코드는 바꾸지 않았지만 `engine-native.js`를 바꿨으므로 CLAUDE.md 7.1대로 돌렸습니다.
+- [x] `npm run test:perf`: **8개 모두 통과**(예산 안). 앱 시작 384 ms, 300 MB 열기 1,881 ms, 렌더 p95 1.3 ms, 창 질의 최대 20.5 ms, 셀 편집 2.2 ms, 스냅샷 1,759 ms, 저장 시점 RSS 1,156,333,568 bytes, LIKE 812 ms(짧은 검색어 중앙값 993 ms), trigram 61 ms. 세션 N 기록의 LIKE 예산 초과는 이번 실행에서는 재현되지 않았습니다.
+- [x] CLAUDE.md 7.1: 새 오류 코드 없음. 새 RPC op `cleanup.plan`·`cleanup.run`은 6장 표에 있음(`conventions.test.js` 통과). `src/db`의 `${`는 `quoteIdent`를 거친 식별자와 검증한 물리 타입뿐. `innerHTML` 새 사용 없음(사용자 데이터는 `textContent`). 모드 문자열 비교 추가 없음(`persistence` 값만 읽음). `dist/` 커밋 없음.
+- [x] CI(`ci` 워크플로): `8b4c973`(run 35898042476)에서 `check-build-e2e`와 `perf`(보정된 기준선 비교, 새 `cleanup-300k` 항목은 기록만) 모두 **초록**. `desktop` 워크플로(세 OS)는 수동 실행 전용이라 돌리지 않았습니다(Windows·macOS는 아래 미확인).
+
+**이어받은 미확인 항목의 결과**
+
+- 설계 v2의 "정리의 메모리 최고 수위(R10)": 300 MB DB에서 렌더러 1,265 MiB(연 직후보다 약 460 MiB, DB 크기의 1.5배쯤 늘어남)로 쟀습니다. 대화상자의 메모리 경고는 설계대로 `dbBytes × 2 > maxFileBytes`(1.5 GB), 즉 750 MB 넘는 DB에서 켜집니다. 이 비율대로라면 700 MB 안팎의 DB는 wasm 메모리 상한(2 GB)에 가까워 경고 없이 `E_MEM`으로 실패할 수 있습니다. 실패해도 전체 롤백이라 데이터는 안전하지만, 700 MB 픽스처로는 **재지 않았습니다(미확인)**. 문턱을 낮출지는 실측 뒤 정할 일로 남깁니다.
+- 세션 N의 나머지(실제 한글 IME, 스크린 리더, Firefox·Safari, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E)는 이 세션의 몫이 아니라 그대로입니다.
+
+**미확인 (후속에서 이어받음)**
+
+- 정리 대화상자의 취소 버튼, 그사이 복원된 열로 인한 목록 다시 읽기, `VACUUM` 실패 경고, 작업 사본 한 개를 버리지 못했을 때 설정 줄의 원인 문구, 읽기 전용에서 정리 버튼이 꺼지는 것: 각각 Worker·스토어 단위 테스트는 있으나 UI는 **E2E 미확인**입니다.
+- native 재작성 중 `E_DISK_FULL`: **미확인**.
+- 700 MB 안팎 DB의 정리 메모리와 경고 문턱(위): **미확인**.
+- 모두 버리기의 Windows·macOS 데스크톱 동작: Linux에서만 쟀습니다(**미확인**). Windows는 `desktop` 워크플로를 수동 실행하면 같은 시나리오가 돕니다.
+- `navigator.storage.estimate`의 사용량 줄: Chromium `file://`에서 보이는 것을 E2E로 확인했습니다. Firefox·Safari는 **미확인**입니다.
+- 저널이 멈춘 상태(가져오기 뒤)에서 정리한 뒤의 복구 동작: v1 규칙 그대로이며 따로 확인하지 않았습니다(**미확인**).
+- 세션 N까지의 나머지 미확인 목록(실제 한글 IME, 스크린 리더, Firefox·Safari, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E, SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사, macOS WKWebView 등)은 그대로 **미확인**입니다.
+
+### 세션 P (Step 14: 툴팁·도움말) — 2026-09-23
+
+커밋: `16aff17` docs(design) → `7ee1646` feat(ui) → `0012f10` test → 이 커밋 docs(session).
+
+시작 상태: 로컬 작업 브랜치가 원격 `cd4cbe4`(세션 O의 마지막 커밋)와 같았습니다. 원격 실행 환경이 정해 준 브랜치도 `claude/busy-mayer-hv2g8x`라 따로 묻지 않았습니다. `npm ci` 뒤 `npm run check`(397개)가 초록이었고, `cd4cbe4`의 `ci` 실행(run 35898590891)도 초록이었습니다(선행 조건). 이어받은 미확인 가운데 이 세션의 몫은 설계 v2 절의 "F1 단축키와 비활성 버튼 툴팁의 브라우저별 동작, 시크릿 모드의 IDB 수명"이었습니다(아래).
+
+**설계에서 구현 중에 정한 것(`16aff17`, DESIGN.md D-19·Step 14에 반영)**
+
+- 툴팁 요소는 포인터 이벤트를 받지 않습니다(`pointer-events: none`). 받게 두면 툴팁이 그 아래의 버튼·머리글을 덮어 클릭을 가로채고, 포인터가 툴팁 위에 있는 한 닫히지 않아 덮인 버튼을 누를 길이 없어집니다(Playwright도 같은 이유로 "다른 요소가 포인터 이벤트를 가로챔"에서 멈춥니다). WCAG 1.4.13의 "가리킬 수 있음"은 좌표로 지킵니다: 보이는 동안만 `pointermove`로 대상과 툴팁을 감싼 사각형을 확인하고, 그 밖으로 나가면 닫습니다. 누르면(`pointerdown`) 닫고 포인터가 그 대상을 떠날 때까지 다시 띄우지 않으며, 스크롤하면 닫습니다.
+- 텍스트 입력칸(검색 상자)에는 툴팁을 달지 않습니다. 입력칸은 마우스로 눌러도 `:focus-visible`이라 입력하는 내내 툴팁이 떠 있게 되고, 레이블·예시가 이미 늘 보입니다. `conventions.test.js`에 예외 목록(`HINTLESS_ACTION_ELEMENTS`)으로 둡니다.
+- 툴팁 키는 `hint.<data-action>`이고, `data-action`이 없는 요소는 `hint.<요소 이름>`(머리글 `hint.header-sort`·`hint.header-menu`, `hint.frozen-select`), 상태에 따라 하는 일이 바뀌는 검색 인덱스 버튼은 상태마다 키(`hint.search-index`·`-disable`·`-stale`)를 둡니다. 설정의 작업 사본 줄의 "열기"·"버리기"에는 `data-action`(`workcopy-open`·`workcopy-discard`)을 새로 달았습니다.
+- `help.open({ topic?, persistence })`: 대화상자는 스토어를 모르므로 도구 모음이 `store.capabilities().persistence`를 넘깁니다. 저장 주제의 본문 키는 `help.saving.body` / `help.saving.bodyNative`입니다. 주제 목록은 세로 탭(로빙 tabindex, ↑↓·Home·End)이라 `dialog.js`에 `initialFocus`를 더하고, 포커스 트랩의 처음·끝 계산이 `tabindex="-1"` 버튼을 건너뛰게 했습니다(탭 정지가 아닌 버튼이 처음·끝이 되면 Shift+Tab이 대화상자 밖으로 나갑니다).
+- F1은 `SHORTCUTS`의 문서 범위 행동 `help`이고, `shortcuts.describe({ mac? })`가 표의 항목마다 표시용 키(`Ctrl+Shift+S`, macOS `⌘⇧S`, Escape는 `Esc`, ContextMenu는 `Menu`)와 `shortcut.<action>`을 돌려줍니다. 도움말은 같은 설명 키의 조합을 한 줄에 모읍니다(13줄).
+- 가져오기 미리보기 칸의 `title`(긴 값의 앞 500자)은 없앴습니다. 툴팁 문구는 i18n 키뿐이라 사용자 값을 담을 수 없습니다. 미리보기는 앞 80자와 말줄임을 보이고, 전체 값은 가져온 뒤 그리드·장문 편집기에서 봅니다.
+
+**한 일**
+
+1. **UI(`7ee1646`)**: `ui/tooltip.js`(`mount`/`unmount`, `main.js`가 `document.body`에 건다), `ui/dialogs/help.js`(`HELP_TOPICS` 열한 개, `bodyKey`, `paragraphs`, `open`), `app/shortcuts.js`(F1 `help`, `describe`), 도구 모음의 "도움말" 버튼과 F1, 도구 모음·사이드바·그리드(행 추가·삭제·고정 열·필터 지우기)·머리글(정렬·메뉴)·설정(정리·직전 저장본·작업 사본·확인 줄)·정렬/필터 대화상자(줄 추가·삭제)·장문 편집기(저장·취소)의 `data-hint`, 검색 인덱스 버튼의 `title` → 상태별 툴팁, `styles/app.css`(툴팁·도움말), 두 언어 문구(툴팁 50개, 단축키 13개, 도움말 제목·본문 23개와 목록·표 머리 4개. 쓰지 않게 된 `toolbar.searchIndexStaleHint`는 지움), `CLAUDE.md` 5.5의 툴팁 규칙.
+2. **테스트·실측(`0012f10`)**: `test/e2e/help.spec.js` 5개, `a11y.spec.js`의 툴팁·도움말 axe 1개, `test/desktop/run.mjs`의 7번 시나리오, `docs/support-matrix.md`의 브라우저 3행·데스크톱 4행. `view.spec.js`의 "오래됨" 테스트는 `title` 대신 `data-hint`와 호버로 보인 툴팁 문구를 보게 고쳤습니다(`7ee1646`, 건너뛴 테스트 없음).
+
+**완료 기준 (Step 14)**
+
+- [x] 단위(`conventions.test.js`): `src/ui`에 `.title =`과 `setAttribute('title'` 0건 — "src/ui에 HTML title 속성 쓰기가 없다". `data-action`을 가진 모든 버튼이 `data-hint`를 가지며 그 키가 `ko.js`·`en.js`에 있다 — `x.dataset.action =`을 하는 변수마다 같은 파일의 `x.dataset.hint =`을 요구하고, 리터럴 action·도우미(`makeButton`·`button`) 호출 인자·확인 줄 역할(`${role}-ok`)에서 만든 `hint.<action>`과 리터럴 `hint.*` 키 전부가 두 파일에 있는지 봅니다. 도우미의 `data-hint` 줄을 지우거나 `en.js`에서 키 하나를 지우면 실패하는 것을 손으로 확인했습니다. 모든 `help.<주제>.title`·`.body`(+ `help.saving.bodyNative`)와 `shortcut.<action>`이 두 파일에 있다 — "도움말 주제의 title·body와 단축키 설명…".
+- [x] 단위: `shortcuts.describe()`가 `SHORTCUTS`의 모든 항목을 표의 순서대로 `shortcut.<action>`과 함께 담는다 — `shortcuts.test.js`(표시용 키 조합의 PC·macOS 형태, F1 해석 포함). `help.test.js`: 주제 목록, 저장 주제의 모드별 본문 키, 문단 나누기.
+- [x] E2E: 마우스 호버 500 ms 뒤 툴팁 표시(250 ms에는 숨김, 표시까지 500 ms 이상), 키보드 Tab 포커스로 즉시 표시(300 ms 제한), Esc로 숨김, `aria-describedby` 연결과 해제 — `help.spec.js` 첫째·둘째 테스트. 툴팁 위로 옮겨도 유지, 벗어나면 숨김과 문구 비움, 누르면 닫히고 떠나기 전에는 다시 뜨지 않음, 마우스 클릭 포커스에는 뜨지 않음도 같은 테스트. 도움말 열기 → 열한 주제가 모두 제목·본문 문단을 가짐(↓로 차례로, Home·End·↑ 순환) → 저장 주제가 브라우저 모드 문구(저널, 200 MB, "작업 사본" 없음) → Esc로 닫고 포커스가 도움말 버튼으로 돌아옴 → F1로도 열림 — 다섯째 테스트. 넷째 테스트는 기본 화면·설정·필터 대화상자에 있는 모든 `button[data-action]`·`select[data-action]`이 `hint.*`를 가지는지 DOM에서 봅니다.
+- [x] 데스크톱 E2E(tauri-driver, Linux WebKitGTK 2.52, Xvfb): 도움말 버튼 → 저장 주제에 "작업 사본"과 ".bak"이 있고 "저널"이 없음 → Esc로 닫으면 포커스가 도움말 버튼 — `run.mjs` 7번. 기존 1~6번도 함께 통과했습니다(`webkit2gtk-driver`·`libwebkit2gtk-4.1-dev`·`xvfb`는 apt, `tauri-driver` 2.0.6은 cargo로 이 컨테이너에 설치).
+- [x] 접근성: 툴팁 표시 상태(키보드 포커스로 띄움)와 도움말 대화상자의 열한 주제 각각에서 axe `critical`·`serious` 0건(`moderate`·`minor`도 0건), 툴팁 명도 대비 4.5:1 이상(계산값: 글자 `#ffffff`·배경 `#1f2328`, 약 15.8:1) — `a11y.spec.js` 여섯째 테스트.
+- [x] `dist/jdrdatabase.html` 크기: **3,950,660 bytes**(세션 O 3,906,811에서 **+43,849 bytes**: 도움말·툴팁 두 언어 문구가 대부분이고 툴팁·도움말 모듈과 CSS). `verify` 통과(외부 참조 0, 예산 6 MiB 안).
+
+**예외 처리 (Step 14) 대응**
+
+- 비활성 버튼: Chromium 141은 꺼진 버튼에도 `pointerover`·`pointerenter`·`mouseover`를 대상 버튼으로 내므로 툴팁이 보입니다(`help.spec.js`의 "뷰 삭제"). WebKitGTK 2.52도 보였습니다(데스크톱 7번, 꺼진 "되돌리기"). 키보드로는 꺼진 버튼에 포커스가 가지 않으므로, "왜 꺼졌는지"를 도움말 "테이블·열·빈 행" 주제의 마지막 문단에 적었습니다. `disabled`는 그대로입니다. Firefox·Safari는 **미확인**입니다.
+- 툴팁을 띄운 요소가 DOM에서 사라짐: 보이는 동안만 `MutationObserver`로 연결 여부를 보고 숨깁니다. 500 ms 대기가 끝날 때도 확인합니다. E2E는 사이드바 버튼 위에 띄운 채 그 요소를 지워 확인했습니다.
+- 모달 대화상자 위의 툴팁: 툴팁은 `z-index: 2000`(대화상자 배경 100, 메뉴 1000 위)이고 포커스를 받지 않는 요소라 포커스 트랩의 대상이 아닙니다(`a11y.spec.js`의 기존 트랩 테스트가 그대로 통과). 대화상자 안 버튼의 툴팁이 대화상자 위에 그려지는지를 화면으로 확인하는 E2E는 두지 않았습니다(**미확인**. 쌓임 순서는 CSS 값으로만 확인).
+- 도움말 대화상자는 v1 `dialog.js`를 씁니다(포커스 트랩, Esc, 닫을 때 포커스 복귀) — E2E.
+- 누락된 문구 키: `conventions.test.js`가 먼저 잡습니다(위). 툴팁은 없는 키면 키 자체를 보입니다.
+- 터치 포인터: `pointerType: 'touch'`의 `pointerover`에는 띄우지 않습니다. E2E는 합성 `PointerEvent`로만 확인했고 실제 터치 기기는 **미확인**입니다.
+
+**검증 (이 환경에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **406개** 통과(397 + 규약 3 + 단축키 3 + 도움말 3). 중간 커밋 `7ee1646`에 단위 테스트 변경이 모두 들어 있어 그 커밋의 상태가 이 수와 같습니다.
+- [x] `npm run build` → `npm run verify`: 통과(위 크기).
+- [x] `npm run test:e2e`: **86개** 통과(80 + `help.spec.js` 5 + `a11y.spec.js` 1). 툴팁이 새로 뜨는데도 기존 80개가 그대로 통과했습니다(툴팁이 포인터 이벤트를 받지 않으므로 다음 클릭을 가리지 않습니다).
+- [x] `npm run test:native`: **40개** 통과. 데스크톱 코드(`src-tauri/`, `engine-native.js`, `ipc-bridge.js`, `filesystem.js`)는 바꾸지 않았지만 돌렸습니다. 러스트 코드를 바꾸지 않아 `cargo fmt`·`clippy`·`cargo test`는 돌리지 않았습니다.
+- [x] `npm run test:desktop`(Linux WebKitGTK, Xvfb): 전 시나리오 통과(위).
+- [x] `npm run test:perf`: 8개 중 7개 통과. 앱 시작 481.7 ms, 300 MB 열기 874 ms, 렌더 p95 1 ms, 창 질의 최대 17.3 ms, 셀 편집 2.7 ms, 스냅샷 1,493 ms, 저장 시점 RSS 1,157,742,592 bytes, CSV 가져오기 18,002 ms, XLSX 7,933 ms, LIKE 834.8 ms, trigram 54.3 ms, 정리 1,299 ms(최고 수위 1,329,233,920 bytes). **LIKE 짧은 검색어 중앙값이 1,055.5 ms로 로컬 예산(1초)을 넘었습니다.** 이 세션의 회귀가 아닌 근거: 같은 컨테이너에서 기준 커밋 `cd4cbe4`(worktree)와 이 브랜치의 `search.perf.spec.js`만 번갈아 두 번씩 돌린 A/B에서 기준 1,064.7·1,069 ms, 이 브랜치 1,060.5·1,067.2 ms였습니다. 세션 N(1,083 ms)부터 기록된 예산 경계 항목이고, 이 세션은 질의 경로를 바꾸지 않았습니다. CI는 보정된 기준선 비교로 판정합니다.
+- [x] CLAUDE.md 7.1: 새 오류 코드 없음. 새 RPC op 없음. `src/db`·`src/import`는 바꾸지 않음. `innerHTML` 새 사용 없음(도움말 본문·단축키 표·툴팁 문구는 모두 `textContent`). 모드 문자열 비교 추가 없음(도움말은 `persistence !== 'snapshot'`로 고름, `conventions.test.js` 통과). `dist/` 커밋 없음.
+- [x] CI(`ci` 워크플로): `815f2b7`(run 35921995316)에서 `check-build-e2e`는 **초록**. `perf`는 첫 시도에서 `import-xlsx.previewMs` 한 항목이 기준선 비교에 걸렸습니다(2,872 ms > 2,893 × 0.69 × 1.3 + 5). 절대값은 직전 실행(`8b4c973`의 3,884 ms)보다 빨랐는데, 그 러너의 보정값이 385 ms(기준선 559, 평소 560~680)로 유난히 낮아 기대값이 0.69배로 줄어든 경우였습니다. 이 컨테이너에서 기준 커밋 `cd4cbe4`와 이 브랜치의 `import-xlsx.perf.spec.js`를 번갈아 세 번씩 돌린 A/B는 기준 5,931·4,923·3,913 ms, 이 브랜치 3,905·3,920·3,912 ms로 이 브랜치가 느리지 않았습니다. PR에 근거를 댓글로 남기고 실패한 잡을 한 번 다시 돌렸고, 재실행(보정값 676 ms)은 10개 항목 모두 회귀 없이 **초록**입니다. `desktop` 워크플로(세 OS)는 수동 실행 전용이라 돌리지 않았습니다.
+
+**이어받은 미확인 항목의 결과**
+
+- 설계 v2의 "F1 단축키와 비활성 버튼 툴팁의 브라우저별 동작": Chromium 141(headless)과 WebKitGTK 2.52(데스크톱)에서 둘 다 F1이 문서로 와서 도움말이 열리고, 꺼진 버튼에도 툴팁이 보였습니다(`docs/support-matrix.md`). 헤드리스라 Chrome 자체의 F1 도움말 탭이 함께 열리는지는 볼 수 없었고, Firefox·Safari·Windows WebView2·macOS WKWebView는 **미확인**입니다.
+- 설계 v2의 "시크릿 모드의 IDB 수명": Chromium의 off-the-record 컨텍스트(Playwright `browser.newContext()`)에서 같은 컨텍스트의 다른 탭에는 IDB 값이 보이고, 컨텍스트를 닫은 뒤 새 컨텍스트에는 스토어가 없음을 쟀습니다. 도움말 "이 기기에 남는 데이터" 주제가 이 동작을 설명합니다. 실제 Chrome·Edge의 시크릿 창을 손으로 열어 확인하지는 않았습니다(**미확인**).
+
+**미확인 (후속에서 이어받음)**
+
+- **툴팁·도움말의 스크린 리더 낭독**(NVDA·VoiceOver가 `aria-describedby`의 툴팁 문구와 세로 탭을 읽는지): **미확인**입니다. axe는 정적 검사입니다.
+- **Firefox·Safari**에서 툴팁(`:focus-visible`, 꺼진 버튼의 포인터 이벤트)과 F1: **미확인**. **Windows WebView2**는 `desktop` 워크플로를 수동 실행하면 7번 시나리오가 돕니다(돌리지 않음, **미확인**). macOS WKWebView는 tauri-driver가 지원하지 않아 **미확인**.
+- **실제 터치 기기**에서 툴팁이 뜨지 않는 것: 합성 이벤트로만 확인(**미확인**).
+- **실제 시크릿 창**의 IDB 수명: 위(**미확인**).
+- **도움말 문구의 내용 검토**: 두 언어 본문은 DESIGN.md·`docs/cloud-sync.md`·`docs/desktop.md`와 코드의 동작에 맞춰 썼고 E2E는 주제마다 본문이 있는지만 봅니다. 사람이 읽고 정확성·어조를 확인하는 것은 리뷰어의 몫입니다(**미확인**).
+- **XLSX 미리보기 측정이 약 1초 단위로 뜀**: 위 A/B에서 3.9·4.9·5.9초처럼 1초 간격 값만 나왔고 기준 커밋도 같습니다. 측정이 대화상자의 어떤 주기에 묶인 것으로 보이며, 러너 보정값이 낮게 나오면 기준선 비교가 이 계단 때문에 걸릴 수 있습니다. 원인은 성능 하네스(또는 미리보기 진행률 주기)이고 이 세션의 범위 밖이라 조사하지 않았습니다(**미확인**).
+- LIKE 짧은 검색어의 로컬 예산 초과: 기준 커밋도 같은 값이라 이 세션의 회귀는 아니지만 이 컨테이너에서 예산을 넘는 상태입니다. 8장 측정 환경(4코어 노트북)에서의 값은 **미확인**입니다.
+- 세션 O까지의 나머지 미확인 목록(실제 한글 IME, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E, 정리 대화상자의 취소·목록 다시 읽기·실패 문구 UI, native 재작성 중 `E_DISK_FULL`, 700 MB DB의 정리 메모리, 모두 버리기의 Windows·macOS 동작, SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사 등)은 그대로 **미확인**입니다.
+
+### v2 점검 (세션 N·O·P 산출물 코드 점검) — 2026-09-24
+
+커밋: `5d4150c` docs(design) D-16 → `adfb5fb`·`e9c3f8f`·`5a7eb38`·`17cd91e`·`731f69b` fix(Step 12) → `e0325fb` docs(design) Step 13 → `69b1fb6`·`bbf503e`·`92f6a34`·`79a6ba3`·`634d52b` fix(Step 13) → `7714bf3` docs(design) D-19 → `f22c253`·`d4a5cc2`·`db86d3d`·`16252a7`·`f77c0f2` fix(Step 14) → `4ab15ff` refactor(shortcuts) → `3d92b3d` fix(help) → `515bcbe` test(help) → `ef00e38` docs(session) → `414f526` docs(session) CI 결과 → `d3e7b8b` docs(design) → `1cc08f1` fix(help) → 이 커밋 docs(session).
+
+시작 상태: 로컬 작업 브랜치가 원격보다 뒤(`cd4cbe4`)여서 원격 `0265c56`(세션 P의 마지막 커밋)으로 fast-forward 했습니다. 원격 실행 환경이 정해 준 브랜치도 `claude/busy-mayer-hv2g8x`라 따로 묻지 않았습니다. `npm ci` 뒤 `npm run check`(406개), `build`, `verify`, `test:e2e`(86개)가 모두 초록이었고, `0265c56`의 `check-build-e2e`도 초록이었습니다(선행 조건). `main`은 이 브랜치의 분기점(`69b20b8`) 그대로라 충돌이 없습니다.
+
+점검 방법: PR 전체(`origin/main...HEAD`, 71개 파일)를 Step 12·13·14 세 범위로 나눠 `CLAUDE.md` 7.2의 순서로 읽고, 의심 항목은 실제 SQLite Wasm(Node)이나 빌드된 `dist/test/jdrdatabase.html`(Playwright)에서 재현한 것만 결함으로 남겼습니다. 수정은 범위마다 별도 worktree에서 재현 테스트를 먼저 넣어 빨강을 확인한 뒤 고쳤고, 세 묶음을 이 브랜치에 차례로 옮겨 합친 상태에서 다시 전부 검증했습니다.
+
+**고친 것 — Step 12 (기본 시트·빈 행·머리글)**
+
+1. **모두 선택 → 복사 → 붙여넣기 한 번에 값 없는 행 30개가 생겼습니다**(`e9c3f8f`, 데이터 오염). `Ctrl+A`가 선택 경계(실제 행 + 빈 행 30줄)를 통째로 골라 복사한 TSV 끝에 빈 줄 30개가 붙었고, 붙여넣으면 그 줄이 실제 행이 됐습니다. 모두 선택은 실제 행만 고르고(행이 없으면 첫 칸), `planPaste`는 마지막 실제 행 아래에 떨어지는 끝부분의 빈 줄을 버립니다(`trailingEmpty`). 값 사이의 빈 줄과 기존 행 위의 빈 줄은 남습니다. D-16에 두 규칙을 적었습니다(`5d4150c`).
+2. **"+ 열"의 이름 편집기에 입력한 채 도구 모음 "되돌리기"를 누르면 히스토리가 깨졌습니다**(`adfb5fb`). 이름의 포커스 이탈 확정은 pointerdown에서, 되돌리기는 click에서 시작하는데, 확정 알림이 저널 기록 뒤에 와서 되돌리기가 합치기 전의 스택을 읽었습니다. 다시 실행이 사라지고 없는 열의 `column.rename`이 스택에 남았습니다. 스토어가 진행 중인 스키마 op를 모으고(`store.schemaIdle()`) 히스토리의 적용·되돌리기·다시 실행이 그것을 기다립니다. 알림 순서(저널 뒤)는 그대로라 저널 실패 때도 저널과 히스토리가 어긋나지 않습니다. 합치기는 스택 맨 위가 **같은 열**의 `column.add`일 때만 합니다.
+3. **빈 행의 장문 편집기가 확정도 닫기도 안 되는 상태에 빠졌습니다**(`5a7eb38`). 편집기를 연 사이 다른 빈 행 입력으로 그 줄까지 행이 생기면 `commitGhost`가 `edit.reverted`만 띄우고 false를 돌려줘, 사용자는 취소해서 글을 잃는 수밖에 없었습니다. 확정 시점에 그 자리의 실제 행 id를 읽어 일반 셀 편집으로 저장합니다.
+4. **빈 행 편집 중 정렬 버튼을 누르면 값이 저장되는데도 "저장되지 않았습니다"라고 알렸습니다**(`17cd91e`). 인라인 편집기가 이미 확정 중(`isCommitting()`)이면 `onGhostDisabled`가 닫지도 알리지도 않습니다.
+5. **이름 편집기 A의 포커스 이탈 확정이 그 사이 연 편집기 B를 닫고 포커스를 body로 떨어뜨렸습니다**(`731f69b`). 확정 뒤 `renaming !== target`이면 아무것도 하지 않습니다.
+
+**고친 것 — Step 13 (데이터베이스 정리·앱 데이터 비우기)**
+
+6. **정리가 다른 테이블의 행을 지웠습니다**(`69b1fb6`, 데이터 유실). 재작성의 `DROP TABLE`이 `foreign_keys = ON` 아래에서 돌아, 다른 도구로 만든 `ON DELETE CASCADE` 자식 행이 전부 지워진 채 커밋되고 `SET NULL`은 참조를 모두 NULL로 바꿨습니다. 사용자 인덱스·트리거는 조용히 사라지고 뷰는 `RENAME`을 실패시켰습니다. `cleanup.schemaBlocker`가 외래 키(양방향), 인덱스(UNIQUE 자동 인덱스 포함), 앱의 검색 트리거가 아닌 트리거, 이 테이블을 담은 뷰, 숨은 열·열 제약을 찾습니다. `cleanup.plan`은 그 테이블을 `blocked`로 보이고, 대화상자는 체크 상자를 끈 채 이유를 보이며, `cleanup.run`은 트랜잭션 안에서 첫 쓰기 전에 다시 검사해 `E_DB_QUERY`(`reason: 'unexpected_schema'`)로 거부합니다. 새 오류 코드는 없습니다. Step 13 예외 목록과 6장 표에 반영했습니다(`e0325fb`).
+7. **실패 뒤 계획을 다시 그리면 사용자가 푼 체크가 다시 켜졌습니다**(`bbf503e`, 되돌릴 수 없는 삭제로 이어짐). 푼 `(tableId, columnId)`를 모아 새 목록에 반영합니다.
+8. **"모두 버리기"가 목록 읽기 실패를 전부 지운 것으로 표시했습니다**(`92f6a34`). 결과에 `removedKeys`·`listFailed`를 더하고 설정은 실제로 지운 줄만 없앱니다.
+9. **정리 대화상자가 첫 체크박스에 포커스를 두어 Enter 한 번으로 정리가 돌았습니다**(`79a6ba3`). 취소 버튼에 포커스를 두고 엽니다.
+10. **결과 알림이 실제와 어긋나고, 대화상자가 밀려나면 알림이 사라졌습니다**(`634d52b`). 빈 공간 줄이기만 실패하면 전용 문구(`cleanup.vacuumOnlyFailed`), `compactsOnSave`면 크기 없는 문구(`cleanup.doneNative`)를 쓰고, 할 일이 없으면 실행 버튼을 끕니다(`DialogActions.setEnabled`). 알림은 대화상자의 반환값이 아니라 실행이 끝나는 자리에서 띄웁니다.
+
+**고친 것 — Step 14 (툴팁·도움말)**
+
+11. **F1이 대화상자가 열려 있거나 셀·이름을 편집할 때 브라우저로 넘어갔습니다**(`f22c253`). 모달이 막아도 `help`는 `preventDefault`하고, 편집기는 F1을 문서 단축키로 흘려보냅니다. 모달이 가져간 포커스는 편집기의 포커스 이탈 확정으로 치지 않아, 도움말을 닫으면 포커스가 편집기로 돌아와 입력이 이어집니다(D-19, `7714bf3`). `docs/support-matrix.md`의 F1 줄을 이 실측으로 고쳤습니다.
+12. **누른 뒤 다시 그려지는 버튼(정렬·숨기기)에 툴팁이 다시 떴습니다**(`d4a5cc2`). 억제를 요소 대신 누른 자리의 사각형으로 기억합니다.
+13. **Tab 포커스가 목록을 스크롤시키면 키보드 툴팁이 곧바로 사라졌습니다**(`db86d3d`). 키보드로 띄운 툴팁은 스크롤 때 위치를 다시 잡고 대상이 화면 밖으로 나갈 때만 닫습니다.
+14. **단축키로 모달을 열면 마우스로 띄운 배경 버튼의 툴팁이 모달 위에 남았습니다**(`16252a7`).
+15. **대화상자 안에서 툴팁만 닫을 방법이 없었습니다**(`f77c0f2`, WCAG 1.4.13 "닫을 수 있음"). 툴팁이 보이는 동안의 첫 Esc는 툴팁만 닫고 소비합니다(WAI-ARIA APG 툴팁 패턴). 조합 중 Esc는 건드리지 않습니다. D-19와 도움말 단축키 주제 문구를 고쳤습니다.
+16. **도움말 단축키 목록이 붙여넣기와 장문 편집기의 Ctrl+Enter를 빠뜨리고, 툴팁 문구가 키 조합을 박아 두었습니다**(`3d92b3d`, 서식 함수 추출은 `4ab15ff`로 분리). 두 조합은 설명 전용 항목(`describeOnly`, `resolveShortcut`은 고르지 않음)으로 표에 두고, 툴팁은 `shortcutForHint()`로 표에서 조합을 붙입니다(macOS `⌘`).
+17. **툴팁 규칙 검사에 우회로가 있었습니다**(`515bcbe`). 19개 화면 상태(빈 앱, 테이블, 대화상자 15종, 열 메뉴, 장문 편집기)의 실제 DOM에서 `data-hint` 없는 `[data-action]`, `[title]`, 툴팁 달린 텍스트 입력칸이 0건이고 모든 키가 두 언어 파일에 있는지 보는 E2E를 더했습니다. 정적 검사는 떨어진 대입, `setAttribute('data-action')`, 리터럴이 아닌 인자, `Object.assign` 등의 `title` 쓰기를 잡습니다. 이 항목은 현재 코드에 위반이 없어, 결함을 일부러 넣어 두 검사가 실패함을 확인했습니다.
+
+(점검 보고의 18번째 항목은 위 10번에 합친 "정리 중 다른 대화상자가 정리 대화상자를 밀어냄"입니다.)
+
+**도움말 보완(점검 뒤 사용자 요청, `d3e7b8b`·`1cc08f1`)**
+
+- 도움말 "열 숨기기·삭제·정리" 주제(`help.columns.body`)가 정리할 수 없는 테이블을 설명하지 않았습니다. 정리 대화상자는 6번의 이유 문구를 보이지만 정리를 열어 보기 전에는 알 수 없었습니다. 다른 SQLite 도구로 외래 키·인덱스·트리거·뷰나 열 제약을 더한 테이블은 그 구조나 다른 테이블의 행이 바뀔 수 있어 정리할 수 없고 대화상자에 이유가 보인다는 문장을 두 언어로 넣었고, DESIGN.md Step 14의 `columns` 주제 범위에도 적었습니다.
+- 검증: `npm run check` 단위 423개, `npm run build` → `npm run verify` 통과(`dist/jdrdatabase.html` **3,962,383 bytes**, 위 3,961,903 bytes에서 +480 bytes), `npm run test:e2e` 102개 통과. 문장이 산출물에 들어간 것을 확인했습니다. 문구의 어조·정확성은 다른 도움말 문구와 같이 리뷰어 검토 대상입니다(아래 이월 목록의 "도움말 문구 내용 검토", **미확인**).
+
+**고치지 않고 남긴 것 (판단과 근거)**
+
+- 이름 확정이 걸리는 짧은 순간(Worker 왕복 한 번)에 새로 연 다른 열 편집기의 Enter·포커스 이탈 확정은 헤더의 `committing` 가드 때문에 무시됩니다. 편집기는 열린 채 남아 다시 Enter를 누르면 확정되므로 입력은 잃지 않습니다. 가드를 편집기별로 나누는 것은 결함 범위 밖이라 두었습니다.
+- 설정 대화상자는 여는 버튼이 열려 있는 동안 꺼져 있어, Esc로 닫으면 포커스가 body로 갑니다. v2 이전부터의 동작이고 이번 점검에서 발견만 했습니다.
+- 정리의 열 제약 판정(`CHECK`·`COLLATE`·`DEFAULT`·`UNIQUE`·`AS` 등)은 `CREATE TABLE` 문에서 식별자·문자열을 지운 뒤 단어로 봅니다. 다른 도구가 따옴표 없는 이름에 이런 단어를 쓰면 정리할 수 없다고 보수적으로 막습니다. 데이터에는 안전한 쪽의 오탐입니다. 앱이 만드는 DDL(`schema.userTableDdl`, `ALTER TABLE … ADD COLUMN`)에는 이 단어가 없음을 확인했습니다.
+- 셀 편집 중 마우스 툴팁이 떠 있으면 첫 Esc는 툴팁만 닫고 편집 취소는 두 번째 Esc가 합니다(15번의 결과). APG 패턴을 따른 선택입니다.
+- `CLAUDE.md` 5.5에 "툴팁 문구(`hint.*`)에 키 조합을 적지 않는다"는 규칙은 넣지 않았습니다. `conventions.test.js`가 이미 검사하므로 문서에 적을지는 리뷰어 판단을 구합니다.
+
+**검증 (세 묶음을 합친 이 브랜치에서 실제로 돌린 것)**
+
+- [x] `npm run check`: 단위 **423개** 통과(점검 전 406개 + 17), 실패·건너뜀 0. lint·prettier·`tsc --strict` 포함.
+- [x] `npm run build` → `npm run verify`: 통과. `dist/jdrdatabase.html` **3,961,903 bytes**(3.78 MiB / 예산 6 MiB), 세션 P의 3,950,660 bytes에서 **+11,243 bytes**(정리 불가 이유·결과 문구, 툴팁 단축키 서식, 두 언어 문구). 외부 참조 0, vendor 체크섬 OK.
+- [x] `npm run test:e2e`: **102개** 통과(점검 전 86개 + 16), 재시도·flaky 0.
+- [x] `npm run test:native`: **49개** 통과(정리 계약의 스키마 차단 8경우와 모두 버리기 목록 실패 1개 추가). 실제 rusqlite 엔진에서 CASCADE·SET NULL·인덱스·트리거·뷰·CHECK 모두 DB 덤프가 그대로입니다.
+- [x] 재현 테스트의 빨강: 위 17개 항목 모두 수정 전 코드에서 새 테스트가 실패함을 확인했습니다(17번은 결함 주입으로 확인).
+- [x] `CLAUDE.md` 7.1 grep: `innerHTML`·`insertAdjacentHTML` 0건, 모드 문자열은 허용 위치 밖 0건, `src/db`에 새로 들어간 `${}`는 오류 메시지 하나뿐입니다.
+- [x] 새 오류 코드 없음. `cleanup.plan` 결과의 `blocked`와 `cleanup.run`의 `unexpected_schema` 거부는 DESIGN.md 6장·Step 13에 있습니다.
+- [x] CI(`ci` 워크플로): `ef00e38`(run 35950712917)에서 `check-build-e2e`와 `perf`(기준선 비교) 모두 첫 시도에 **초록**입니다. `desktop` 워크플로(세 OS)는 수동 실행 전용이라 돌리지 않았습니다.
+
+**미확인 (후속에서 이어받음)**
+
+- **데스크톱 E2E**(`npm run test:desktop`, `desktop` 워크플로): 이 컨테이너에 `tauri-driver`·`WebKitWebDriver`가 없어 돌리지 못했고, 세 OS의 `desktop` 워크플로도 수동 실행하지 않았습니다(**미확인**). 데스크톱에서 체크를 모두 풀면 정리 실행 버튼이 꺼지는 것(10번)과 설정의 실패한 작업 사본 줄만 남는 것(8번)은 단위·native 테스트와 코드 경로로만 확인했습니다.
+- **`cargo fmt`·`clippy`·`cargo test`**: 러스트 코드를 바꾸지 않아 돌리지 않았습니다(**미확인**, 변경 없음).
+- **8장 절대 예산의 로컬 성능 측정**(`npm run test:perf`): 이 컨테이너에서 돌리지 않았습니다(**미확인**). CI `perf` 잡의 기준선 비교는 위와 같이 초록입니다. 이번 수정은 히스토리의 적용·되돌리기·다시 실행에 빈 목록 대기 한 번을 더했을 뿐 렌더·창 질의 경로는 바꾸지 않았습니다.
+- **실제 Chrome의 F1 도움말 탭**이 `preventDefault`로 막히는지: 헤드리스라 볼 수 없습니다(**미확인**). Firefox·Safari의 F1·툴팁 Esc도 **미확인**입니다.
+- 세션 P까지의 나머지 미확인 목록(스크린 리더, Firefox·Safari, Windows WebView2·macOS WKWebView, 실제 터치 기기, 실제 시크릿 창, 도움말 문구 내용 검토, XLSX 미리보기 측정의 1초 계단, LIKE 짧은 검색어의 로컬 예산, 실제 한글 IME, 31만 행 이상 스크롤 스케일링, 읽기 전용 전환 E2E, native 재작성 중 `E_DISK_FULL`, 700 MB DB의 정리 메모리, 모두 버리기의 Windows·macOS 동작, SheetJS 파일 무결성 대조, `push`(main) 경로, 30만 행 내보내기 메모리, File System Access 실측, Windows·macOS 5 GB 복사 등)은 그대로 **미확인**입니다. 세션 O의 "정리 대화상자의 취소·목록 다시 읽기·실패 문구 UI" 가운데 목록 다시 읽기는 7번의 E2E(거부 뒤 다시 그린 목록의 체크 상태)로 확인됐고, 취소와 실패 문구 표시는 여전히 **미확인**입니다.

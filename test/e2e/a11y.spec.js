@@ -9,6 +9,7 @@ import { AxeBuilder } from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 import { PAGE_URL } from './page-url.js';
+import { createTableWith, headerCell } from './schema-ui.js';
 
 const FIXTURES = path.resolve('test/fixtures/import');
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -45,40 +46,16 @@ async function audit(page, screen) {
 }
 
 /**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- */
-async function createTable(page, name) {
-  await page.click('[data-action="table-create"]');
-  await page.locator('.jdr-dialog input').fill(name);
-  await page.locator('.jdr-dialog').getByRole('button', { name: '만들기' }).click();
-  await expect(page.locator('.jdr-grid__empty')).toBeVisible();
-}
-
-/**
- * @param {import('@playwright/test').Page} page
- * @param {string} name
- * @param {string} typeLabel
- */
-async function addColumn(page, name, typeLabel) {
-  await page.click('[data-action="column-add"]');
-  const dialog = page.locator('.jdr-dialog');
-  await dialog.locator('input').fill(name);
-  await dialog.locator('select').selectOption({ label: typeLabel });
-  await dialog.getByRole('button', { name: '추가' }).click();
-  await expect(page.locator('.jdr-sidebar__column-name', { hasText: name })).toBeVisible();
-}
-
-/**
  * 텍스트·정수·장문·불리언 열과 행 20개(edit.spec.js와 같은 표본).
  * @param {import('@playwright/test').Page} page
  */
 async function seed(page) {
-  await createTable(page, '고객');
-  await addColumn(page, '이름', '텍스트');
-  await addColumn(page, '나이', '정수');
-  await addColumn(page, '본문', '장문');
-  await addColumn(page, '활성', '참/거짓');
+  await createTableWith(page, '고객', [
+    { name: '이름', type: 'text' },
+    { name: '나이', type: 'integer' },
+    { name: '본문', type: 'longtext' },
+    { name: '활성', type: 'boolean' },
+  ]);
   const state = await page.evaluate(() =>
     /** @type {{ __jdrTest: TestHook }} */ (/** @type {unknown} */ (window)).__jdrTest.state(),
   );
@@ -120,7 +97,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
 });
 
-test('axe: 빈 앱, 테이블 만들기 대화상자, 그리드, 열 추가·정렬·필터·내보내기·설정 대화상자, 장문·인라인 편집기', async ({
+test('axe: 빈 앱, 테이블 만들기 대화상자, 그리드, 타입 변경·정렬·필터·내보내기·설정 대화상자, 장문·인라인 편집기', async ({
   page,
 }) => {
   await audit(page, '빈 앱');
@@ -137,14 +114,15 @@ test('axe: 빈 앱, 테이블 만들기 대화상자, 그리드, 열 추가·정
 
   /** @type {Array<[string, string]>} */
   const dialogs = [
-    ['column-add', '열 추가'],
+    // 열 추가는 대화상자가 없다(D-16). 타입 변경 대화상자에는 선택 항목의 예시·설명 줄이 있다.
+    ['column-type', '타입 변경'],
     ['sort', '정렬'],
     ['filter', '필터'],
     ['export', '내보내기'],
     ['settings', '설정'],
   ];
   for (const [action, label] of dialogs) {
-    await page.click(`[data-action="${action}"]`);
+    await page.locator(`[data-action="${action}"]`).first().click();
     await expect(page.locator('.jdr-dialog')).toBeVisible();
     await audit(page, `${label} 대화상자`);
     await page.keyboard.press('Escape');
@@ -183,7 +161,8 @@ test('그리드 ARIA: role=grid, aria-rowcount·aria-colcount, 활성 셀 aria-s
 }) => {
   await seed(page);
   const grid = page.locator('[role="grid"]');
-  await expect(grid).toHaveAttribute('aria-rowcount', '21');
+  // 머리글 1 + 실제 행 20 + 빈 행 30(D-16).
+  await expect(grid).toHaveAttribute('aria-rowcount', '51');
   await expect(grid).toHaveAttribute('aria-colcount', '5');
   await expect(grid).toHaveAttribute('aria-label', /.+/);
   await cell(page, 2, 1).click();
@@ -209,7 +188,7 @@ test('대화상자: 포커스 트랩(Tab이 안에서 순환), Esc로 닫히고 
   page,
 }) => {
   await seed(page);
-  const opener = page.locator('[data-action="column-add"]');
+  const opener = page.locator('[data-action="table-create"]');
   await opener.focus();
   await page.keyboard.press('Enter');
   const dialog = page.locator('.jdr-dialog');
@@ -240,4 +219,86 @@ test('대화상자: 포커스 트랩(Tab이 안에서 순환), Esc로 닫히고 
   await page.keyboard.press('Escape');
   await expect(page.locator('.jdr-dialog')).toHaveCount(0);
   await expect(opener).toBeFocused();
+});
+
+test('axe(D-16): 열 메뉴·머리글 이름 편집기·빈 행이 열린 상태에서 critical·serious 0건', async ({
+  page,
+}) => {
+  await seed(page);
+  // 빈 행이 보이도록 끝으로 내린다.
+  await cell(page, 0, 0).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.jdr-grid__row--ghost').first()).toBeVisible();
+  await expect(page.locator('.jdr-grid__row--ghost').first()).toHaveAttribute(
+    'aria-label',
+    /빈 행/,
+  );
+  await audit(page, '빈 행');
+
+  await page.keyboard.press('Shift+F10');
+  const menu = page.locator('.jdr-menu[role="menu"]');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await audit(page, '열 메뉴');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(page.locator('.jdr-grid__scroller')).toBeFocused();
+
+  await headerCell(page, '나이').locator('.jdr-grid__hname').dblclick();
+  const editor = page.locator('.jdr-grid__hrename');
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveAttribute('aria-label', '나이 열 이름');
+  await audit(page, '머리글 이름 편집기');
+  // 검증 실패 문구가 보이는 상태도 검사한다.
+  await editor.fill('이름');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.jdr-grid__hrename-error')).toHaveText('같은 이름이 이미 있습니다.');
+  await audit(page, '머리글 이름 편집기(오류)');
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+});
+
+/**
+ * sRGB 색 문자열(`rgb(…)`/`rgba(…)`)의 상대 휘도(WCAG 2.1).
+ * @param {string} color
+ */
+function luminance(color) {
+  const [r, g, b] = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+    const c = Number(v) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+}
+
+test('axe: 툴팁이 보이는 상태와 도움말 대화상자(모든 주제), 툴팁 명도 대비 4.5:1 이상 (D-19)', async ({
+  page,
+}) => {
+  await seed(page);
+  // 키보드 포커스로 띄운 툴팁(aria-describedby 연결 상태).
+  await page.locator('[data-action="new"]').focus();
+  await page.keyboard.press('Tab');
+  const tooltip = page.locator('#jdr-tooltip');
+  await expect(tooltip).toBeVisible();
+  await audit(page, '툴팁 표시');
+  const { fg, bg } = await tooltip.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { fg: style.color, bg: style.backgroundColor };
+  });
+  const [light, dark] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+  const ratio = ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05);
+  expect(ratio, `툴팁 명도 대비 ${fg} / ${bg}`).toBeGreaterThanOrEqual(4.5);
+  await page.keyboard.press('Escape');
+
+  await page.click('[data-action="help-open"]');
+  const dialog = page.locator('.jdr-dialog');
+  await expect(dialog).toBeVisible();
+  const tabs = dialog.getByRole('tab');
+  const count = await tabs.count();
+  for (let i = 0; i < count; i += 1) {
+    await tabs.nth(i).click();
+    await audit(page, `도움말: ${await tabs.nth(i).textContent()}`);
+  }
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
 });

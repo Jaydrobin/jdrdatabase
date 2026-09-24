@@ -9,12 +9,15 @@ import { judge } from './revision.js';
 import { normalizeViewSpec, pruneViewSpec, toggleSort } from '../db/query.js';
 import { AppError, toAppError } from '../util/errors.js';
 import { formatBytes } from '../util/bytes.js';
+import { nextNames } from '../util/names.js';
+import { t } from '../i18n/index.js';
 
 /** @typedef {import('../db/client.js').Client} Client */
 /** @typedef {import('../db/engine.js').EngineCapabilities} EngineCapabilities */
 /** @typedef {import('../db/schema.js').Meta} Meta */
 /** @typedef {import('../db/command.js').Command} Command */
 /** @typedef {import('../db/tables.js').TableInfo} TableInfo */
+/** @typedef {import('../db/tables.js').NewColumn} NewColumn */
 /** @typedef {import('../db/worker.js').OpMap} OpMap */
 /** @typedef {import('../db/client.js').CallOptions} CallOptions */
 /** @typedef {import('../io/idb.js').Idb} Idb */
@@ -44,6 +47,8 @@ import { formatBytes } from '../util/bytes.js';
 /** @typedef {import('../import/pipeline.js').ImportPolicy} ImportPolicy */
 /** @typedef {import('../import/pipeline.js').ImportReport} ImportReport */
 /** @typedef {import('../import/pipeline.js').PreviewResult} PreviewResult */
+/** @typedef {import('../db/cleanup.js').CleanupPlan} CleanupPlan */
+/** @typedef {import('../db/cleanup.js').CleanupResult} CleanupResult */
 
 /** 저장 직전 백업을 IDB에 남기는 파일 크기 상한(D-04). */
 export const BACKUP_MAX_BYTES = 200 * 1024 * 1024;
@@ -160,13 +165,31 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {{ phase: string, done: number, total: number } | null} progress 데스크톱 모드의 긴 작업(열기·저장) 진행률. 없으면 null
  */
 
-/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done'} StoreEvent */
+/** @typedef {'file:opened' | 'file:saved' | 'file:dirty' | 'state:changed' | 'journal:full' | 'tables:changed' | 'selection:changed' | 'view:changed' | 'data:changed' | 'import:done' | 'cleanup:done'} StoreEvent */
+
+/**
+ * 작업 사본 모두 버리기(D-18)의 결과. 실패한 항목은 사본이 그대로 남아 목록에 다시 나온다.
+ * @typedef {object} DiscardAllResult
+ * @property {number} removed
+ * @property {string[]} removedKeys 실제로 지운 사본의 키. 설정은 이 줄만 없앤다
+ * @property {Array<{ entry: WorkcopyEntry, error: AppError }>} failed
+ * @property {boolean} listFailed 목록을 읽지 못해 아무것도 지우지 않았다(오류는 알렸다)
+ */
 
 /**
  * `recordCommand`의 선택 사항.
  * @typedef {object} RecordOptions
  * @property {boolean} [fromHistory] 히스토리(`app/history.js`)가 적용·되돌리기·다시 실행으로 부른 것. `onCommand`를 내지 않는다
  * @property {boolean} [refresh] false면 `data:changed`를 내지 않는다(호출자가 그리드 캐시를 직접 고친 경우). 기본 true
+ * @property {boolean} [mergeWithAdd] "+ 열" 직후 이름 편집기의 확정(D-16). `onCommand` 구독자(히스토리)에 실어 보내 직전의 열 추가와 한 항목으로 합치게 한다
+ * @property {string} [columnId] 이 커맨드가 추가하거나 이름을 바꾼 열. 히스토리가 이름 확정을 **같은 열의** 추가와만 합치도록 알림에 싣는다(D-16)
+ */
+
+/**
+ * `onCommand` 알림의 부가 정보.
+ * @typedef {object} CommandNotice
+ * @property {boolean} mergeWithAdd 직전의 열 추가와 합칠 커맨드인가(`RecordOptions.mergeWithAdd`)
+ * @property {string | null} columnId 이 커맨드가 추가하거나 이름을 바꾼 열(`RecordOptions.columnId`). 없으면 null
  */
 
 /**
@@ -207,17 +230,26 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(args: ExportArgs, callOptions?: CallOptions) => Promise<ExportOutcome | null>} exportTable 저장 위치 선택 → `export.stream` 조각을 싱크에 쓰기. 취소는 null, 실패는 던진다(싱크는 버린다)
  * @property {() => void} markDirty
  * @property {(cmd: Command, options?: RecordOptions) => Promise<void>} recordCommand 적용된 커맨드를 저널에 넣고 dirty로 표시한다. 히스토리가 부른 것이 아니면 `onCommand` 구독자에게 알린다
- * @property {(handler: (cmd: Command) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
+ * @property {(handler: (cmd: Command, notice: CommandNotice) => void) => () => void} onCommand 스키마 op 등 히스토리 밖에서 적용된 커맨드의 알림. 구독 해제 함수를 돌려준다
  * @property {() => void} refreshData 그리드가 블록 캐시를 버리고 다시 읽게 한다(`data:changed`)
  * @property {() => Promise<boolean>} recoverPending 시작 시 저널에 남은 새 DB 기록을 복구 제안한다
  * @property {() => Promise<WorkcopyEntry[]>} listWorkcopies 데스크톱 모드: 복구를 기다리는 dirty 작업 사본. 브라우저 모드는 빈 배열
  * @property {(key: string) => Promise<boolean>} openWorkcopy 데스크톱 모드: 남은 작업 사본을 키로 연다
  * @property {(key: string) => Promise<boolean>} discardWorkcopy 데스크톱 모드: 남은 작업 사본을 버린다
+ * @property {() => Promise<DiscardAllResult>} discardAllWorkcopies 데스크톱 모드: 복구를 기다리는 작업 사본을 모두 버린다(D-18). 하나가 실패해도 나머지를 계속한다. 브라우저 모드는 할 일이 없다
+ * @property {() => Promise<number | null>} backupCount 이 브라우저에 남은 직전 저장본 수(IDB `backups`의 키 수, 모든 파일). IDB가 없거나 읽지 못하면 null
+ * @property {() => Promise<{ removed: number } | null>} clearBackups 이 브라우저의 직전 저장본을 모두 지운다(D-18). 저널·최근 파일·설정은 건드리지 않는다. 실패는 알리고 null
+ * @property {() => Promise<CleanupPlan | null>} planCleanup 데이터베이스 정리 계획(D-17). 실패는 알리고 null
+ * @property {(columns: Array<{ tableId: string, columnId: string }>, callOptions?: CallOptions) => Promise<CleanupResult | null>} runCleanup 정리 실행 → 커맨드를 저널에 기록하고 히스토리를 비운다(`cleanup:done`), 테이블 목록·그리드를 다시 읽고 dirty. 읽기 전용이면 안내하고 null. 실패는 던진다(대화상자가 원인별 문구로 표시)
  * @property {() => Promise<RecentFile | null>} recentFile IDB에 남은 최근 파일(핸들 또는 데스크톱 경로. 권한은 아직 묻지 않음)
  * @property {() => Promise<boolean>} openRecent 최근 파일을 권한 요청 뒤 연다
  * @property {(tableId: string | null) => void} selectTable
  * @property {<K extends SchemaOp>(op: K, args: OpMap[K]['args'], options?: CallOptions) => Promise<OpMap[K]['result'] | null>} runSchemaOp 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다. 실패는 알리고 null
+ * @property {(name: string, options?: { columns?: NewColumn[] }) => Promise<string | null>} createTable 테이블을 만들고(기본 열은 `columns`, D-16) 그 테이블을 고른다. 만든 테이블 id. 실패는 알리고 null
+ * @property {(tableId: string) => Promise<{ columnId: string, columnCount: number } | null>} addDefaultColumn 자동 이름(`column.defaultName`)의 텍스트 열을 끝에 붙인다(D-16). 이름은 살아 있는 열과 소프트 삭제된 열의 이름을 모두 건너뛰고, Worker가 이름 겹침으로 거부하면 목록을 다시 읽어 한 번만 다시 시도한다
+ * @property {(tableId: string, columnId: string, name: string, options?: { mergeWithAdd?: boolean }) => Promise<boolean>} renameColumn 열 표시 이름 바꾸기(머리글 이름 편집기). `mergeWithAdd`면 히스토리가 직전의 열 추가와 합친다(D-16). 실패는 알리고 false
  * @property {() => Promise<void>} refreshTables `schema.list`로 테이블 목록을 다시 읽는다
+ * @property {() => Promise<void>} schemaIdle 진행 중인 스키마 op(적용 → 저널 → `onCommand` 알림 → 목록 새로 읽기)가 모두 끝날 때까지 기다린다. 히스토리의 적용·되돌리기·다시 실행이 먼저 기다려, 머리글 이름 편집기의 포커스 이탈 확정처럼 먼저 시작한 스키마 op가 늘 먼저 스택에 들어간다(D-16)
  * @property {(tableId: string) => TableViewState} getViewState 테이블의 뷰 상태(복사본)
  * @property {(tableId: string, columnId: string, width: number) => void} setColumnWidth
  * @property {(tableId: string, count: number) => void} setFrozenColumns
@@ -286,7 +318,7 @@ export function createStore(deps) {
 
   /** @type {Map<StoreEvent, Set<() => void>>} */
   const listeners = new Map();
-  /** @type {Set<(cmd: Command) => void>} */
+  /** @type {Set<(cmd: Command, notice: CommandNotice) => void>} */
   const commandListeners = new Set();
   /** @type {Map<string, TableViewState>} */
   const views = new Map();
@@ -700,6 +732,15 @@ export function createStore(deps) {
   }
 
   /**
+   * 데스크톱 모드: 복구를 기다리는 dirty 작업 사본. 열린 사본은 복구를 기다리지 않으므로(이미 열려 있다) 뺀다.
+   * 목록을 읽지 못하면 던진다(호출자가 "없음"과 "읽지 못함"을 가른다).
+   * @returns {Promise<WorkcopyEntry[]>}
+   */
+  async function pendingWorkcopies() {
+    return (await nativeFs('listWorkcopies')()).filter((e) => e.dirty && e.key !== openWorkcopyKey);
+  }
+
+  /**
    * 데스크톱 모드: 지금 열린 dirty 작업 사본을 버린다(사용자가 미저장 변경 버리기를 확인한 뒤에만).
    */
   async function discardDirtyWorkcopy() {
@@ -992,6 +1033,106 @@ export function createStore(deps) {
   function withGzipName(name, gzip) {
     const base = name.replace(/\.gz$/i, '');
     return gzip ? `${base}.gz` : base;
+  }
+
+  /**
+   * 진행 중인 스키마 op. `schemaIdle`이 이것이 빌 때까지 기다린다.
+   * @type {Set<Promise<unknown>>}
+   */
+  const pendingSchemaOps = new Set();
+
+  /**
+   * 스키마 op의 약속을 진행 중 목록에 넣는다. 호출자는 op를 시작한 그 자리에서(동기로) 부른다. 그래야 바로 뒤에
+   * 눌린 되돌리기(`history.undo`)가 이 op를 보고 기다린다.
+   * @template T
+   * @param {Promise<T>} promise
+   * @returns {Promise<T>}
+   */
+  function trackSchemaOp(promise) {
+    pendingSchemaOps.add(promise);
+    const done = () => {
+      pendingSchemaOps.delete(promise);
+    };
+    promise.then(done, done);
+    return promise;
+  }
+
+  /**
+   * 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다(`runSchemaOp`의 본문).
+   * `record`는 `recordCommand`에 넘기는 선택 사항(열 추가와 이름 합치기 표시).
+   * @template {SchemaOp} K
+   * @param {K} op
+   * @param {OpMap[K]['args']} args
+   * @param {CallOptions | undefined} options
+   * @param {RecordOptions} record
+   * @returns {Promise<OpMap[K]['result'] | null>}
+   */
+  function schemaOp(op, args, options, record) {
+    return trackSchemaOp(runSchemaOpNow(op, args, options, record));
+  }
+
+  /**
+   * `schemaOp`의 본문(진행 중 목록에 넣기 전).
+   * @template {SchemaOp} K
+   * @param {K} op
+   * @param {OpMap[K]['args']} args
+   * @param {CallOptions | undefined} options
+   * @param {RecordOptions} record
+   * @returns {Promise<OpMap[K]['result'] | null>}
+   */
+  async function runSchemaOpNow(op, args, options, record) {
+    if (state.readOnly !== 'none') {
+      notify.info('file.readOnlyBlocked');
+      return null;
+    }
+    /** @type {OpMap[K]['result']} */
+    let result;
+    try {
+      result = await client.call(op, args, options);
+    } catch (err) {
+      notify.error(toStoreError(err));
+      // 적용되지 않았으므로 상태를 그대로 두되, 목록이 어긋났을 수 있으니 다시 읽는다(E_DB_QUERY 등).
+      await store.refreshTables();
+      return null;
+    }
+    await store.recordCommand(result.cmd, record);
+    await store.refreshTables();
+    return result;
+  }
+
+  /**
+   * `addDefaultColumn`의 본문(진행 중 목록에 넣기 전).
+   * @param {string} tableId
+   * @returns {Promise<{ columnId: string, columnCount: number } | null>}
+   */
+  async function addDefaultColumnNow(tableId) {
+    if (state.readOnly !== 'none') {
+      notify.info('file.readOnlyBlocked');
+      return null;
+    }
+    for (let attempt = 0; ; attempt += 1) {
+      const table = state.tables.find((tb) => tb.id === tableId);
+      if (!table) return null;
+      // 소프트 삭제된 열의 이름도 건너뛴다. 그 이름을 새 열이 가져가면 삭제한 열을 복원할 수 없다(D-16).
+      const taken = new Set(table.columns.map((c) => c.name));
+      const [name = ''] = nextNames(t('column.defaultName'), taken, 1);
+      /** @type {OpMap['schema.addColumn']['result']} */
+      let result;
+      try {
+        result = await client.call('schema.addColumn', { tableId, name, type: 'text' });
+      } catch (err) {
+        const appErr = toStoreError(err);
+        // 다른 경로(저널 재생, 다른 창의 커맨드)가 같은 이름을 막 만들었다. 목록을 다시 읽고 한 번만 더.
+        const retry = appErr.code === 'E_NAME_INVALID' && attempt === 0;
+        await store.refreshTables();
+        if (retry) continue;
+        notify.error(appErr);
+        return null;
+      }
+      await store.recordCommand(result.cmd, { columnId: result.columnId });
+      await store.refreshTables();
+      return { columnId: result.columnId, columnCount: result.columnCount };
+    }
   }
 
   /** @type {Store} */
@@ -1467,7 +1608,11 @@ export function createStore(deps) {
       }
       store.markDirty();
       if (!options.fromHistory) {
-        for (const handler of commandListeners) handler(cmd);
+        const notice = {
+          mergeWithAdd: options.mergeWithAdd === true,
+          columnId: options.columnId ?? null,
+        };
+        for (const handler of commandListeners) handler(cmd, notice);
       }
       // 커맨드는 DB 내용을 바꿨다. 그리드는 블록 캐시를 버리고 다시 읽는다(D-06).
       if (options.refresh !== false) emit('data:changed');
@@ -1547,23 +1692,34 @@ export function createStore(deps) {
     },
 
     async runSchemaOp(op, args, options) {
-      if (state.readOnly !== 'none') {
-        notify.info('file.readOnlyBlocked');
-        return null;
-      }
-      /** @type {OpMap[typeof op]['result']} */
-      let result;
-      try {
-        result = await client.call(op, args, options);
-      } catch (err) {
-        notify.error(toStoreError(err));
-        // 적용되지 않았으므로 상태를 그대로 두되, 목록이 어긋났을 수 있으니 다시 읽는다(E_DB_QUERY 등).
-        await store.refreshTables();
-        return null;
-      }
-      await store.recordCommand(result.cmd);
-      await store.refreshTables();
-      return result;
+      return schemaOp(op, args, options, {});
+    },
+
+    async createTable(name, options = {}) {
+      const result = await store.runSchemaOp('schema.create', {
+        name,
+        ...(options.columns ? { columns: options.columns } : {}),
+      });
+      if (!result) return null;
+      store.selectTable(result.tableId);
+      return result.tableId;
+    },
+
+    addDefaultColumn(tableId) {
+      return trackSchemaOp(addDefaultColumnNow(tableId));
+    },
+
+    async renameColumn(tableId, columnId, name, options = {}) {
+      const result = await schemaOp('schema.renameColumn', { tableId, columnId, name }, undefined, {
+        mergeWithAdd: options.mergeWithAdd === true,
+        columnId,
+      });
+      return result !== null;
+    },
+
+    async schemaIdle() {
+      // 기다리는 사이 새 op가 시작될 수 있다. 모두 끝날 때까지 다시 본다.
+      while (pendingSchemaOps.size > 0) await Promise.allSettled([...pendingSchemaOps]);
     },
 
     getViewState(tableId) {
@@ -1747,10 +1903,7 @@ export function createStore(deps) {
     async listWorkcopies() {
       if (!nativeMode) return [];
       try {
-        // 열린 사본은 복구를 기다리지 않는다(이미 열려 있다). 여기서 빼야 목록에서 버려지지 않는다.
-        return (await nativeFs('listWorkcopies')()).filter(
-          (e) => e.dirty && e.key !== openWorkcopyKey,
-        );
+        return await pendingWorkcopies();
       } catch (err) {
         notify.error(toStoreError(err));
         return [];
@@ -1790,6 +1943,94 @@ export function createStore(deps) {
         notify.error(toStoreError(err));
         return false;
       }
+    },
+
+    async discardAllWorkcopies() {
+      /** @type {DiscardAllResult} */
+      const outcome = { removed: 0, removedKeys: [], failed: [], listFailed: false };
+      if (!nativeMode) return outcome;
+      /** @type {WorkcopyEntry[]} */
+      let entries;
+      try {
+        // 목록은 열린 사본을 뺀 것이다. 지금 열린 DB는 대상이 아니다(D-18).
+        entries = await pendingWorkcopies();
+      } catch (err) {
+        // 목록을 읽지 못했으면 아무것도 지우지 않았다. 빈 목록으로 삼키면 설정이 모두 지운 것처럼 줄을 없앤다.
+        notify.error(toStoreError(err));
+        outcome.listFailed = true;
+        return outcome;
+      }
+      for (const entry of entries) {
+        try {
+          await nativeFs('removeWorkcopy')(entry.key);
+          outcome.removed += 1;
+          outcome.removedKeys.push(entry.key);
+        } catch (err) {
+          // 파일 잠금 등. 그 사본만 남기고 나머지를 계속한다. 원본 파일은 이 경로에서 건드리지 않는다.
+          outcome.failed.push({ entry, error: toStoreError(err) });
+        }
+      }
+      return outcome;
+    },
+
+    async backupCount() {
+      if (!idb) return null;
+      try {
+        return (await idb.keys('backups')).length;
+      } catch (err) {
+        notify.error(toAppError(err));
+        return null;
+      }
+    },
+
+    async clearBackups() {
+      if (!idb) return null;
+      try {
+        const removed = (await idb.keys('backups')).length;
+        await idb.clear('backups');
+        return { removed };
+      } catch (err) {
+        // IDB의 clear는 트랜잭션 하나라 실패하면 아무것도 지워지지 않는다. 보관본이 그대로임을 문구로 알린다.
+        notify.error(
+          new AppError('E_UNKNOWN', 'clearing previous saves failed', {
+            cause: err,
+            detail: { backupsKept: true },
+          }),
+          'backup.clearFailed',
+        );
+        return null;
+      }
+    },
+
+    async planCleanup() {
+      try {
+        return await client.call('cleanup.plan');
+      } catch (err) {
+        notify.error(toStoreError(err));
+        return null;
+      }
+    },
+
+    async runCleanup(columns, callOptions) {
+      if (state.readOnly !== 'none') {
+        notify.info('file.readOnlyBlocked');
+        return null;
+      }
+      const result = await client.call('cleanup.run', { columns }, callOptions);
+      // 커맨드는 저널에만 남긴다(재생은 `do` 방향이라 같은 재작성이 다시 일어난다). 되돌릴 수 없으므로 히스토리
+      // 스택에 넣지 않고, `cleanup:done`을 받은 히스토리가 스택을 비운다(테이블 삭제와 같은 규칙, D-08).
+      for (const cmd of result.cmds) {
+        await store.recordCommand(cmd, { fromHistory: true, refresh: false });
+      }
+      if (result.cmds.length > 0) {
+        emit('cleanup:done');
+      } else if (result.vacuumed) {
+        // 빈 공간만 줄였다. 논리 상태는 그대로라 저널에 남길 것이 없지만, 저장해야 파일이 작아진다.
+        store.markDirty();
+      }
+      await store.refreshTables();
+      emit('data:changed');
+      return result;
     },
 
     async openRecent() {

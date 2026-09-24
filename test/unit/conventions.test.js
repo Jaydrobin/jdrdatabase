@@ -38,7 +38,10 @@ async function listJs(dir) {
  * @param {string} source
  */
 function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
+  // 블록 주석은 줄바꿈만 남긴다: 보고하는 줄 번호가 원본 파일과 같게.
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ''))
+    .replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
 }
 
 /** @param {string} file */
@@ -148,4 +151,167 @@ test('DESIGN.md 6장 표의 RPC op와 worker.js OpMap이 같다', async () => {
     [],
     '구현됐으나 6장 표에 없는 op',
   );
+});
+
+/**
+ * HTML `title` 속성을 쓰는 형태. 속성 대입, `setAttribute`·`setAttributeNS`·`toggleAttribute`, `el['title'] =`,
+ * `Object.assign(el, { title })`, 마크업 문자열의 `title="…"`.
+ */
+const TITLE_WRITE =
+  /\.title\s*=(?!=)|(?:setAttribute|toggleAttribute)\(\s*['"]title['"]|setAttributeNS\([^,]*,\s*['"]title['"]|\[\s*['"]title['"]\s*\]\s*=(?!=)|Object\.assign\([^)]*\btitle\s*[:,}]|<[a-z][^>]*\stitle=/;
+
+test("src/ui에 HTML title 속성 쓰기(`.title =`, `setAttribute('title'` 등)가 없다(툴팁은 data-hint, D-19)", async () => {
+  assert.ok(TITLE_WRITE.test("Object.assign(button, { title: 'x' })"));
+  assert.ok(TITLE_WRITE.test("el.setAttributeNS(null, 'title', 'x')"));
+  assert.ok(TITLE_WRITE.test("el['title'] = 'x'"));
+  assert.ok(TITLE_WRITE.test('<button title="x">'));
+  assert.ok(!TITLE_WRITE.test("openDialog({ title: t('help.title') })"));
+  /** @type {string[]} */
+  const hits = [];
+  for (const file of await listJs(path.join(SRC, 'ui'))) {
+    const code = stripComments(await readFile(file, 'utf8'));
+    for (const [index, line] of code.split('\n').entries()) {
+      if (TITLE_WRITE.test(line)) {
+        hits.push(`${rel(file)}:${index + 1}: ${line.trim().slice(0, 80)}`);
+      }
+    }
+  }
+  assert.deepEqual(hits, []);
+});
+
+/**
+ * `data-action`을 달지만 툴팁을 달지 않는 요소. 텍스트 입력칸에는 툴팁을 달지 않는다(D-19: 포커스가 늘
+ * `:focus-visible`이라 입력하는 내내 떠 있고, 필요한 정보는 레이블·예시가 늘 보인다).
+ * @type {Record<string, string[]>}
+ */
+const HINTLESS_ACTION_ELEMENTS = { 'src/ui/toolbar.js': ['searchInput'] };
+
+test('data-action을 가진 버튼·선택 상자는 data-hint를 가지며, 툴팁 키가 ko.js·en.js에 있다(D-19)', async () => {
+  const { en } = await import('../../src/i18n/en.js');
+  /** @type {string[]} */
+  const missingHint = [];
+  /** @type {Set<string>} */
+  const hintKeys = new Set();
+  for (const file of await listJs(path.join(SRC, 'ui'))) {
+    const code = stripComments(await readFile(file, 'utf8'));
+    const exempt = HINTLESS_ACTION_ELEMENTS[rel(file)] ?? [];
+    // 1) `x.dataset.action = …`을 하는 줄 가까이(앞뒤 3줄)에 같은 변수의 `x.dataset.hint = …`가 있다. 파일 어디엔가
+    //    있는 것으로는 부족하다: 다른 함수의 같은 이름 변수(`button`)가 통과시킨다.
+    const lines = code.split('\n');
+    for (const [index, line] of lines.entries()) {
+      for (const m of line.matchAll(/(\w+)\.dataset\.action\s*=/g)) {
+        const variable = m[1] ?? '';
+        if (exempt.includes(variable)) continue;
+        const near = lines.slice(Math.max(0, index - 3), index + 4).join('\n');
+        if (!new RegExp(`\\b${variable}\\.dataset\\.hint\\s*=`).test(near)) {
+          missingHint.push(`${rel(file)}:${index + 1}: ${variable}`);
+        }
+      }
+      // `setAttribute('data-action', …)`는 위 규칙을 우회한다. dataset으로 쓴다.
+      if (/setAttribute\(\s*['"]data-action['"]/.test(line)) {
+        missingHint.push(`${rel(file)}:${index + 1}: setAttribute('data-action')`);
+      }
+    }
+    // 2) 툴팁 키 리터럴('hint.…')은 그대로 모은다.
+    for (const m of code.matchAll(/['"`](hint\.[a-z0-9-]+)['"`]/g)) hintKeys.add(m[1] ?? '');
+    // 3) `dataset.hint = \`hint.${action}\``처럼 data-action을 따르는 키는 그 action 값에서 만든다.
+    //    action 값: 리터럴 대입, 그 대입을 하는 도우미(makeButton·button)의 호출 인자, 설정 확인 줄의 역할(`${role}-ok`).
+    /** @type {Set<string>} */
+    const actions = new Set();
+    for (const m of code.matchAll(/(\w+)\.dataset\.action\s*=\s*'([a-z0-9-]+)'/g)) {
+      if (!exempt.includes(m[1] ?? '')) actions.add(m[2] ?? '');
+    }
+    const helpers = [
+      ...code.matchAll(
+        /function (\w+)\([^)]*\baction\b[^)]*\)\s*\{[^}]*dataset\.action = action;/g,
+      ),
+    ].map((m) => m[1] ?? '');
+    for (const helper of helpers) {
+      // 도우미 호출의 action 인자가 리터럴이 아니면 키를 확인할 수 없다(조용히 건너뛰지 않는다).
+      const calls = [...code.matchAll(new RegExp(`(?<!function )\\b${helper}\\(`, 'g'))].length;
+      const literal = [
+        ...code.matchAll(new RegExp(`\\b${helper}\\([^;]*?,\\s*'([a-z][a-z0-9-]*)'\\s*[,)]`, 'g')),
+      ].length;
+      if (calls !== literal) {
+        missingHint.push(
+          `${rel(file)}: ${helper}() 호출 ${calls - literal}곳의 action이 리터럴이 아님`,
+        );
+      }
+      for (const m of code.matchAll(
+        new RegExp(`\\b${helper}\\([^;]*?,\\s*'([a-z][a-z0-9-]*)'\\s*[,)]`, 'g'),
+      )) {
+        actions.add(m[1] ?? '');
+      }
+    }
+    if (code.includes('`${options.role}-ok`')) {
+      for (const m of code.matchAll(/role:\s*'([a-z0-9-]+)'/g)) actions.add(`${m[1]}-ok`);
+    }
+    if (/dataset\.hint = `hint\.\$\{(?:action|options\.role\}-ok)/.test(code)) {
+      for (const action of actions) hintKeys.add(`hint.${action}`);
+    } else {
+      // 도우미가 없는 파일은 대입마다 리터럴 키를 쓴다. 그래도 action과 짝이 맞는지 본다.
+      for (const action of actions) {
+        if (!hintKeys.has(`hint.${action}`)) missingHint.push(`${rel(file)}: hint.${action}`);
+      }
+    }
+  }
+  assert.deepEqual(missingHint, [], 'data-action만 있고 data-hint가 없는 요소');
+  assert.ok(hintKeys.size > 40, `툴팁 키 수집 실패(${hintKeys.size})`);
+  /** @type {Record<string, unknown>} */
+  const koMap = ko;
+  /** @type {Record<string, unknown>} */
+  const enMap = en;
+  assert.deepEqual(
+    [...hintKeys].filter((key) => !(key in koMap) || !(key in enMap)).sort(),
+    [],
+    'ko.js·en.js에 없는 툴팁 키',
+  );
+});
+
+test('도움말 주제의 title·body와 단축키 설명(shortcut.<action>)이 ko.js·en.js에 있다(D-19)', async () => {
+  const { en } = await import('../../src/i18n/en.js');
+  const { HELP_TOPICS } = await import('../../src/ui/dialogs/help.js');
+  const { SHORTCUTS } = await import('../../src/app/shortcuts.js');
+  const keys = [
+    ...HELP_TOPICS.flatMap((topic) => [`help.${topic}.title`, `help.${topic}.body`]),
+    'help.saving.bodyNative',
+    ...SHORTCUTS.map((s) => `shortcut.${s.action}`),
+  ];
+  /** @type {Record<string, unknown>} */
+  const koMap = ko;
+  /** @type {Record<string, unknown>} */
+  const enMap = en;
+  assert.deepEqual(
+    keys.filter((key) => !(key in koMap) || !(key in enMap)),
+    [],
+  );
+});
+
+test('툴팁 문구(hint.*)에 키 조합을 적지 않는다: 단축키는 툴팁이 단축키 표에서 붙인다(D-19)', async () => {
+  const { en } = await import('../../src/i18n/en.js');
+  const { HINT_SHORTCUTS } = await import('../../src/app/shortcuts.js');
+  /** @type {string[]} */
+  const combos = [];
+  for (const [name, map] of /** @type {const} */ ([
+    ['ko', ko],
+    ['en', en],
+  ])) {
+    for (const [key, text] of Object.entries(map)) {
+      if (!key.startsWith('hint.')) continue;
+      if (/\((?:Ctrl|⌘|Cmd|Shift|Alt|Option|F\d{1,2})\b[^)]*\)/.test(String(text))) {
+        combos.push(`${name}:${key}`);
+      }
+    }
+  }
+  assert.deepEqual(combos, [], '키 조합을 적은 툴팁 문구');
+  /** @type {Record<string, unknown>} */
+  const koMap = ko;
+  /** @type {Record<string, unknown>} */
+  const enMap = en;
+  assert.deepEqual(
+    Object.keys(HINT_SHORTCUTS).filter((key) => !(key in koMap) || !(key in enMap)),
+    [],
+    'HINT_SHORTCUTS의 툴팁 키',
+  );
+  assert.ok('tooltip.withShortcut' in koMap && 'tooltip.withShortcut' in enMap);
 });

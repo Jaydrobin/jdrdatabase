@@ -249,6 +249,7 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
   const opened = out.find((m) => 'id' in m && m.id === 2);
   assert.ok(opened && 'ok' in opened && opened.ok === true);
   assert.deepEqual([...EXCLUSIVE_OPS].sort(), [
+    'cleanup.run',
     'command.apply',
     'db.close',
     'db.save',
@@ -264,6 +265,7 @@ test('db.open 진행 중의 다른 요청과 배타 op 충돌은 E_DB_BUSY', asy
   assert.equal(isExclusiveOp('schema.create'), true);
   assert.equal(isExclusiveOp('schema.list'), false);
   assert.equal(isExclusiveOp('query.window'), false);
+  assert.equal(isExclusiveOp('cleanup.plan'), false);
 });
 
 test('취소 메시지는 진행 중 요청의 signal을 abort한다', async () => {
@@ -474,6 +476,19 @@ test('schema.*: 테이블 생성·열 추가가 커맨드를 돌려주고 db.ope
   await assert.rejects(
     client.call('schema.renameColumn', { tableId: created.tableId, columnId: 'id', name: 'x' }),
     (err) => err instanceof AppError && err.code === 'E_SYSTEM_COLUMN',
+  );
+  // 기본 열(D-16): `columns`가 RPC 경계를 넘어 테이블과 함께 만들어진다.
+  const sheet = await client.call('schema.create', {
+    name: '시트',
+    columns: [
+      { name: '열 1', type: 'text' },
+      { name: '열 2', type: 'text' },
+    ],
+  });
+  const withColumns = (await client.call('schema.list')).tables.find((t) => t.id === sheet.tableId);
+  assert.deepEqual(
+    withColumns?.columns.map((c) => c.name),
+    ['열 1', '열 2'],
   );
   client.close();
 });
@@ -1080,4 +1095,71 @@ test('command.apply: 외부(비STRICT) 테이블의 데이터 커맨드는 거�
   const created = await client.call('schema.create', { name: '정상' });
   assert.ok(created.tableId);
   client.close();
+});
+
+test('cleanup.plan·cleanup.run(D-17): 계획은 읽기, 실행은 진행률과 커맨드를 돌려주고 가져오기 중에는 E_DB_BUSY', async () => {
+  const { client } = await readyClient();
+  const { tableId, cmd } = await client.call('schema.create', {
+    name: '표',
+    columns: [
+      { name: '남김', type: 'text' },
+      { name: '지움', type: 'longtext' },
+    ],
+  });
+  assert.equal(cmd.type, 'table.create');
+  const { tables } = await client.call('schema.list');
+  const gone = tables.find((t) => t.id === tableId)?.columns[1]?.id ?? '';
+  await client.call('schema.softDeleteColumn', { tableId, columnId: gone });
+  const plan = await client.call('cleanup.plan');
+  assert.deepEqual(
+    plan.tables.map((t) => [t.tableId, t.columns.map((c) => c.id)]),
+    [[tableId, [gone]]],
+  );
+  assert.equal(plan.compactsOnSave, false);
+  /** @type {string[]} */
+  const phases = [];
+  const result = await client.call(
+    'cleanup.run',
+    { columns: [{ tableId, columnId: gone }] },
+    { onProgress: (p) => phases.push(p.phase) },
+  );
+  assert.deepEqual(
+    result.cmds.map((c) => c.type),
+    ['column.purge'],
+  );
+  assert.equal(result.removedColumns, 1);
+  assert.equal(result.vacuumed, true);
+  assert.ok(phases.includes('purge') && phases.includes('vacuum'));
+  assert.deepEqual((await client.call('cleanup.plan')).tables, []);
+  client.close();
+});
+
+test('cleanup.run은 다른 배타 op와 겹치면 E_DB_BUSY, cleanup.plan은 그 사이에도 허용된다', async () => {
+  /** @type {RpcOutbound[]} */
+  const out = [];
+  const dispatcher = createDispatcher({ post: (m) => out.push(m) });
+  const wasm = await loadWasmBinary();
+  await dispatcher.dispatch({ id: 1, op: 'engine.init', args: { mode: 'wasm', wasmBinary: wasm } });
+  await dispatcher.dispatch({ id: 2, op: 'db.open', args: {} });
+  // 가져오기가 도는 동안(첫 await에서 멈춘 사이)의 정리·계획.
+  const file = new Blob(['a,b\n1,2\n']);
+  const importing = dispatcher.dispatch({
+    id: 3,
+    op: 'import.run',
+    args: {
+      file,
+      options: { format: 'csv' },
+      mapping: { columns: [{ source: 0 }, { source: 1 }] },
+      target: { kind: 'new', name: '가져옴' },
+    },
+  });
+  await dispatcher.dispatch({ id: 4, op: 'cleanup.run', args: { columns: [] } });
+  await dispatcher.dispatch({ id: 5, op: 'cleanup.plan' });
+  await importing;
+  const busy = out.find((m) => 'id' in m && m.id === 4);
+  assert.ok(busy && 'ok' in busy && busy.ok === false && busy.error.code === 'E_DB_BUSY');
+  const planned = out.find((m) => 'id' in m && m.id === 5);
+  assert.ok(planned && 'ok' in planned && planned.ok === true);
+  // 가져오기 자체의 성패는 여기서 보지 않는다(겹치는 동안 배타 op로 자리를 차지하는 것만 필요하다).
+  assert.ok(out.some((m) => 'id' in m && m.id === 3 && 'ok' in m));
 });

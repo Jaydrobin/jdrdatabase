@@ -115,8 +115,6 @@ export const en = Object.freeze({
   'column.policyLabel': 'Values that cannot be converted',
   'column.policy.null': 'Set to empty (NULL)',
   'column.policy.abort': 'Abort and keep the original',
-  'column.add.title': 'Add column',
-  'column.add.ok': 'Add',
   'column.rename': 'Rename',
   'column.rename.title': 'Rename column',
   'column.changeType': 'Type',
@@ -131,9 +129,26 @@ export const en = Object.freeze({
   'column.delete': 'Delete',
   'column.delete.title': 'Delete column',
   'column.delete.message':
-    'Hides column "{name}". Its data stays in the file and can be restored; it is removed for good only by "Clean up database".',
+    'Hides column "{name}". Its data stays in the file and can be restored; it is removed for good only by "Clean up database…" in Settings.',
   'column.delete.ok': 'Delete',
   'column.restore': 'Restore',
+  'table.defaultName': 'Table {n}',
+  'column.defaultName': 'Column {n}',
+  'column.choicesPlaceholder': 'In progress\nDone\nOn hold',
+  'column.choicesHint': 'A cell can hold only one of the values listed here. Write one per line.',
+  'grid.ghostRow': 'Empty row. Entering a value creates rows up to this line',
+  'grid.ghostClosed':
+    'The empty-row input was closed because sorting, a filter or a search was turned on, or the file became read-only. The value you were typing was not saved.',
+  'grid.sortButton': 'Sort column {name}',
+  'grid.menuButton': 'Column {name} menu',
+  'grid.renameLabel': 'Name of column {name}',
+  'columnMenu.rename': 'Rename',
+  'columnMenu.changeType': 'Change type…',
+  'columnMenu.sortAsc': 'Sort ascending',
+  'columnMenu.sortDesc': 'Sort descending',
+  'columnMenu.sortClear': 'Clear sort',
+  'columnMenu.hide': 'Hide column',
+  'columnMenu.delete': 'Delete column…',
   'column.manyWarning':
     'This table has {count} columns. SQLite allows 2,000 per table and many columns slow things down.',
   'validate.nameEmpty': 'Enter a name.',
@@ -203,8 +218,6 @@ export const en = Object.freeze({
   'toolbar.searchIndexEnable': 'Build search index',
   'toolbar.searchIndexDisable': 'Drop search index',
   'toolbar.searchIndexStale': 'Search index (outdated)',
-  'toolbar.searchIndexStaleHint':
-    'Columns changed after the index was built. New columns are not searched and removed ones are still indexed. Turn the index off and on to rebuild it.',
   'toolbar.searchIndexProgress': 'Building search index… {done}/{total}',
   'search.enabled': 'Search index built. Queries of 3+ characters use it.',
   'search.disabled': 'Search index dropped. Search continues with LIKE.',
@@ -397,6 +410,74 @@ export const en = Object.freeze({
     'Writes the file as it was just before the last save. The open database is unchanged.',
   'settings.save': 'Save',
   'settings.saved': 'Settings saved.',
+  'backup.clearFailed': 'Could not delete the previous saves. They are still there.',
+  'settings.databaseTitle': 'Database',
+  'settings.cleanup': 'Clean up database…',
+  'settings.cleanupHint':
+    'Removes deleted columns from the file for good; in the browser it also reclaims free space in the file.',
+  'settings.cleanupNothing': 'There are no deleted columns to clean up.',
+  'settings.backupClearAll': 'Delete all previous saves in this browser',
+  'settings.backupClearConfirm':
+    'Deletes the {count} previous saves kept in this browser (for every file). This cannot be undone. Recovery records of unsaved changes are not deleted.',
+  'settings.storageUsage': 'Storage this app uses in this browser: {usage} / {quota}',
+  'settings.backupClearOk': 'Delete all',
+  'settings.backupCleared': 'Deleted {count} previous saves.',
+  'settings.workcopyDiscardAll': 'Discard all',
+  'settings.workcopyDiscardAllConfirm':
+    'Discards {count} working copies and the unsaved changes in them. This cannot be undone. The original files are not changed.',
+  'settings.workcopyDiscardAllOk': 'Discard all',
+  'settings.workcopyDiscarded':
+    'Discarded {count} working copies. The original files are unchanged.',
+  'settings.workcopyDiscardFailed':
+    'Could not discard: {message}. This copy is still there and the original file is unchanged.',
+  'cleanup.title': 'Clean up database',
+  'cleanup.intro':
+    'Checked columns are removed from the file for good. Unchecked columns can still be restored.',
+  'cleanup.column': '{name} · {type} · deleted {at}',
+  'cleanup.blocked.foreign_key':
+    'This table is linked to another table ({object}) by a foreign key, so it cannot be cleaned up: cleaning up could delete or change rows in that table. The deleted columns stay restorable.',
+  'cleanup.blocked.index':
+    'This table has an index made by another tool ({object}), so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.blocked.trigger':
+    'A trigger made by another tool ({object}) uses this table, so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.blocked.view':
+    'A view ({object}) refers to this table, so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.blocked.columns':
+    'This table has column constraints this app did not create, so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.index': 'The search index of this table is rebuilt.',
+  'cleanup.noColumns':
+    'There are no deleted columns. Only the free space in the file is reclaimed.',
+  'cleanup.size': 'Current size {size} · reclaimable free space {free}',
+  'cleanup.sizeNative': 'Current size {size}. Free space in the file is removed when you save.',
+  'cleanup.irreversible': 'This cannot be undone. Cleaning up empties the undo history.',
+  'cleanup.copies':
+    "The values of removed columns remain in the original file until you save, in the previous save kept in this browser, and in your cloud drive's version history. Previous saves can be deleted in Settings.",
+  'cleanup.copiesNative':
+    "The values of removed columns remain in the original file until you save, in the .bak file next to it, and in your cloud drive's version history.",
+  'cleanup.saveToShrink': 'The file gets smaller only when you save.',
+  'cleanup.memoryWarn':
+    'The database is large, so the browser may run out of memory while cleaning up (about {need} needed). If it fails, nothing changes. Clean up large files in the desktop app.',
+  'cleanup.run': 'Clean up',
+  'cleanup.progress.purge': 'Rewriting tables… {done}/{total}',
+  'cleanup.progress.index': 'Rebuilding the search index… {done}/{total} rows',
+  'cleanup.progress.vacuum': 'Reclaiming free space… This step cannot be cancelled.',
+  'cleanup.cancelling': 'Cancelling…',
+  'cleanup.cancelled':
+    'Clean-up cancelled. Everything is as it was before, and the original file is unchanged.',
+  'cleanup.failed':
+    'Could not clean up: {message}. Everything is as it was before, and the original file is unchanged.',
+  'cleanup.stale':
+    'Some deleted columns were restored or removed in the meantime. The list was reloaded. Nothing was changed.',
+  'cleanup.done':
+    'Removed {count} deleted columns ({before} → {after}). The file gets smaller when you save.',
+  'cleanup.doneNative':
+    'Removed {count} deleted columns. They leave the file, and its free space is reclaimed, when you save.',
+  'cleanup.doneCompacted':
+    'Reclaimed free space in the file ({before} → {after}). The file gets smaller when you save.',
+  'cleanup.vacuumFailed':
+    'Removed the deleted columns but could not reclaim free space: {message}. You can still save.',
+  'cleanup.vacuumOnlyFailed':
+    'Could not reclaim free space: {message}. The database is unchanged and you can still save.',
   'export.title': 'Export "{table}"',
   'export.formatLabel': 'Format',
   'export.format.csv': 'CSV',
@@ -472,4 +553,123 @@ export const en = Object.freeze({
     'The original file could not be replaced (locked or no permission). The original is intact; you can save under another name.',
   'error.E_ORIGINAL_CHANGED': 'The original file changed on disk after it was opened.',
   'error.E_UNKNOWN': 'An unexpected error occurred. Save and restart the app.',
+  'toolbar.help': 'Help',
+  'tooltip.withShortcut': '{hint} ({keys})',
+  'hint.new':
+    'Create a new empty database. If the current file has unsaved changes, you are asked first.',
+  'hint.open': 'Open a database file (.db, .db.gz) from your computer.',
+  'hint.recent': 'Reopen the file you opened last.',
+  'hint.save': 'Save to the current file.',
+  'hint.save-as': 'Save to a file with a new name or in another place.',
+  'hint.import': 'Import a CSV or XLSX file into a new table or an existing one.',
+  'hint.settings':
+    'Device name, autosave, database cleanup, and data this app keeps on this device.',
+  'hint.undo': 'Undo the last change.',
+  'hint.redo': 'Redo the change you undid.',
+  'hint.help-open': 'Read about features and concepts, and see the keyboard shortcuts.',
+  'hint.sort': 'Set the sort order of several columns at once.',
+  'hint.filter': 'Show only the rows that match conditions.',
+  'hint.view-clear': 'Clear all sorting, filters and search on this table.',
+  'hint.view-select':
+    'Load a saved view (sorting, filters, search, hidden columns, column widths).',
+  'hint.view-save':
+    'Save the current sorting, filters, search, hidden columns and column widths in the file under a name.',
+  'hint.view-delete': 'Delete the selected view. The data stays as it is.',
+  'hint.search-index':
+    'Build a search index so searches of three or more characters stay fast on large tables. The file grows.',
+  'hint.search-index-disable': 'Delete the search index. Search keeps working, only slower.',
+  'hint.search-index-stale':
+    'Columns changed after the index was built. New columns are not searched and removed ones are still indexed. Turn the index off and on to rebuild it.',
+  'hint.export': 'Export this table as a CSV or XLSX file.',
+  'hint.table-create': 'Create a new table with 30 columns and blank rows.',
+  'hint.table-select': 'Open this table in the grid.',
+  'hint.table-rename': 'Rename the table.',
+  'hint.table-drop': 'Delete the table and its data. This cannot be undone.',
+  'hint.column-add': 'Add a text column at the end and type its name right away.',
+  'hint.column-rename': 'Rename the column.',
+  'hint.column-type': 'Change the column type and choose what to do with values that do not fit.',
+  'hint.column-delete': 'Delete the column. Its values stay in the file, so you can restore it.',
+  'hint.column-restore': 'Bring back the deleted column with its values.',
+  'hint.column-up': 'Move the column one place forward.',
+  'hint.column-down': 'Move the column one place back.',
+  'hint.column-visibility':
+    'Hide this column in the grid or show it again. The values stay as they are.',
+  'hint.frozen-select':
+    'Choose how many columns from the left stay visible when you scroll sideways.',
+  'hint.row-insert': 'Add a blank row at the end of the table.',
+  'hint.row-delete': 'Delete every row the selected cells touch.',
+  'hint.clear-filters': 'Clear filters and search to show all rows again.',
+  'hint.header-sort':
+    'Sort by this column. Each click goes ascending, descending, then off. Shift+click adds a secondary sort.',
+  'hint.header-menu': 'Open the menu to rename, change type, sort, hide or delete.',
+  'hint.longtext-save': 'Save the edited text to the cell.',
+  'hint.longtext-cancel': 'Discard the edits and close.',
+  'hint.add': 'Add a line.',
+  'hint.remove': 'Remove this line.',
+  'hint.cleanup-open':
+    'Remove deleted columns from the file for good and reclaim free space. This cannot be undone.',
+  'hint.backup-restore':
+    'Export the previous save as a new file. The open database stays as it is.',
+  'hint.backup-clear-all':
+    'Delete the previous saves of every file in this browser. You are asked to confirm.',
+  'hint.backup-clear-ok': 'Delete the previous saves. This cannot be undone.',
+  'hint.workcopy-open': 'Open this work copy to recover its unsaved changes.',
+  'hint.workcopy-discard':
+    'Discard this work copy and its unsaved changes. The original file stays as it is.',
+  'hint.workcopy-discard-all': 'Discard every work copy in the list. You are asked to confirm.',
+  'hint.workcopy-discard-ok': 'Discard all work copies. The original files stay as they are.',
+  'shortcut.save': 'Save',
+  'shortcut.saveAs': 'Save as',
+  'shortcut.undo': 'Undo',
+  'shortcut.redo': 'Redo',
+  'shortcut.help': 'Open help',
+  'shortcut.rowInsert': 'Add a row (grid)',
+  'shortcut.rowDelete': 'Delete the selected rows (grid)',
+  'shortcut.selectAll': 'Select all cells (grid; blank rows are not selected)',
+  'shortcut.columnMenu': "Open the active cell's column menu (grid)",
+  'shortcut.copy': 'Copy the selected cells (grid)',
+  'shortcut.paste': 'Paste starting at the selected cell (grid)',
+  'shortcut.edit': 'Edit the active cell (grid)',
+  'shortcut.cancel': 'Collapse the range selection (grid)',
+  'shortcut.clear': 'Clear the values of the selected cells (grid)',
+  'shortcut.longtextSave': 'Save the text in the long-text editor (long-text editor)',
+  'help.title': 'Help',
+  'help.topics': 'Help topics',
+  'help.shortcuts.keys': 'Keys',
+  'help.shortcuts.action': 'What it does',
+  'help.basics.title': 'Tables, columns and blank rows',
+  'help.basics.body':
+    'A database is one file, and it holds several tables. "+ Table" in the sidebar creates a table with 30 text columns (Column 1 to Column 30). You can rename them later, so pressing Enter right away is fine.\n\nBelow the last row the grid shows 30 faint blank rows. Blank rows exist only on screen, not in the file. Type a value into any blank row and rows are created down to that line, with the value where you typed it. One undo removes all the rows that were created. Blank rows are not shown while sorting, a filter or a search is on, or when the database is read-only.\n\nRename a column by double-clicking its name in the header or from the header ▾ menu. "+ Column" adds a text column at the end and lets you type its name right away. Edit a cell by double-clicking it or pressing Enter or F2, or just start typing on a selected cell.\n\nA dimmed, disabled button cannot be used right now. The database may be open read-only because another tab is editing it, the table may be an external table made by another tool (read-only), or an earlier task may still be running. Undo is off when there is nothing to undo.',
+  'help.types.title': 'Column types',
+  'help.types.body':
+    'Every column has a type, and values that do not fit the type are not saved. The types are text (one line), long text (edited in the side panel), integer, real number, true/false (a check box), date (YYYY-MM-DD), date and time (YYYY-MM-DDTHH:mm:ss), and choice. An empty cell means "empty" in every type.\n\nA choice column lets you pick one of a fixed set of options. Write them one per line in the options box of the change-type dialog, for example: In progress / Done / On hold. New values that arrive by import are added to the options automatically.\n\nChange the type from the header menu or with "Type" in the sidebar. You choose whether values that cannot move to the new type become empty or whether the change stops. A type change can be undone.',
+  'help.columns.title': 'Hiding, deleting and cleaning up columns',
+  'help.columns.body':
+    'Hiding only takes a column out of the grid. Its values, sorting and filters stay, and "Show" in the sidebar brings it back.\n\nA deleted column leaves the grid and exports, but its values stay in the file. That is why undo or "Restore" in the sidebar brings it back with its values. If a column with the same name already exists, rename that column first.\n\nTo remove the values from the file for good, choose the columns in Settings → Database → "Clean up database…". Tables to which another SQLite tool added foreign keys, indexes, triggers, views or column constraints cannot be cleaned up, because rewriting them could change that structure or rows in other tables; the dialog shows why. Cleanup cannot be undone and clears the undo history. In the browser it also reclaims free space in the file. The file becomes smaller only after you save, and the original file before saving, the previous save and your cloud drive\'s version history still hold the old values.',
+  'help.sortFilter.title': 'Sorting and filters',
+  'help.sortFilter.body':
+    'Each click on a header sort button sorts by that column ascending, descending, then turns sorting off. Hold Shift while clicking to keep the current sort and add a secondary one. "Sort ascending/descending" in the header menu also keeps the other columns\' sorting. To set the order of several columns at once, use "Sort…" in the toolbar.\n\n"Filter…" shows only the rows that match conditions. Conditions are combined with "all" or "any". The row count shows the rows that pass the filter.\n\nSorting and filters only change what you see and in which order; they do not change data. "Clear sort & filter" removes them at once.',
+  'help.search.title': 'Search and the search index',
+  'help.search.body':
+    'The search box finds rows whose text-like columns (text, long text, date, date and time, choice) contain the search term. English letter case is ignored.\n\nOn a table with many rows, search can be slow. With a search index ("Build search index"), terms of three or more characters use the index and are found fast. Terms of one or two characters cannot use the index and still scan every row. The index makes the file larger, so it is off by default.\n\nThe index is fixed to the columns that existed when it was built. If you add columns or change types afterwards, the button turns into "Search index (outdated)" and new columns are not searched. Delete the index and build it again.',
+  'help.views.title': 'Views',
+  'help.views.body':
+    'A view is a named set of sorting, filters, search, hidden columns, column widths and frozen columns, saved in the database file. Save one with "Save view…" and load it from the view selector. Saving under an existing name overwrites it.\n\nViews live in the file, so they are there when you open the same file on another PC. Deleting a view does not change data, and undo brings a deleted view back. If a column a view refers to has been deleted, only that part is dropped when the view is loaded.',
+  'help.importExport.title': 'Import and export',
+  'help.importExport.body':
+    '"Import…" reads a CSV, TSV, TXT or XLSX file and creates a new table or adds rows at the end of an existing table. In the preview you choose the encoding (Korean CSV files are often EUC-KR), the row that holds column names, and for each column whether to import it and its type.\n\nImport is not recorded in the undo history. When it finishes, the undo history is cleared and a notice asks you to save right away, because the import cannot be recovered if the tab closes.\n\n"Export…" downloads this table as CSV or XLSX. You can apply the current view\'s sorting, filters, search and hidden columns. For files you will open in Excel, choose "UTF-8 (with BOM)". Formula-injection protection puts an apostrophe in front of values that start with =, +, - or @ so spreadsheets do not run them as formulas.',
+  'help.saving.title': 'Saving and recovery',
+  'help.saving.body':
+    'This app loads the whole file into browser memory and edits it there. Edits reach the file when you save, and the ● next to the file name means there are unsaved changes. Turn on autosave in Settings to save at a fixed interval (for files opened with the file picker).\n\nIn browsers without the file picker, saving becomes a download. The downloaded file is then the new version, so move it back where the original was.\n\nUnsaved changes are recorded (the journal) in this browser. If the tab closes, opening the same file again offers to recover them. After an import, or when the record grows past 50 MB, recording stops and a banner asks you to save.\n\nEach time you save to the same file, the file as it was just before saving is kept in this browser (up to 200 MB). If you saved by mistake, take it out with Settings → Previous save → "Export under a new name".\n\nIn the browser, files over 700 MB show a warning and files over 1.5 GB are not opened. Use the desktop app for larger data.',
+  'help.saving.bodyNative':
+    'When the desktop app opens a file, it copies the original to a work copy in the app data folder, and edits go straight into that copy. The original does not change until you save. The ● next to the file name means there are changes not yet saved to the original.\n\nSaving writes the copy to a temporary file and swaps it into the original\'s place, keeping the previous original as a .bak file in the same folder. If you saved by mistake, take the .bak out under a new name from Settings → Previous save. If the disk is full or the original is locked while saving, the original stays as it is.\n\nIf the app ends abnormally, unsaved changes stay in the work copy. Opening the same file again offers to recover them, and leftover copies can be opened or discarded under "Work copies waiting for recovery" in Settings.\n\nIf another PC or program changed the original after you opened it, saving tells you and asks whether to overwrite or save under another name.',
+  'help.multiPc.title': 'Using several PCs',
+  'help.multiPc.body':
+    'You can keep one file in a synced folder such as Google Drive, OneDrive or Dropbox and use it from several PCs in turn. The app never merges files automatically, so edit on one PC at a time.\n\nOrder: save on PC A → wait until the sync program finishes uploading → close the file on PC A → on PC B, check that the download has finished, then open it.\n\nThe file holds a number that goes up by one on every save (the revision) and the name of the device that saved it. If this device once saved a later revision and you open an earlier one, the app warns "This file may be outdated". Syncing may not be finished, or it may be a conflict copy made by the cloud service, so check the folder first.\n\nChange the device name in Settings. If this PC has a record of unsaved changes but another PC saved the file in the meantime, the record is not applied automatically; you can export it to a separate file instead.',
+  'help.appData.title': 'Data left on this device',
+  'help.appData.body':
+    'In the browser, this app keeps the record of unsaved changes (the journal), a previous save per file, the recent file and settings inside this browser (IndexedDB). Settings → Previous save → "Delete all previous saves in this browser" removes the saves for every file. The record of unsaved changes is the only copy for recovery, so this button does not delete it. It is cleared when you save or choose "Discard" when asked about recovery.\n\nThe desktop app keeps work copies in the app data folder. Copies that were saved delete themselves; only copies with unsaved changes remain. "Discard all" under "Work copies waiting for recovery" in Settings deletes them. Original files do not change.\n\nIn a private (incognito) browser window, the browser deletes this storage when you close all private windows. The record of unsaved changes and the previous saves go with it, so always save before closing a private window.',
+  'help.shortcuts.title': 'Keyboard shortcuts',
+  'help.shortcuts.body':
+    'Shortcuts marked "(grid)" work while the grid has focus. In the grid, move with the arrow keys, PageUp/PageDown and Home/End, and hold Shift to select a range. Ctrl+Home goes to the first cell and Ctrl+End to the last cell of the last row.\n\nWhile editing, Enter confirms, Esc cancels, and Tab confirms and moves to the next cell. While Korean input is being composed, the input method uses Enter and Esc. If a button description (tooltip) is showing, the first Esc closes only the description, and the next Esc closes the dialog or cancels the edit.\n\nOn macOS, press ⌘ instead of Ctrl. If the browser takes F1 first, use the "Help" button in the toolbar.',
 });

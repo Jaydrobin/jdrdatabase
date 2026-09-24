@@ -17,12 +17,20 @@ import { t } from '../../i18n/index.js';
  * @typedef {object} DialogOptions
  * @property {string} title
  * @property {string} [message] 본문 문단. 줄바꿈(`\n`)은 문단 구분
- * @property {(body: HTMLElement) => void} [body] 폼 등 추가 내용을 채우는 함수
+ * @property {(body: HTMLElement, actions: DialogActions) => void} [body] 폼 등 추가 내용을 채우는 함수. `actions`는 본문 안의 컨트롤이 버튼 행의 버튼을 누른 것과 같게 닫을 때 쓴다
  * @property {DialogButton[]} buttons
  * @property {string} cancelValue Esc·배경 클릭 시 resolve 값
  * @property {() => string | null | Promise<string | null>} [validate] 확인(primary) 전에 검사. 오류 문구를 돌려주면 닫지 않고 표시. Promise면 끝날 때까지 버튼을 잠근다(가져오기 실행처럼 긴 작업)
  * @property {() => boolean} [beforeCancel] 취소(취소 버튼·Esc·배경)를 가로챈다. false를 돌려주면 닫지 않는다(진행 중인 작업을 먼저 멈출 때)
  * @property {boolean} [wide] 넓은 대화상자(미리보기 표 등)
+ * @property {() => HTMLElement | null} [initialFocus] 열린 뒤 포커스를 받을 요소. 없거나 null이면 첫 입력칸, 확인 버튼, 첫 버튼 순이다
+ */
+
+/**
+ * 본문 콜백이 받는 손잡이.
+ * @typedef {object} DialogActions
+ * @property {(value: string) => void} submit 그 값의 버튼을 누른 것과 같다(확인 버튼이면 `validate`를 거친다). 본문을 만드는 동안이 아니라 사용자 동작에서 부른다
+ * @property {(value: string, enabled: boolean) => void} setEnabled 그 값의 버튼을 켜거나 끈다. 꺼진 버튼은 Enter로도 제출되지 않고, 비동기 `validate`가 끝나도 꺼진 채다. 본문을 만드는 동안 불러도 된다
  */
 
 /** @type {HTMLElement | null} */
@@ -42,8 +50,9 @@ export function isDialogOpen() {
   return openBackdrop !== null;
 }
 
+// 로빙 tabindex(도움말의 주제 탭)의 `tabindex="-1"` 버튼은 탭 순서에 없으므로 트랩의 처음·끝이 될 수 없다.
 const FOCUSABLE =
-  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+  'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
 /**
  * 대화상자를 열고 사용자의 선택 값을 돌려준다. 한 번에 하나만 열린다(열려 있으면 먼저 닫힌 것으로 처리).
@@ -89,7 +98,22 @@ export function openDialog(options) {
         body.append(p);
       }
     }
-    options.body?.(body);
+    // 버튼 행은 본문 뒤에 붙지만 먼저 만든다. 본문 콜백의 `setEnabled`가 버튼을 찾는다.
+    const row = document.createElement('div');
+    row.className = 'jdr-dialog__buttons';
+    /** @type {Set<string>} 본문이 끈 버튼의 값(`setEnabled`) */
+    const disabledValues = new Set();
+    /** 비동기 검사가 진행 중이다. 그동안 확인·Enter는 무시하고 취소만 `beforeCancel`로 넘긴다. */
+    let pending = false;
+    // `submit`은 아래의 함수 선언이다. 본문의 컨트롤은 사용자 동작에서만 부르므로 그때는 버튼 행이 이미 있다.
+    options.body?.(body, {
+      submit: (value) => submit(value),
+      setEnabled: (value, enabled) => {
+        if (enabled) disabledValues.delete(value);
+        else disabledValues.add(value);
+        applyEnabled();
+      },
+    });
     dialog.append(body);
 
     const error = document.createElement('p');
@@ -98,8 +122,6 @@ export function openDialog(options) {
     error.hidden = true;
     dialog.append(error);
 
-    const row = document.createElement('div');
-    row.className = 'jdr-dialog__buttons';
     /** @type {HTMLButtonElement | null} */
     let primaryButton = null;
     for (const spec of options.buttons) {
@@ -118,17 +140,21 @@ export function openDialog(options) {
     }
     dialog.append(row);
     backdrop.append(dialog);
+    applyEnabled();
 
-    /** 비동기 검사가 진행 중이다. 그동안 확인·Enter는 무시하고 취소만 `beforeCancel`로 넘긴다. */
-    let pending = false;
+    /** 버튼의 켜짐: 진행 중이면 취소 말고 모두 끄고, 본문이 끈 버튼은 언제나 끈다. 버튼 행이 생기기 전에는 할 일이 없다. */
+    function applyEnabled() {
+      for (const b of row.querySelectorAll('button')) {
+        const value = b.dataset.value ?? '';
+        // 취소 버튼은 열어 둔다(진행 중인 작업을 멈추는 손잡이다).
+        b.disabled = disabledValues.has(value) || (pending && value !== options.cancelValue);
+      }
+    }
 
     /** @param {boolean} on */
     function setBusy(on) {
       pending = on;
-      for (const b of row.querySelectorAll('button')) {
-        // 취소 버튼은 열어 둔다(진행 중인 작업을 멈추는 손잡이다).
-        if (b.dataset.value !== options.cancelValue) b.disabled = on;
-      }
+      applyEnabled();
     }
 
     /**
@@ -161,7 +187,7 @@ export function openDialog(options) {
         cancel();
         return;
       }
-      if (pending) return;
+      if (pending || disabledValues.has(value)) return;
       const isPrimary = options.buttons.find((b) => b.value === value)?.primary;
       if (isPrimary && options.validate) {
         const outcome = options.validate();
@@ -248,7 +274,11 @@ export function openDialog(options) {
     const firstInput = /** @type {HTMLElement | null} */ (
       body.querySelector('input, select, textarea')
     );
-    (firstInput ?? primaryButton ?? row.querySelector('button'))?.focus();
+    const initial = options.initialFocus?.() ?? null;
+    (initial ?? firstInput ?? primaryButton ?? row.querySelector('button'))?.focus();
+    // 미리 채운 이름(새 테이블의 `테이블 n`, 이름 바꾸기의 옛 이름)은 전체 선택해 둔다. Enter 한 번으로
+    // 그대로 받거나 바로 타이핑해 바꾼다(D-16).
+    if (firstInput instanceof HTMLInputElement && firstInput.type === 'text') firstInput.select();
   });
 }
 
