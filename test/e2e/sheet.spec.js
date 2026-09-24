@@ -446,3 +446,21 @@ test('빈 행이 꺼지는 전환: 빈 행의 장문 편집기는 정렬을 켜�
     [2, '둘째 줄 본문'],
   ]);
 });
+
+test('"+ 열" 이름 편집기에 입력한 채 도구 모음의 되돌리기: 열이 사라지고 다시 실행하면 이름까지 돌아온다', async ({
+  page,
+}) => {
+  await createTableWith(page, '표', [{ name: '열 1', type: 'text' }]);
+  await page.click('[data-action="column-add"]');
+  const editor = page.locator('.jdr-grid__hrename');
+  await expect(editor).toBeFocused();
+  await page.keyboard.type('memo');
+  // 버튼의 pointerdown이 포커스 이탈 확정을 시작하고 click이 되돌리기를 부른다(리뷰 N2).
+  await page.click('[data-action="undo"]');
+  await expect(headerCell(page, 'memo')).toHaveCount(0);
+  await expect(headerCell(page, '열 2')).toHaveCount(0);
+  await expect(page.locator('[data-action="redo"]')).toBeEnabled();
+  await page.click('[data-action="redo"]');
+  await expect(headerCell(page, 'memo')).toHaveCount(1);
+  await expect(page.locator('[data-action="redo"]')).toBeDisabled();
+});

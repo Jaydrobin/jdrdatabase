@@ -222,6 +222,43 @@ test('"+ 열" 직후의 이름 확정(mergeWithAdd)은 열 추가와 한 항목:
   client.close();
 });
 
+test('이름 확정이 끝나기 전에 누른 되돌리기는 확정이 히스토리에 들어간 뒤에 돈다: 합친 항목을 되돌리고 다시 실행하면 이름까지 돌아온다(D-16)', async () => {
+  const { client, store, history, tableId } = await setup();
+  const columns = () => (store.getState().tables[0]?.columns ?? []).map((c) => c.name);
+  const added = await store.addDefaultColumn(tableId);
+  assert.ok(added);
+  const undoBefore = history.state().undo;
+  // 머리글 이름 편집기의 포커스 이탈 확정(pointerdown) 직후 도구 모음의 되돌리기(click)가 오는 순서.
+  const renaming = store.renameColumn(tableId, added.columnId, '메모', { mergeWithAdd: true });
+  const undone = history.undo();
+  assert.equal(await renaming, true);
+  assert.equal(await undone, true);
+  assert.deepEqual(columns(), ['이름'], '되돌리기 한 번에 열이 사라진다');
+  assert.deepEqual(
+    history.state(),
+    { undo: undoBefore - 1, redo: 1, busy: false },
+    '없는 열의 이름 바꾸기가 스택에 남지 않고, 다시 실행할 항목이 있다',
+  );
+  assert.equal(await history.redo(), true);
+  assert.deepEqual(columns(), ['이름', '메모'], '다시 실행하면 이름까지 돌아온다');
+  client.close();
+});
+
+test('mergeWithAdd는 스택 맨 위의 열 추가가 같은 열일 때만 합친다', async () => {
+  const { client, store, history, tableId } = await setup();
+  const first = await store.addDefaultColumn(tableId);
+  const second = await store.addDefaultColumn(tableId);
+  assert.ok(first && second);
+  const undoBefore = history.state().undo;
+  // 맨 위는 두 번째 열의 추가다. 첫 번째 열의 이름을 합치면 되돌리기가 엉뚱한 열을 지운다.
+  await store.renameColumn(tableId, first.columnId, '메모', { mergeWithAdd: true });
+  assert.equal(history.state().undo, undoBefore + 1, '다른 열의 추가와는 합치지 않는다');
+  assert.equal(await history.undo(), true);
+  const names = () => (store.getState().tables[0]?.columns ?? []).map((c) => c.name);
+  assert.deepEqual(names(), ['이름', '열 1', '열 2'], '이름 바꾸기만 되돌린다');
+  client.close();
+});
+
 test('되돌릴 수 없는 커맨드가 들어오면 스택을 비우고, 파일을 열어도 비운다', async () => {
   const { client, store, history, tableId } = await setup();
   await history.apply(insertRows({ tableId, count: 1, firstId: 1, now: NOW }));

@@ -180,12 +180,14 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {boolean} [fromHistory] 히스토리(`app/history.js`)가 적용·되돌리기·다시 실행으로 부른 것. `onCommand`를 내지 않는다
  * @property {boolean} [refresh] false면 `data:changed`를 내지 않는다(호출자가 그리드 캐시를 직접 고친 경우). 기본 true
  * @property {boolean} [mergeWithAdd] "+ 열" 직후 이름 편집기의 확정(D-16). `onCommand` 구독자(히스토리)에 실어 보내 직전의 열 추가와 한 항목으로 합치게 한다
+ * @property {string} [columnId] 이 커맨드가 추가하거나 이름을 바꾼 열. 히스토리가 이름 확정을 **같은 열의** 추가와만 합치도록 알림에 싣는다(D-16)
  */
 
 /**
  * `onCommand` 알림의 부가 정보.
  * @typedef {object} CommandNotice
  * @property {boolean} mergeWithAdd 직전의 열 추가와 합칠 커맨드인가(`RecordOptions.mergeWithAdd`)
+ * @property {string | null} columnId 이 커맨드가 추가하거나 이름을 바꾼 열(`RecordOptions.columnId`). 없으면 null
  */
 
 /**
@@ -245,6 +247,7 @@ export const MIN_COLUMN_WIDTH = 40;
  * @property {(tableId: string) => Promise<{ columnId: string, columnCount: number } | null>} addDefaultColumn 자동 이름(`column.defaultName`)의 텍스트 열을 끝에 붙인다(D-16). 이름은 살아 있는 열과 소프트 삭제된 열의 이름을 모두 건너뛰고, Worker가 이름 겹침으로 거부하면 목록을 다시 읽어 한 번만 다시 시도한다
  * @property {(tableId: string, columnId: string, name: string, options?: { mergeWithAdd?: boolean }) => Promise<boolean>} renameColumn 열 표시 이름 바꾸기(머리글 이름 편집기). `mergeWithAdd`면 히스토리가 직전의 열 추가와 합친다(D-16). 실패는 알리고 false
  * @property {() => Promise<void>} refreshTables `schema.list`로 테이블 목록을 다시 읽는다
+ * @property {() => Promise<void>} schemaIdle 진행 중인 스키마 op(적용 → 저널 → `onCommand` 알림 → 목록 새로 읽기)가 모두 끝날 때까지 기다린다. 히스토리의 적용·되돌리기·다시 실행이 먼저 기다려, 머리글 이름 편집기의 포커스 이탈 확정처럼 먼저 시작한 스키마 op가 늘 먼저 스택에 들어간다(D-16)
  * @property {(tableId: string) => TableViewState} getViewState 테이블의 뷰 상태(복사본)
  * @property {(tableId: string, columnId: string, width: number) => void} setColumnWidth
  * @property {(tableId: string, count: number) => void} setFrozenColumns
@@ -1022,6 +1025,28 @@ export function createStore(deps) {
   }
 
   /**
+   * 진행 중인 스키마 op. `schemaIdle`이 이것이 빌 때까지 기다린다.
+   * @type {Set<Promise<unknown>>}
+   */
+  const pendingSchemaOps = new Set();
+
+  /**
+   * 스키마 op의 약속을 진행 중 목록에 넣는다. 호출자는 op를 시작한 그 자리에서(동기로) 부른다. 그래야 바로 뒤에
+   * 눌린 되돌리기(`history.undo`)가 이 op를 보고 기다린다.
+   * @template T
+   * @param {Promise<T>} promise
+   * @returns {Promise<T>}
+   */
+  function trackSchemaOp(promise) {
+    pendingSchemaOps.add(promise);
+    const done = () => {
+      pendingSchemaOps.delete(promise);
+    };
+    promise.then(done, done);
+    return promise;
+  }
+
+  /**
    * 스키마 op를 실행하고 커맨드를 저널·dirty에 반영한 뒤 테이블 목록을 새로 읽는다(`runSchemaOp`의 본문).
    * `record`는 `recordCommand`에 넘기는 선택 사항(열 추가와 이름 합치기 표시).
    * @template {SchemaOp} K
@@ -1031,7 +1056,20 @@ export function createStore(deps) {
    * @param {RecordOptions} record
    * @returns {Promise<OpMap[K]['result'] | null>}
    */
-  async function schemaOp(op, args, options, record) {
+  function schemaOp(op, args, options, record) {
+    return trackSchemaOp(runSchemaOpNow(op, args, options, record));
+  }
+
+  /**
+   * `schemaOp`의 본문(진행 중 목록에 넣기 전).
+   * @template {SchemaOp} K
+   * @param {K} op
+   * @param {OpMap[K]['args']} args
+   * @param {CallOptions | undefined} options
+   * @param {RecordOptions} record
+   * @returns {Promise<OpMap[K]['result'] | null>}
+   */
+  async function runSchemaOpNow(op, args, options, record) {
     if (state.readOnly !== 'none') {
       notify.info('file.readOnlyBlocked');
       return null;
@@ -1049,6 +1087,41 @@ export function createStore(deps) {
     await store.recordCommand(result.cmd, record);
     await store.refreshTables();
     return result;
+  }
+
+  /**
+   * `addDefaultColumn`의 본문(진행 중 목록에 넣기 전).
+   * @param {string} tableId
+   * @returns {Promise<{ columnId: string, columnCount: number } | null>}
+   */
+  async function addDefaultColumnNow(tableId) {
+    if (state.readOnly !== 'none') {
+      notify.info('file.readOnlyBlocked');
+      return null;
+    }
+    for (let attempt = 0; ; attempt += 1) {
+      const table = state.tables.find((tb) => tb.id === tableId);
+      if (!table) return null;
+      // 소프트 삭제된 열의 이름도 건너뛴다. 그 이름을 새 열이 가져가면 삭제한 열을 복원할 수 없다(D-16).
+      const taken = new Set(table.columns.map((c) => c.name));
+      const [name = ''] = nextNames(t('column.defaultName'), taken, 1);
+      /** @type {OpMap['schema.addColumn']['result']} */
+      let result;
+      try {
+        result = await client.call('schema.addColumn', { tableId, name, type: 'text' });
+      } catch (err) {
+        const appErr = toStoreError(err);
+        // 다른 경로(저널 재생, 다른 창의 커맨드)가 같은 이름을 막 만들었다. 목록을 다시 읽고 한 번만 더.
+        const retry = appErr.code === 'E_NAME_INVALID' && attempt === 0;
+        await store.refreshTables();
+        if (retry) continue;
+        notify.error(appErr);
+        return null;
+      }
+      await store.recordCommand(result.cmd, { columnId: result.columnId });
+      await store.refreshTables();
+      return { columnId: result.columnId, columnCount: result.columnCount };
+    }
   }
 
   /** @type {Store} */
@@ -1524,7 +1597,10 @@ export function createStore(deps) {
       }
       store.markDirty();
       if (!options.fromHistory) {
-        const notice = { mergeWithAdd: options.mergeWithAdd === true };
+        const notice = {
+          mergeWithAdd: options.mergeWithAdd === true,
+          columnId: options.columnId ?? null,
+        };
         for (const handler of commandListeners) handler(cmd, notice);
       }
       // 커맨드는 DB 내용을 바꿨다. 그리드는 블록 캐시를 버리고 다시 읽는다(D-06).
@@ -1618,41 +1694,21 @@ export function createStore(deps) {
       return result.tableId;
     },
 
-    async addDefaultColumn(tableId) {
-      if (state.readOnly !== 'none') {
-        notify.info('file.readOnlyBlocked');
-        return null;
-      }
-      for (let attempt = 0; ; attempt += 1) {
-        const table = state.tables.find((tb) => tb.id === tableId);
-        if (!table) return null;
-        // 소프트 삭제된 열의 이름도 건너뛴다. 그 이름을 새 열이 가져가면 삭제한 열을 복원할 수 없다(D-16).
-        const taken = new Set(table.columns.map((c) => c.name));
-        const [name = ''] = nextNames(t('column.defaultName'), taken, 1);
-        /** @type {OpMap['schema.addColumn']['result']} */
-        let result;
-        try {
-          result = await client.call('schema.addColumn', { tableId, name, type: 'text' });
-        } catch (err) {
-          const appErr = toStoreError(err);
-          // 다른 경로(저널 재생, 다른 창의 커맨드)가 같은 이름을 막 만들었다. 목록을 다시 읽고 한 번만 더.
-          const retry = appErr.code === 'E_NAME_INVALID' && attempt === 0;
-          await store.refreshTables();
-          if (retry) continue;
-          notify.error(appErr);
-          return null;
-        }
-        await store.recordCommand(result.cmd);
-        await store.refreshTables();
-        return { columnId: result.columnId, columnCount: result.columnCount };
-      }
+    addDefaultColumn(tableId) {
+      return trackSchemaOp(addDefaultColumnNow(tableId));
     },
 
     async renameColumn(tableId, columnId, name, options = {}) {
       const result = await schemaOp('schema.renameColumn', { tableId, columnId, name }, undefined, {
         mergeWithAdd: options.mergeWithAdd === true,
+        columnId,
       });
       return result !== null;
+    },
+
+    async schemaIdle() {
+      // 기다리는 사이 새 op가 시작될 수 있다. 모두 끝날 때까지 다시 본다.
+      while (pendingSchemaOps.size > 0) await Promise.allSettled([...pendingSchemaOps]);
     },
 
     getViewState(tableId) {
