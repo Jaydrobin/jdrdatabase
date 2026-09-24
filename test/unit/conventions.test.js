@@ -252,3 +252,32 @@ test('도움말 주제의 title·body와 단축키 설명(shortcut.<action>)이 
     [],
   );
 });
+
+test('툴팁 문구(hint.*)에 키 조합을 적지 않는다: 단축키는 툴팁이 단축키 표에서 붙인다(D-19)', async () => {
+  const { en } = await import('../../src/i18n/en.js');
+  const { HINT_SHORTCUTS } = await import('../../src/app/shortcuts.js');
+  /** @type {string[]} */
+  const combos = [];
+  for (const [name, map] of /** @type {const} */ ([
+    ['ko', ko],
+    ['en', en],
+  ])) {
+    for (const [key, text] of Object.entries(map)) {
+      if (!key.startsWith('hint.')) continue;
+      if (/\((?:Ctrl|⌘|Cmd|Shift|Alt|Option|F\d{1,2})\b[^)]*\)/.test(String(text))) {
+        combos.push(`${name}:${key}`);
+      }
+    }
+  }
+  assert.deepEqual(combos, [], '키 조합을 적은 툴팁 문구');
+  /** @type {Record<string, unknown>} */
+  const koMap = ko;
+  /** @type {Record<string, unknown>} */
+  const enMap = en;
+  assert.deepEqual(
+    Object.keys(HINT_SHORTCUTS).filter((key) => !(key in koMap) || !(key in enMap)),
+    [],
+    'HINT_SHORTCUTS의 툴팁 키',
+  );
+  assert.ok('tooltip.withShortcut' in koMap && 'tooltip.withShortcut' in enMap);
+});

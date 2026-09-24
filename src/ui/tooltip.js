@@ -19,11 +19,13 @@
  * - 툴팁 요소는 문서에 하나이고 포인터 이벤트를 받지 않는다. 받으면 아래의 버튼을 덮어 클릭을 가로챈다.
  *   대신 포인터가 대상과 툴팁을 함께 감싼 사각형 안에 있는 동안은 닫지 않는다(가리킬 수 있음).
  * - 보일 때 대상에 `aria-describedby`를 달고, 숨길 때 뗀다. 숨긴 툴팁은 문구를 비운다.
+ * - 단축키가 있는 요소는 문구 뒤에 `app/shortcuts.js` 표의 조합을 붙인다(문구에 조합을 적지 않는다).
  * - 대상이 DOM에서 사라지면(그리드 다시 마운트, 대화상자 닫힘) 다음 이벤트를 기다리지 않고 숨긴다.
  *   보이는 동안만 `MutationObserver`를 건다(가상 그리드는 스크롤마다 노드를 바꾼다).
  * - 모달 대화상자(`aria-modal="true"`)가 열렸는데 대상이 그 밖에 있으면 숨긴다. 포인터를 버튼에 둔 채
  *   단축키로 대화상자를 열면 포인터가 움직이지 않아 배경 버튼의 툴팁이 대화상자 위에 남기 때문이다.
  */
+import { shortcutForHint } from '../app/shortcuts.js';
 import { hasMessage, t } from '../i18n/index.js';
 
 /** 마우스를 올린 뒤 툴팁이 보일 때까지(ms). */
@@ -184,7 +186,10 @@ function show(target) {
   const { el, root } = mounted;
   const key = target.dataset.hint ?? '';
   // 없는 키도 키 자체를 보인다(t()의 규칙). 단위 테스트가 먼저 잡는다.
-  el.textContent = hasMessage(key) ? t(key) : key;
+  const hint = hasMessage(key) ? t(key) : key;
+  // 단축키는 문구에 적지 않고 단축키 표에서 붙인다(도움말과 같은 형식, macOS는 ⌘).
+  const keys = shortcutForHint(key);
+  el.textContent = keys ? t('tooltip.withShortcut', { hint, keys }) : hint;
   el.hidden = false;
   current = target;
   visible = true;

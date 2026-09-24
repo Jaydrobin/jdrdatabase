@@ -2,10 +2,17 @@
 /**
  * 단축키 매핑(Step 5): 조합·범위별 해석, 조합 중 무시, 입력 요소 판정.
  * 도움말의 단축키 목록(Step 14): `describe()`가 표의 모든 항목을 표시용 키와 설명 키로 돌려준다.
+ * 설명 전용 항목(붙여넣기, 장문 저장)은 해석하지 않고, 툴팁은 `shortcutForHint()`로 조합을 붙인다.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { describe, resolveShortcut, SHORTCUTS } from '../../../src/app/shortcuts.js';
+import {
+  describe,
+  HINT_SHORTCUTS,
+  resolveShortcut,
+  shortcutForHint,
+  SHORTCUTS,
+} from '../../../src/app/shortcuts.js';
 
 /**
  * @param {string} key
@@ -94,4 +101,41 @@ test('describe(): 표시용 키 조합(Windows·Linux는 Ctrl+Shift+키, macOS�
   assert.ok(mac.includes('saveAs:⌘⇧S'));
   assert.ok(mac.includes('undo:⌘Z'));
   assert.ok(mac.includes('help:F1'));
+});
+
+test('설명 전용 항목: 붙여넣기(Ctrl+V)와 장문 저장(Ctrl+Enter)은 도움말에 보이지만 resolveShortcut이 고르지 않는다', () => {
+  const pc = describe({ mac: false }).map((d) => `${d.action}:${d.keys}`);
+  assert.ok(pc.includes('paste:Ctrl+V'));
+  assert.ok(pc.includes('longtextSave:Ctrl+Enter'));
+  assert.ok(describe({ mac: true }).some((d) => d.action === 'paste' && d.keys === '⌘V'));
+  for (const scope of /** @type {const} */ (['document', 'grid'])) {
+    assert.equal(
+      resolveShortcut(key('v', { ctrl: true }), scope),
+      null,
+      `Ctrl+V는 브라우저의 것(${scope})`,
+    );
+    assert.equal(resolveShortcut(key('V', { meta: true }), scope), null);
+    assert.equal(
+      resolveShortcut(key('Enter', { ctrl: true }), scope),
+      null,
+      `Ctrl+Enter(${scope})`,
+    );
+  }
+  assert.ok(SHORTCUTS.filter((s) => s.describeOnly).length >= 2);
+});
+
+test('shortcutForHint: 툴팁 키에 대응하는 행동의 조합을 describe와 같은 형식으로, 여럿이면 " / "로', () => {
+  assert.equal(shortcutForHint('hint.save', { mac: false }), 'Ctrl+S');
+  assert.equal(shortcutForHint('hint.save-as', { mac: true }), '⌘⇧S');
+  assert.equal(shortcutForHint('hint.redo', { mac: false }), 'Ctrl+Shift+Z / Ctrl+Y');
+  assert.equal(shortcutForHint('hint.redo', { mac: true }), '⌘⇧Z / ⌘Y');
+  assert.equal(shortcutForHint('hint.help-open', { mac: false }), 'F1');
+  assert.equal(shortcutForHint('hint.header-menu', { mac: false }), 'Shift+F10 / Menu');
+  assert.equal(shortcutForHint('hint.longtext-save', { mac: false }), 'Ctrl+Enter');
+  assert.equal(shortcutForHint('hint.import', { mac: false }), null);
+  assert.equal(shortcutForHint('', { mac: false }), null);
+  const actions = new Set(SHORTCUTS.map((s) => s.action));
+  for (const [hint, action] of Object.entries(HINT_SHORTCUTS)) {
+    assert.ok(actions.has(action), `${hint} → ${action}`);
+  }
 });

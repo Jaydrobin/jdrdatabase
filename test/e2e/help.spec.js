@@ -241,7 +241,8 @@ test('도움말: 버튼으로 열기 → 모든 주제(↑↓·Home·End) → �
     'Shift+F10',
     'Menu',
   ]);
-  expect(await keyRows.count()).toBe(13);
+  // 설명 전용 항목(붙여넣기, 장문 저장)을 포함한 행동 15개.
+  expect(await keyRows.count()).toBe(15);
 
   await page.keyboard.press('Home');
   await expect(panel.locator('.jdr-help__heading')).toHaveText('테이블·열·빈 행');
@@ -502,4 +503,39 @@ test('툴팁: 대화상자 안에서 첫 Esc는 툴팁만 닫고, 다음 Esc가 
   await page.keyboard.press('Shift+Tab');
   await expect(opener).toBeFocused();
   await expect(tooltip).toBeVisible();
+});
+
+test('툴팁: 단축키는 문구가 아니라 단축키 표에서 붙인다(macOS는 ⌘), 도움말에 붙여넣기·장문 저장', async ({
+  page,
+}) => {
+  const tooltip = page.locator(TOOLTIP);
+  // Windows·Linux 형식.
+  await pointTo(page, page.locator('[data-action="save"]'));
+  await expect(tooltip).toHaveText('지금 파일에 저장합니다. (Ctrl+S)');
+  await page.mouse.move(700, 600);
+  await pointTo(page, page.locator('[data-action="redo"]'));
+  await expect(tooltip).toHaveText('되돌린 변경을 다시 실행합니다. (Ctrl+Shift+Z / Ctrl+Y)');
+  await page.mouse.move(700, 600);
+  // 단축키가 없는 버튼에는 붙이지 않는다.
+  await pointTo(page, page.locator('[data-action="import"]'));
+  await expect(tooltip).toHaveText('CSV·XLSX 파일을 새 테이블이나 지금 있는 테이블로 가져옵니다.');
+  await page.mouse.move(700, 600);
+
+  // 도움말의 단축키 주제에 붙여넣기(Ctrl+V)와 장문 편집기 저장(Ctrl+Enter)이 있다.
+  await page.click('[data-action="help-open"]');
+  const panel = page.locator('.jdr-dialog').getByRole('tabpanel');
+  await page.locator('.jdr-dialog').getByRole('tab', { name: '단축키' }).click();
+  const keyRows = panel.locator('.jdr-help__keys tbody tr');
+  await expect(keyRows.filter({ hasText: '붙여넣기' }).locator('kbd')).toHaveText(['Ctrl+V']);
+  await expect(keyRows.filter({ hasText: '장문' }).locator('kbd')).toHaveText(['Ctrl+Enter']);
+  await page.keyboard.press('Escape');
+
+  // macOS 형식: navigator.platform이 Mac이면 ⌘·⇧.
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' });
+  });
+  await page.reload();
+  await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
+  await pointTo(page, page.locator('[data-action="save-as"]'));
+  await expect(tooltip).toHaveText('새 이름이나 다른 위치에 파일로 저장합니다. (⌘⇧S)');
 });
