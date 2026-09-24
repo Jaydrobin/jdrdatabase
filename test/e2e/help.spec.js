@@ -363,3 +363,37 @@ test('F1: 대화상자가 떠 있어도 브라우저 기본 동작을 막고, �
   await expect(rename).toHaveCount(0);
   await expect(page.locator('.jdr-grid__hname', { hasText: /^새이름$/ })).toHaveCount(1);
 });
+
+test('툴팁: 누른 뒤 다시 그려진 대상(머리글 정렬, 사이드바 숨기기)에는 포인터가 떠날 때까지 다시 뜨지 않는다', async ({
+  page,
+}) => {
+  const tooltip = page.locator(TOOLTIP);
+  await createTableWith(page, '표', [
+    { name: '가', type: 'text' },
+    { name: '나', type: 'text' },
+  ]);
+  for (const selector of [
+    '.jdr-grid__hcell[data-col="0"] .jdr-grid__hbtn--sort',
+    '.jdr-sidebar [data-action="column-visibility"] >> nth=1',
+  ]) {
+    await page.mouse.move(700, 700);
+    await expect(tooltip).toBeHidden();
+    const target = page.locator(selector);
+    await pointTo(page, target);
+    await expect(tooltip).toBeVisible();
+    // 지금의 버튼들에 표시를 해 두고, 누른 뒤 대상이 새 노드로 바뀌었는지(재현 조건) 확인한다.
+    await page.evaluate(() => {
+      for (const el of document.querySelectorAll('button')) el.dataset.old = '1';
+    });
+    await page.mouse.down();
+    await expect(tooltip).toBeHidden();
+    await page.mouse.up();
+    await expect(page.locator(selector)).not.toHaveAttribute('data-old', '1');
+    await page.waitForTimeout(900);
+    await expect(tooltip).toBeHidden();
+    // 떠났다 돌아오면 다시 뜬다.
+    await page.mouse.move(700, 700);
+    await pointTo(page, page.locator(selector));
+    await expect(tooltip).toBeVisible();
+  }
+});

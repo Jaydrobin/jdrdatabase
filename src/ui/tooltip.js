@@ -6,6 +6,9 @@
  *   WCAG 1.4.13을 만족하지 못한다).
  * - 마우스는 올린 뒤 500 ms, 키보드 포커스(`:focus-visible`)는 즉시 보인다. 터치에는 보이지 않는다.
  * - Esc·포커스 이탈·포인터 이탈·누름·스크롤로 닫는다. Esc는 전파를 막지 않는다(대화상자·편집기의 Esc도 돈다).
+ * - 누르면 닫고, 포인터가 누른 자리(그때 대상의 사각형)를 떠날 때까지 다시 띄우지 않는다. 요소가 아니라 자리로
+ *   기억한다: 누른 결과로 대상이 다시 그려지면(머리글 정렬, 사이드바 목록) 포인터 아래의 새 노드가 `pointerover`를
+ *   다시 받기 때문이다.
  * - 툴팁 요소는 문서에 하나이고 포인터 이벤트를 받지 않는다. 받으면 아래의 버튼을 덮어 클릭을 가로챈다.
  *   대신 포인터가 대상과 툴팁을 함께 감싼 사각형 안에 있는 동안은 닫지 않는다(가리킬 수 있음).
  * - 보일 때 대상에 `aria-describedby`를 달고, 숨길 때 뗀다. 숨긴 툴팁은 문구를 비운다.
@@ -41,10 +44,18 @@ let showTimer = 0;
 /** 누르거나 Esc로 닫은 대상. 포인터·포커스가 떠날 때까지 다시 띄우지 않는다. */
 /** @type {HTMLElement | null} */
 let suppressed = null;
+/**
+ * 누른 자리(그때 대상의 사각형, 화면 좌표). 포인터가 이 안에 있는 동안은 어떤 대상의 `pointerover`에도 띄우지
+ * 않는다. 벗어나면 지운다.
+ * @type {Rect | null}
+ */
+let pressed = null;
 /** 마우스로 띄운 툴팁인가(포인터 이탈 판정은 이때만 한다). */
 let byPointer = false;
+/** @typedef {{ left: number, top: number, right: number, bottom: number }} Rect */
+
 /** 보이는 동안 대상과 툴팁을 함께 감싼 사각형. 포인터가 이 안에 있으면 닫지 않는다. */
-/** @type {{ left: number, top: number, right: number, bottom: number } | null} */
+/** @type {Rect | null} */
 let hull = null;
 /** @type {MutationObserver | null} */
 let observer = null;
@@ -58,6 +69,17 @@ function hintTarget(target) {
   if (!(target instanceof Element)) return null;
   const el = target.closest(TARGET);
   return el instanceof HTMLElement && el.dataset.hint ? el : null;
+}
+
+/**
+ * 점이 사각형 안(경계 제외)에 있는가. 이웃한 대상으로 옮긴 포인터는 경계 위에 있을 수 있으므로 경계는 밖으로 본다.
+ * @param {Rect} rect
+ * @param {number} x
+ * @param {number} y
+ * @returns {boolean}
+ */
+function inside(rect, x, y) {
+  return x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
 }
 
 /**
@@ -174,11 +196,17 @@ function onPointerOver(ev) {
   if (ev.pointerType === 'touch') return;
   const target = hintTarget(ev.target);
   if (!target) return;
+  if (pressed) {
+    // 누른 자리 안: 대상이 다시 그려져 새 노드가 됐어도 띄우지 않는다.
+    if (inside(pressed, ev.clientX, ev.clientY)) return;
+    pressed = null;
+  }
   schedule(target, true);
 }
 
 /** @param {PointerEvent} ev */
 function onPointerOut(ev) {
+  if (pressed && !inside(pressed, ev.clientX, ev.clientY)) pressed = null;
   const from = hintTarget(ev.target);
   if (!from) return;
   const to = hintTarget(ev.relatedTarget);
@@ -202,7 +230,11 @@ function onPointerMove(ev) {
 /** @param {PointerEvent} ev */
 function onPointerDown(ev) {
   const target = hintTarget(ev.target);
-  if (target) suppressed = target;
+  if (target) {
+    suppressed = target;
+    const rect = target.getBoundingClientRect();
+    pressed = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  }
   if (current) hide();
 }
 
@@ -281,4 +313,5 @@ export function unmount() {
   mounted = null;
   observer = null;
   suppressed = null;
+  pressed = null;
 }
