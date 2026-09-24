@@ -38,7 +38,10 @@ async function listJs(dir) {
  * @param {string} source
  */
 function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
+  // 블록 주석은 줄바꿈만 남긴다: 보고하는 줄 번호가 원본 파일과 같게.
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ''))
+    .replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
 }
 
 /** @param {string} file */
@@ -150,13 +153,25 @@ test('DESIGN.md 6장 표의 RPC op와 worker.js OpMap이 같다', async () => {
   );
 });
 
-test("src/ui에 HTML title 속성 쓰기(`.title =`, `setAttribute('title'`)가 없다(툴팁은 data-hint, D-19)", async () => {
+/**
+ * HTML `title` 속성을 쓰는 형태. 속성 대입, `setAttribute`·`setAttributeNS`·`toggleAttribute`, `el['title'] =`,
+ * `Object.assign(el, { title })`, 마크업 문자열의 `title="…"`.
+ */
+const TITLE_WRITE =
+  /\.title\s*=(?!=)|(?:setAttribute|toggleAttribute)\(\s*['"]title['"]|setAttributeNS\([^,]*,\s*['"]title['"]|\[\s*['"]title['"]\s*\]\s*=(?!=)|Object\.assign\([^)]*\btitle\s*[:,}]|<[a-z][^>]*\stitle=/;
+
+test("src/ui에 HTML title 속성 쓰기(`.title =`, `setAttribute('title'` 등)가 없다(툴팁은 data-hint, D-19)", async () => {
+  assert.ok(TITLE_WRITE.test("Object.assign(button, { title: 'x' })"));
+  assert.ok(TITLE_WRITE.test("el.setAttributeNS(null, 'title', 'x')"));
+  assert.ok(TITLE_WRITE.test("el['title'] = 'x'"));
+  assert.ok(TITLE_WRITE.test('<button title="x">'));
+  assert.ok(!TITLE_WRITE.test("openDialog({ title: t('help.title') })"));
   /** @type {string[]} */
   const hits = [];
   for (const file of await listJs(path.join(SRC, 'ui'))) {
     const code = stripComments(await readFile(file, 'utf8'));
     for (const [index, line] of code.split('\n').entries()) {
-      if (/\.title\s*=(?!=)|setAttribute\(\s*['"]title['"]/.test(line)) {
+      if (TITLE_WRITE.test(line)) {
         hits.push(`${rel(file)}:${index + 1}: ${line.trim().slice(0, 80)}`);
       }
     }
@@ -180,12 +195,21 @@ test('data-action을 가진 버튼·선택 상자는 data-hint를 가지며, 툴
   for (const file of await listJs(path.join(SRC, 'ui'))) {
     const code = stripComments(await readFile(file, 'utf8'));
     const exempt = HINTLESS_ACTION_ELEMENTS[rel(file)] ?? [];
-    // 1) `x.dataset.action = …`을 하는 변수는 같은 파일에서 `x.dataset.hint = …`도 한다.
-    for (const m of code.matchAll(/(\w+)\.dataset\.action\s*=/g)) {
-      const variable = m[1] ?? '';
-      if (exempt.includes(variable)) continue;
-      if (!new RegExp(`\\b${variable}\\.dataset\\.hint\\s*=`).test(code)) {
-        missingHint.push(`${rel(file)}: ${variable}`);
+    // 1) `x.dataset.action = …`을 하는 줄 가까이(앞뒤 3줄)에 같은 변수의 `x.dataset.hint = …`가 있다. 파일 어디엔가
+    //    있는 것으로는 부족하다: 다른 함수의 같은 이름 변수(`button`)가 통과시킨다.
+    const lines = code.split('\n');
+    for (const [index, line] of lines.entries()) {
+      for (const m of line.matchAll(/(\w+)\.dataset\.action\s*=/g)) {
+        const variable = m[1] ?? '';
+        if (exempt.includes(variable)) continue;
+        const near = lines.slice(Math.max(0, index - 3), index + 4).join('\n');
+        if (!new RegExp(`\\b${variable}\\.dataset\\.hint\\s*=`).test(near)) {
+          missingHint.push(`${rel(file)}:${index + 1}: ${variable}`);
+        }
+      }
+      // `setAttribute('data-action', …)`는 위 규칙을 우회한다. dataset으로 쓴다.
+      if (/setAttribute\(\s*['"]data-action['"]/.test(line)) {
+        missingHint.push(`${rel(file)}:${index + 1}: setAttribute('data-action')`);
       }
     }
     // 2) 툴팁 키 리터럴('hint.…')은 그대로 모은다.
@@ -203,6 +227,16 @@ test('data-action을 가진 버튼·선택 상자는 data-hint를 가지며, 툴
       ),
     ].map((m) => m[1] ?? '');
     for (const helper of helpers) {
+      // 도우미 호출의 action 인자가 리터럴이 아니면 키를 확인할 수 없다(조용히 건너뛰지 않는다).
+      const calls = [...code.matchAll(new RegExp(`(?<!function )\\b${helper}\\(`, 'g'))].length;
+      const literal = [
+        ...code.matchAll(new RegExp(`\\b${helper}\\([^;]*?,\\s*'([a-z][a-z0-9-]*)'\\s*[,)]`, 'g')),
+      ].length;
+      if (calls !== literal) {
+        missingHint.push(
+          `${rel(file)}: ${helper}() 호출 ${calls - literal}곳의 action이 리터럴이 아님`,
+        );
+      }
       for (const m of code.matchAll(
         new RegExp(`\\b${helper}\\([^;]*?,\\s*'([a-z][a-z0-9-]*)'\\s*[,)]`, 'g'),
       )) {

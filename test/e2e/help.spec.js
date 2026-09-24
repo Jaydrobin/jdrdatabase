@@ -6,8 +6,13 @@
  *   비활성 버튼(Chromium은 포인터 이벤트를 낸다).
  * - 도움말: 버튼·F1로 열기, 모든 주제 표시(↑↓ 탭 이동), 저장 주제는 브라우저 모드 문구, 단축키 주제는
  *   `SHORTCUTS` 표에서 그림, Esc로 닫고 포커스가 도움말 버튼으로 돌아옴.
+ * - 세션 P 리뷰 수정의 재현: F1이 모달·편집 중에도 브라우저로 새지 않음, 누른 뒤 다시 그려진 대상, Tab 포커스가
+ *   일으킨 스크롤, 단축키로 연 모달 뒤의 툴팁, 대화상자 안의 첫 Esc, 단축키 표에서 붙이는 툴팁 조합.
+ * - DOM 전수: 앱 화면과 모든 대화상자·메뉴를 열어 `data-hint` 없는 `data-action`과 `title` 속성이 없는지 본다.
  */
 import { expect, test } from '@playwright/test';
+import { en } from '../../src/i18n/en.js';
+import { ko } from '../../src/i18n/ko.js';
 import { PAGE_URL } from './page-url.js';
 import { createTableWith } from './schema-ui.js';
 
@@ -538,4 +543,133 @@ test('툴팁: 단축키는 문구가 아니라 단축키 표에서 붙인다(mac
   await expect(page.locator('.jdr-statusbar__item').first()).toHaveText('준비됨');
   await pointTo(page, page.locator('[data-action="save-as"]'));
   await expect(tooltip).toHaveText('새 이름이나 다른 위치에 파일로 저장합니다. (⌘⇧S)');
+});
+
+/**
+ * 지금 DOM(앱이 만든 것)에서 툴팁 규칙을 어기는 요소와 `data-hint` 키를 모은다. 텍스트 입력칸은
+ * 툴팁을 달지 않으므로(D-19) `data-action`이 있어도 뺀다.
+ * @param {import('@playwright/test').Page} page
+ */
+function auditHints(page) {
+  return page.evaluate(() => {
+    const textInput = (/** @type {Element} */ el) =>
+      el instanceof HTMLTextAreaElement ||
+      (el instanceof HTMLInputElement &&
+        !['button', 'checkbox', 'radio', 'file'].includes(el.type));
+    const body = document.body;
+    return {
+      missing: Array.from(body.querySelectorAll('[data-action]:not([data-hint])'))
+        .filter((el) => !textInput(el) && !(el instanceof HTMLInputElement && el.type === 'file'))
+        .map((el) => `${el.tagName.toLowerCase()}[data-action=${el.getAttribute('data-action')}]`),
+      titled: Array.from(body.querySelectorAll('[title]')).map(
+        (el) => `${el.tagName.toLowerCase()}.${el.className}`,
+      ),
+      keys: Array.from(body.querySelectorAll('[data-hint]')).map(
+        (el) => el.getAttribute('data-hint') ?? '',
+      ),
+      hintedTextInputs: Array.from(body.querySelectorAll('[data-hint]'))
+        .filter(textInput)
+        .map((el) => el.className),
+    };
+  });
+}
+
+test('DOM 전수: 앱 화면·모든 대화상자·메뉴·장문 편집기에서 data-action에 data-hint, title 속성 0건, 키는 두 문구 파일에', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  /** @type {Set<string>} */
+  const keys = new Set();
+  /** @type {Set<string>} */
+  const states = new Set();
+  const dialog = page.locator('.jdr-dialog');
+  /** @param {string} where */
+  const check = async (where) => {
+    const found = await auditHints(page);
+    expect(found.missing, `${where}: data-hint 없는 data-action`).toEqual([]);
+    expect(found.titled, `${where}: title 속성`).toEqual([]);
+    expect(found.hintedTextInputs, `${where}: 텍스트 입력칸의 툴팁`).toEqual([]);
+    for (const key of found.keys) keys.add(key);
+    states.add(where);
+  };
+  /** @param {string} where */
+  const checkDialog = async (where) => {
+    await expect(dialog).toBeVisible();
+    await check(where);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+  };
+
+  await check('빈 앱');
+  await page.click('[data-action="help-open"]');
+  await checkDialog('도움말');
+  await page.click('[data-action="settings"]');
+  await checkDialog('설정');
+  await page.click('[data-action="table-create"]');
+  await checkDialog('새 테이블');
+
+  await createTableWith(page, '표', [
+    { name: '이름', type: 'text' },
+    { name: '본문', type: 'longtext' },
+  ]);
+  await check('테이블');
+  for (const action of ['sort', 'filter']) {
+    await page.click(`[data-action="${action}"]`);
+    await dialog.locator('[data-action="add"]').click();
+    await checkDialog(action);
+  }
+  await page.click('[data-action="export"]');
+  await checkDialog('내보내기');
+  await page.locator('input.jdr-import-input').setInputFiles({
+    name: 'a.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('이름,값\n가,1\n'),
+  });
+  await expect(dialog.locator('.jdr-dialog__title')).toHaveText('CSV·XLSX 가져오기');
+  await checkDialog('가져오기');
+  for (const action of [
+    'table-rename',
+    'table-drop',
+    'column-rename',
+    'column-type',
+    'column-delete',
+  ]) {
+    await page.locator(`.jdr-sidebar [data-action="${action}"]`).first().click();
+    await checkDialog(action);
+  }
+  // 뷰를 저장하면 "뷰 삭제"가 켜진다.
+  await page.click('[data-action="view-save"]');
+  await expect(dialog).toBeVisible();
+  await check('뷰 저장');
+  await dialog.locator('input').fill('뷰1');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('[data-action="view-delete"]')).toBeEnabled();
+  await page.click('[data-action="view-delete"]');
+  await checkDialog('뷰 삭제');
+  // 설정의 "데이터베이스 정리"는 설정을 닫고 정리 대화상자를 연다.
+  await page.click('[data-action="settings"]');
+  await dialog.locator('[data-action="cleanup-open"]').click();
+  await expect(dialog.locator('.jdr-dialog__title')).toHaveText('데이터베이스 정리');
+  await checkDialog('정리');
+  // 열 메뉴.
+  await page.locator('.jdr-grid__hcell[data-col="0"]').click({ button: 'right' });
+  await expect(page.locator('.jdr-menu[role="menu"]')).toBeVisible();
+  await check('열 메뉴');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.jdr-menu[role="menu"]')).toHaveCount(0);
+  // 장문 편집기(빈 행의 장문 칸에서 Enter).
+  await page.locator('.jdr-grid__row[data-row="0"] .jdr-grid__cell[data-col="1"]').click();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.jdr-longtext')).toBeVisible();
+  await check('장문 편집기');
+
+  expect(states.size).toBe(19);
+  /** @type {Record<string, unknown>} */
+  const koMap = ko;
+  /** @type {Record<string, unknown>} */
+  const enMap = en;
+  expect([...keys].filter((key) => !(key in koMap) || !(key in enMap))).toEqual([]);
+  // 상태별 키(검색 인덱스)와 설정의 확인 줄은 이 경로에서 다 보이지 않아도, 본 키만 40개가 넘는다.
+  expect(keys.size).toBeGreaterThan(30);
 });
