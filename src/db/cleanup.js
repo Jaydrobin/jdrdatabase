@@ -13,7 +13,7 @@
  */
 import { AppError, serializeError } from '../util/errors.js';
 import { applyCommand } from './command.js';
-import { quoteIdent, SYSTEM_COLUMNS, tmpTableFor } from './schema.js';
+import { ftsTriggersFor, quoteIdent, SYSTEM_COLUMNS, tmpTableFor } from './schema.js';
 import { indexStatements, searchableColumns } from './search.js';
 import { dropSearchIndexStatements, list, requireStrict, requireTable } from './tables.js';
 
@@ -33,6 +33,15 @@ import { dropSearchIndexStatements, list, requireStrict, requireTable } from './
  * @property {string} name
  * @property {Array<{ id: string, name: string, type: LogicalType, deletedAt: string }>} columns 소프트 삭제된 열
  * @property {boolean} ftsEnabled 정리하면 검색 인덱스를 다시 만든다
+ * @property {SchemaBlocker | null} blocked 재작성이 스키마를 그대로 옮길 수 없어 정리할 수 없는 테이블이면 그 이유
+ */
+
+/**
+ * 정리할 수 없는 이유(`schemaBlocker`). 이 앱이 만든 테이블에는 검색 인덱스 말고 다른 스키마 객체가 없으므로
+ * 다른 도구가 더한 것이다.
+ * @typedef {object} SchemaBlocker
+ * @property {'foreign_key' | 'index' | 'trigger' | 'view' | 'columns'} reason
+ * @property {string} object 그 객체의 이름(표시용, 80자까지). 열 제약이면 빈 문자열일 수 있다
  */
 
 /**
@@ -87,6 +96,92 @@ function dbBytes(engine) {
 }
 
 /**
+ * `CREATE TABLE` 문에 이 앱이 쓰지 않는 열 제약이 있는가. 앱의 DDL은 따옴표 친 식별자, 타입, `PRIMARY KEY`,
+ * `NOT NULL`, `STRICT`뿐이다(D-03, `purgeCommand`). 식별자와 문자열을 지운 뒤 남은 단어로 판정한다.
+ */
+const CONSTRAINT_WORDS =
+  /\b(CHECK|COLLATE|DEFAULT|UNIQUE|REFERENCES|CONSTRAINT|AUTOINCREMENT|ASC|DESC|CONFLICT|AS|WITHOUT|GENERATED|FOREIGN)\b/i;
+
+/**
+ * @param {string} sql
+ * @returns {boolean}
+ */
+function hasColumnConstraints(sql) {
+  const stripped = sql.replace(/"(?:[^"]|"")*"|'(?:[^']|'')*'|`(?:[^`]|``)*`|\[[^\]]*\]/g, ' ');
+  return CONSTRAINT_WORDS.test(stripped);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function objectName(value) {
+  return String(value ?? '').slice(0, 80);
+}
+
+/**
+ * 재작성(`CREATE` → `INSERT … SELECT` → `DROP` → `RENAME`)이 이 테이블의 스키마를 그대로 옮길 수 없는가(Step 13 예외 처리).
+ * 다른 테이블의 외래 키가 이 테이블을 가리키면 `DROP TABLE`이 `ON DELETE CASCADE`·`SET NULL`을 실행해 그 테이블의
+ * 행을 지우거나 바꾸고, 사용자 인덱스·트리거는 `DROP`과 함께 사라지며, 뷰는 `RENAME`을 실패시킨다. 읽기만 한다.
+ * @param {Engine} engine
+ * @param {string} tableId
+ * @returns {SchemaBlocker | null}
+ */
+export function schemaBlocker(engine, tableId) {
+  const outgoing = engine.exec('SELECT "table" FROM pragma_foreign_key_list(?) LIMIT 1', [tableId]);
+  if (outgoing.rows.length > 0) {
+    return { reason: 'foreign_key', object: objectName(outgoing.rows[0]?.[0]) };
+  }
+  const incoming = engine.exec(
+    `SELECT m.name FROM sqlite_master AS m, pragma_foreign_key_list(m.name) AS f
+      WHERE m.type = 'table' AND m.name <> ? AND f."table" = ? COLLATE NOCASE LIMIT 1`,
+    [tableId, tableId],
+  );
+  if (incoming.rows.length > 0) {
+    return { reason: 'foreign_key', object: objectName(incoming.rows[0]?.[0]) };
+  }
+  const indexes = engine.exec('SELECT name FROM pragma_index_list(?) LIMIT 1', [tableId]);
+  if (indexes.rows.length > 0) return { reason: 'index', object: objectName(indexes.rows[0]?.[0]) };
+  const own = ftsTriggersFor(tableId);
+  const triggers = engine.exec(
+    `SELECT name FROM sqlite_master
+      WHERE type = 'trigger' AND (tbl_name = ? COLLATE NOCASE OR instr(sql, ?) > 0)
+        AND name NOT IN (?, ?, ?) LIMIT 1`,
+    [tableId, tableId, own.insert, own.delete, own.update],
+  );
+  if (triggers.rows.length > 0) {
+    return { reason: 'trigger', object: objectName(triggers.rows[0]?.[0]) };
+  }
+  const views = engine.exec(
+    "SELECT name FROM sqlite_master WHERE type = 'view' AND instr(sql, ?) > 0 LIMIT 1",
+    [tableId],
+  );
+  if (views.rows.length > 0) return { reason: 'view', object: objectName(views.rows[0]?.[0]) };
+  const hidden = engine.exec('SELECT name FROM pragma_table_xinfo(?) WHERE hidden <> 0 LIMIT 1', [
+    tableId,
+  ]);
+  if (hidden.rows.length > 0) return { reason: 'columns', object: objectName(hidden.rows[0]?.[0]) };
+  const ddl = engine.exec(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+    [tableId],
+  );
+  if (hasColumnConstraints(String(ddl.rows[0]?.[0] ?? '')))
+    return { reason: 'columns', object: '' };
+  try {
+    physicalColumns(engine, tableId);
+  } catch (err) {
+    if (err instanceof AppError && err.code === 'E_DB_QUERY') {
+      const detail = /** @type {Record<string, unknown>} */ (
+        typeof err.detail === 'object' && err.detail !== null ? err.detail : {}
+      );
+      return { reason: 'columns', object: objectName(detail.column) };
+    }
+    throw err;
+  }
+  return null;
+}
+
+/**
  * 정리 계획. 소프트 삭제된 열이 있는 STRICT 테이블과 DB 크기·빈 공간을 돌려준다. 읽기만 한다.
  * @param {Engine} engine
  * @returns {CleanupPlan}
@@ -109,6 +204,7 @@ export function plan(engine) {
         deletedAt: /** @type {string} */ (c.deletedAt),
       })),
       ftsEnabled: table.ftsEnabled,
+      blocked: schemaBlocker(engine, table.id),
     });
   }
   const pageSize = pragmaNumber(engine, 'PRAGMA page_size');
@@ -253,6 +349,13 @@ function resolveRequest(engine, columns) {
   for (const [tableId, ids] of byTable) {
     const table = requireTable(engine, tableId);
     requireStrict(table);
+    // 계획 뒤에 다른 도구가 스키마를 더했을 수 있다. 쓰기 전에(바깥 트랜잭션 안에서) 다시 본다.
+    const blocked = schemaBlocker(engine, tableId);
+    if (blocked) {
+      throw new AppError('E_DB_QUERY', `table schema cannot be rewritten (${blocked.reason})`, {
+        detail: { reason: 'unexpected_schema', tableId, blocked },
+      });
+    }
     const physical = physicalColumns(engine, tableId);
     for (const id of ids) {
       const column = table.columns.find((c) => c.id === id);
@@ -274,7 +377,8 @@ function resolveRequest(engine, columns) {
 }
 
 /**
- * 정리를 실행한다. 재작성은 트랜잭션 하나이고, 그 뒤 `compactsOnSave`가 거짓이면 `VACUUM`을 부른다.
+ * 정리를 실행한다. 요청 검사(소프트 삭제 상태, `schemaBlocker`)와 재작성은 트랜잭션 하나이고, 그 뒤
+ * `compactsOnSave`가 거짓이면 `VACUUM`을 부른다.
  * 취소는 테이블 사이와(커맨드 안의 문장 사이) 인덱싱 청크 사이에서 받으며 전체를 롤백한다. `VACUUM`은 취소할 수 없다.
  * @param {Engine} engine
  * @param {{ columns: Array<{ tableId: string, columnId: string }> }} input
@@ -282,31 +386,31 @@ function resolveRequest(engine, columns) {
  * @returns {Promise<CleanupResult>}
  */
 export async function run(engine, input, ctx = {}) {
-  const groups = resolveRequest(engine, input?.columns);
   const bytesBefore = dbBytes(engine);
   /** @type {Command[]} */
   const cmds = [];
   let removedColumns = 0;
   let rebuiltIndexes = 0;
-  if (groups.length > 0) {
-    await engine.transaction(async () => {
-      for (let i = 0; i < groups.length; i += 1) {
-        if (ctx.signal?.aborted) {
-          throw new AppError('E_IMPORT_CANCELLED', 'cleanup cancelled', {
-            detail: { done: i, total: groups.length },
-          });
-        }
-        ctx.progress?.({ phase: 'purge', done: i, total: groups.length });
-        const group = /** @type {{ target: PurgeTarget, columnIds: string[] }} */ (groups[i]);
-        const cmd = purgeCommand(group.target, group.columnIds);
-        await applyCommand(engine, cmd, 'do', ctx);
-        cmds.push(cmd);
-        removedColumns += group.columnIds.length;
-        if (cmd.do.some((s) => 'index' in s)) rebuiltIndexes += 1;
+  await engine.transaction(async () => {
+    // 검사도 트랜잭션 안에서 한다. 검사와 첫 쓰기 사이에 스키마가 바뀔 틈을 두지 않는다.
+    const groups = resolveRequest(engine, input?.columns);
+    if (groups.length === 0) return;
+    for (let i = 0; i < groups.length; i += 1) {
+      if (ctx.signal?.aborted) {
+        throw new AppError('E_IMPORT_CANCELLED', 'cleanup cancelled', {
+          detail: { done: i, total: groups.length },
+        });
       }
-      ctx.progress?.({ phase: 'purge', done: groups.length, total: groups.length });
-    });
-  }
+      ctx.progress?.({ phase: 'purge', done: i, total: groups.length });
+      const group = /** @type {{ target: PurgeTarget, columnIds: string[] }} */ (groups[i]);
+      const cmd = purgeCommand(group.target, group.columnIds);
+      await applyCommand(engine, cmd, 'do', ctx);
+      cmds.push(cmd);
+      removedColumns += group.columnIds.length;
+      if (cmd.do.some((s) => 'index' in s)) rebuiltIndexes += 1;
+    }
+    ctx.progress?.({ phase: 'purge', done: groups.length, total: groups.length });
+  });
   let vacuumed = false;
   /** @type {SerializedError | null} */
   let vacuumError = null;

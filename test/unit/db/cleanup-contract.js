@@ -487,6 +487,106 @@ export function defineCleanupContract(label, open) {
       await engine.close();
     });
 
+    // 다른 도구가 더한 스키마: 재작성(CREATE → INSERT … SELECT → DROP → RENAME)이 그대로 옮길 수 없다.
+    // 특히 외래 키의 ON DELETE CASCADE·SET NULL은 DROP TABLE이 다른 테이블의 행을 지우거나 바꾼다.
+    /** @type {Array<{ label: string, reason: string, object: string, sql: (t: string, a: string) => string[] }>} */
+    const foreignSchemas = [
+      {
+        label: '다른 테이블의 외래 키(ON DELETE CASCADE)',
+        reason: 'foreign_key',
+        object: 'child',
+        sql: (t) => [
+          `CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES "${t}"(id) ON DELETE CASCADE, note TEXT)`,
+          "INSERT INTO child (pid, note) VALUES (1, 'c1'), (2, 'c2')",
+        ],
+      },
+      {
+        label: '다른 테이블의 외래 키(ON DELETE SET NULL)',
+        reason: 'foreign_key',
+        object: 'child',
+        sql: (t) => [
+          `CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES "${t}"(id) ON DELETE SET NULL, note TEXT)`,
+          "INSERT INTO child (pid, note) VALUES (1, 'c1'), (2, 'c2')",
+        ],
+      },
+      {
+        label: '사용자 인덱스',
+        reason: 'index',
+        object: 'user_ix',
+        sql: (t, a) => [`CREATE INDEX user_ix ON "${t}"("${a}")`],
+      },
+      {
+        label: 'UNIQUE 인덱스',
+        reason: 'index',
+        object: 'user_unique',
+        sql: (t, a) => [`CREATE UNIQUE INDEX user_unique ON "${t}"("${a}")`],
+      },
+      {
+        label: '이 테이블의 사용자 트리거',
+        reason: 'trigger',
+        object: 'user_tr',
+        sql: (t, a) => [
+          'CREATE TABLE audit (x TEXT)',
+          `CREATE TRIGGER user_tr AFTER INSERT ON "${t}" BEGIN INSERT INTO audit VALUES (new."${a}"); END`,
+        ],
+      },
+      {
+        label: '다른 테이블의 트리거가 이 테이블을 씀',
+        reason: 'trigger',
+        object: 'other_tr',
+        sql: (t, a) => [
+          'CREATE TABLE other (x TEXT)',
+          `CREATE TRIGGER other_tr AFTER INSERT ON other BEGIN INSERT INTO "${t}" ("${a}") VALUES (new.x); END`,
+        ],
+      },
+      {
+        label: '이 테이블을 참조하는 뷰',
+        reason: 'view',
+        object: 'user_v',
+        sql: (t, a) => [`CREATE VIEW user_v AS SELECT "${a}" FROM "${t}"`],
+      },
+      {
+        label: '열 제약(CHECK)',
+        reason: 'columns',
+        object: '',
+        sql: (t) => [`ALTER TABLE "${t}" ADD COLUMN extra TEXT CHECK (extra <> '')`],
+      },
+    ];
+    for (const extra of foreignSchemas) {
+      test(`다른 도구가 더한 스키마(${extra.label}): 계획은 blocked, 실행은 unexpected_schema로 거부하고 DB 덤프가 그대로다`, async () => {
+        const engine = await open();
+        const { customers, orders, cols } = await seed(engine);
+        await engine.transaction(() => {
+          for (const sql of extra.sql(orders, cols.itemCol)) engine.run(sql);
+        });
+        const planned = cleanup.plan(engine);
+        const blocked = planned.tables.find((t) => t.tableId === orders)?.blocked;
+        assert.equal(blocked?.reason, extra.reason);
+        if (extra.object) assert.equal(blocked?.object, extra.object);
+        // 다른 테이블은 그대로 정리할 수 있다.
+        assert.equal(planned.tables.find((t) => t.tableId === customers)?.blocked, null);
+        const before = dumpWithoutMeta(engine);
+        await assert.rejects(
+          cleanup.run(engine, {
+            columns: [
+              { tableId: customers, columnId: cols.memoCol },
+              { tableId: orders, columnId: cols.qtyCol },
+            ],
+          }),
+          (err) => {
+            assert.ok(err instanceof AppError, String(err));
+            assert.equal(err.code, 'E_DB_QUERY');
+            const detail = /** @type {Record<string, unknown>} */ (err.detail);
+            assert.equal(detail.reason, 'unexpected_schema');
+            assert.equal(detail.tableId, orders);
+            return true;
+          },
+        );
+        assert.deepEqual(dumpWithoutMeta(engine), before);
+        await engine.close();
+      });
+    }
+
     test('저널 재생: 기록된 column.purge를 새 DB에 재생하면 같은 스키마·데이터가 된다', async () => {
       const engine = await open();
       const { journal, customers, orders, cols } = await seed(engine);

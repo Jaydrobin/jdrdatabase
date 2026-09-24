@@ -202,7 +202,9 @@ export async function openSettingsDialog(deps) {
       });
       void store.planCleanup().then((plan) => {
         if (!plan) return;
-        const nothing = plan.tables.length === 0 && plan.compactsOnSave;
+        // 정리할 수 없는 테이블(`blocked`)만 있으면 고를 열이 없다(Step 13 예외 처리).
+        const purgeable = plan.tables.some((table) => !table.blocked);
+        const nothing = !purgeable && plan.compactsOnSave;
         cleanupButton.disabled = nothing || store.getState().readOnly !== 'none';
         if (nothing) cleanupHint.textContent = t('settings.cleanupNothing');
       });

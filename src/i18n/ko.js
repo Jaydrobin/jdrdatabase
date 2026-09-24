@@ -432,6 +432,16 @@ export const ko = Object.freeze({
   'cleanup.title': '데이터베이스 정리',
   'cleanup.intro': '체크한 열을 파일에서 완전히 지웁니다. 체크를 푼 열은 계속 복원할 수 있습니다.',
   'cleanup.column': '{name} · {type} · {at}에 삭제',
+  'cleanup.blocked.foreign_key':
+    '외래 키로 다른 테이블({object})과 이어져 있어 이 테이블은 정리할 수 없습니다. 정리하면 그 테이블의 행이 지워지거나 바뀔 수 있습니다. 삭제한 열은 복원할 수 있는 채로 남습니다.',
+  'cleanup.blocked.index':
+    '다른 도구가 만든 인덱스({object})가 있어 이 테이블은 정리할 수 없습니다. 삭제한 열은 복원할 수 있는 채로 남습니다.',
+  'cleanup.blocked.trigger':
+    '다른 도구가 만든 트리거({object})가 이 테이블을 써서 정리할 수 없습니다. 삭제한 열은 복원할 수 있는 채로 남습니다.',
+  'cleanup.blocked.view':
+    '뷰({object})가 이 테이블을 참조해 정리할 수 없습니다. 삭제한 열은 복원할 수 있는 채로 남습니다.',
+  'cleanup.blocked.columns':
+    '이 앱이 만들지 않은 열 제약이 있어 이 테이블은 정리할 수 없습니다. 삭제한 열은 복원할 수 있는 채로 남습니다.',
   'cleanup.index': '이 테이블의 검색 인덱스를 다시 만듭니다.',
   'cleanup.noColumns': '삭제한 열이 없습니다. 파일의 빈 공간 줄이기만 합니다.',
   'cleanup.size': '지금 크기 {size} · 줄일 수 있는 빈 공간 {free}',

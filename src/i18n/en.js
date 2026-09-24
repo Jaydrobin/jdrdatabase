@@ -434,6 +434,16 @@ export const en = Object.freeze({
   'cleanup.intro':
     'Checked columns are removed from the file for good. Unchecked columns can still be restored.',
   'cleanup.column': '{name} · {type} · deleted {at}',
+  'cleanup.blocked.foreign_key':
+    'This table is linked to another table ({object}) by a foreign key, so it cannot be cleaned up: cleaning up could delete or change rows in that table. The deleted columns stay restorable.',
+  'cleanup.blocked.index':
+    'This table has an index made by another tool ({object}), so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.blocked.trigger':
+    'A trigger made by another tool ({object}) uses this table, so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.blocked.view':
+    'A view ({object}) refers to this table, so it cannot be cleaned up. The deleted columns stay restorable.',
+  'cleanup.blocked.columns':
+    'This table has column constraints this app did not create, so it cannot be cleaned up. The deleted columns stay restorable.',
   'cleanup.index': 'The search index of this table is rebuilt.',
   'cleanup.noColumns':
     'There are no deleted columns. Only the free space in the file is reclaimed.',

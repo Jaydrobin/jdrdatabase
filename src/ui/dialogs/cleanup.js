@@ -17,8 +17,27 @@ import { formatBackupTime } from './settings.js';
 /** @typedef {import('../../app/store.js').Store} Store */
 /** @typedef {import('../../db/cleanup.js').CleanupPlan} CleanupPlan */
 /** @typedef {import('../../db/cleanup.js').CleanupResult} CleanupResult */
+/** @typedef {import('../../db/cleanup.js').SchemaBlocker} SchemaBlocker */
 /** @typedef {import('../../util/errors.js').AppError} AppError */
 /** @typedef {import('../toast.js').Toasts} Toasts */
+
+/** 정리할 수 없는 테이블(`blocked`)의 이유 문구(Step 13 예외 처리). */
+const BLOCKED_KEYS = /** @type {const} */ ({
+  foreign_key: 'cleanup.blocked.foreign_key',
+  index: 'cleanup.blocked.index',
+  trigger: 'cleanup.blocked.trigger',
+  view: 'cleanup.blocked.view',
+  columns: 'cleanup.blocked.columns',
+});
+
+/**
+ * 정리할 수 없는 테이블의 문구. `object`는 다른 도구가 만든 객체 이름(사용자 데이터)이라 textContent로만 넣는다.
+ * @param {SchemaBlocker} blocked
+ * @returns {string}
+ */
+export function blockedText(blocked) {
+  return t(BLOCKED_KEYS[blocked.reason], { object: blocked.object });
+}
 
 /**
  * 오류 코드의 문구(뒤에 코드). 정리 문구의 `{message}` 자리에 들어간다.
@@ -105,12 +124,22 @@ export async function openCleanupDialog(deps) {
       const legend = document.createElement('legend');
       legend.textContent = table.name;
       group.append(legend);
+      // 재작성이 스키마를 옮길 수 없는 테이블은 고를 수 없다(체크 상자는 꺼진 채 체크하지 않음). 이유를 먼저 보인다.
+      const blocked = table.blocked ?? null;
+      if (blocked) {
+        const note = document.createElement('p');
+        note.className = 'jdr-import__warning';
+        note.dataset.role = 'cleanup-blocked';
+        note.textContent = blockedText(blocked);
+        group.append(note);
+      }
       for (const column of table.columns) {
         const label = document.createElement('label');
         label.className = 'jdr-import__check';
         const box = document.createElement('input');
         box.type = 'checkbox';
-        box.checked = true;
+        box.checked = !blocked;
+        box.disabled = blocked !== null;
         box.dataset.column = column.id;
         const text = document.createElement('span');
         text.textContent = t('cleanup.column', {
@@ -120,9 +149,9 @@ export async function openCleanupDialog(deps) {
         });
         label.append(box, text);
         group.append(label);
-        checks.push({ box, tableId: table.tableId, columnId: column.id });
+        if (!blocked) checks.push({ box, tableId: table.tableId, columnId: column.id });
       }
-      if (table.ftsEnabled) {
+      if (table.ftsEnabled && !blocked) {
         const note = document.createElement('p');
         note.className = 'jdr-import__muted';
         note.textContent = t('cleanup.index');

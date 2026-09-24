@@ -294,3 +294,52 @@ test('정리 대화상자: 빈 기기 이름이면 설정에 머물고, 체크�
     .click();
   await expect(headerCell(page, 'b')).toHaveCount(1);
 });
+
+/**
+ * 표 하나(a, b, c)를 만들고 b·c를 삭제한다. 표 id와 열 id를 돌려준다.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} name
+ */
+async function tableWithDeleted(page, name) {
+  await createTableWith(page, name, [
+    { name: 'a', type: 'text' },
+    { name: 'b', type: 'text' },
+    { name: 'c', type: 'text' },
+  ]);
+  const table = (await state(page))?.tables.find((t) => t.name === name);
+  const [a, b, c] = (table?.columns ?? []).map((col) => col.id);
+  for (const col of ['b', 'c']) {
+    const menu = await openColumnMenu(page, col);
+    await menu.getByRole('menuitem', { name: '열 삭제…' }).click();
+    await page.locator('.jdr-dialog').getByRole('button', { name: '삭제' }).click();
+    await expect(headerCell(page, col)).toHaveCount(0);
+  }
+  return { tableId: table?.id ?? '', a: a ?? '', b: b ?? '', c: c ?? '' };
+}
+
+/** @param {import('@playwright/test').Page} page */
+async function openCleanup(page) {
+  await page.click('[data-action="settings"]');
+  await page.locator('.jdr-dialog [data-action="cleanup-open"]').click();
+  const dialog = page.locator('.jdr-dialog');
+  await expect(dialog.locator('.jdr-dialog__title')).toHaveText('데이터베이스 정리');
+  return dialog;
+}
+
+test('정리할 수 없는 테이블(다른 도구의 뷰): 체크 상자가 꺼지고 이유를 보이며, 실행해도 그 열은 남는다', async ({
+  page,
+}) => {
+  const { tableId, a, b } = await tableWithDeleted(page, '뷰 표');
+  await query(page, `CREATE VIEW user_v AS SELECT "${a}" FROM "${tableId}"`);
+  const dialog = await openCleanup(page);
+  await expect(dialog.locator('[data-role="cleanup-blocked"]')).toContainText('뷰(user_v)');
+  const box = dialog.locator(`input[data-column="${b}"]`);
+  await expect(box).toBeDisabled();
+  await expect(box).not.toBeChecked();
+  // 브라우저 모드는 빈 공간 줄이기가 남아 있어 실행할 수 있다.
+  await dialog.getByRole('button', { name: '정리', exact: true }).click();
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+  expect(await physicalColumns(page, tableId)).toContain(b);
+  const after = (await state(page))?.tables.find((t) => t.id === tableId);
+  expect(after?.columns.find((col) => col.id === b)?.deletedAt).not.toBeNull();
+});
