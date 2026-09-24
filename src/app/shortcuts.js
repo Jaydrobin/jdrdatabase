@@ -153,21 +153,29 @@ function detectMac() {
  */
 export function describe(options = {}) {
   const mac = options.mac ?? detectMac();
-  return SHORTCUTS.map((shortcut) => {
-    const key =
-      KEY_NAMES[shortcut.key] ??
-      (shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key);
-    /** @type {string[]} */
-    const parts = [];
-    if (shortcut.ctrl) parts.push(mac ? '⌘' : 'Ctrl');
-    if (shortcut.alt) parts.push(mac ? '⌥' : 'Alt');
-    if (shortcut.shift) parts.push(mac ? '⇧' : 'Shift');
-    parts.push(key);
-    return {
-      keys: parts.join(mac ? '' : '+'),
-      labelKey: /** @type {const} */ (`shortcut.${shortcut.action}`),
-      action: shortcut.action,
-      scope: shortcut.scope,
-    };
-  });
+  return SHORTCUTS.map((shortcut) => ({
+    keys: formatKeys(shortcut, mac),
+    labelKey: /** @type {const} */ (`shortcut.${shortcut.action}`),
+    action: shortcut.action,
+    scope: shortcut.scope,
+  }));
+}
+
+/**
+ * 표의 한 항목을 표시용 키 조합으로 쓴다(`Ctrl+Shift+S`, macOS는 `⌘⇧S`).
+ * @param {Shortcut} shortcut
+ * @param {boolean} mac
+ * @returns {string}
+ */
+function formatKeys(shortcut, mac) {
+  const key =
+    KEY_NAMES[shortcut.key] ??
+    (shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key);
+  /** @type {string[]} */
+  const parts = [];
+  if (shortcut.ctrl) parts.push(mac ? '⌘' : 'Ctrl');
+  if (shortcut.alt) parts.push(mac ? '⌥' : 'Alt');
+  if (shortcut.shift) parts.push(mac ? '⇧' : 'Shift');
+  parts.push(key);
+  return parts.join(mac ? '' : '+');
 }
