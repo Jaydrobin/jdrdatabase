@@ -601,7 +601,7 @@ export const ko = Object.freeze({
   'shortcut.help': '도움말 열기',
   'shortcut.rowInsert': '행 추가 (그리드)',
   'shortcut.rowDelete': '고른 행 삭제 (그리드)',
-  'shortcut.selectAll': '모든 칸 선택 (그리드)',
+  'shortcut.selectAll': '모든 칸 선택 (그리드. 빈 행은 고르지 않음)',
   'shortcut.columnMenu': '활성 칸의 열 메뉴 열기 (그리드)',
   'shortcut.copy': '고른 칸 복사 (그리드)',
   'shortcut.edit': '활성 칸 편집 (그리드)',

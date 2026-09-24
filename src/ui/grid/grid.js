@@ -1158,7 +1158,10 @@ export function createGrid(deps) {
       hooks.onCopy(selection.getRange());
     } else if (action === 'selectAll') {
       ev.preventDefault();
-      selection.selectAll();
+      // 모두 선택은 실제 행만 고른다(D-16). 빈 행까지 고르면 복사한 내용에 빈 줄 30개가 붙어, 붙여넣을 때마다
+      // 값 없는 행이 생긴다. 실제 행이 없으면 첫 칸 하나만 고른다.
+      if (rowCount > 0) selection.selectRows(0, rowCount - 1);
+      else selection.setActive(0, 0);
       scheduleRender();
     } else if (action === 'rowInsert') {
       ev.preventDefault();

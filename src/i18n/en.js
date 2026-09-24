@@ -610,7 +610,7 @@ export const en = Object.freeze({
   'shortcut.help': 'Open help',
   'shortcut.rowInsert': 'Add a row (grid)',
   'shortcut.rowDelete': 'Delete the selected rows (grid)',
-  'shortcut.selectAll': 'Select all cells (grid)',
+  'shortcut.selectAll': 'Select all cells (grid; blank rows are not selected)',
   'shortcut.columnMenu': "Open the active cell's column menu (grid)",
   'shortcut.copy': 'Copy the selected cells (grid)',
   'shortcut.edit': 'Edit the active cell (grid)',

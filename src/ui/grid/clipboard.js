@@ -114,14 +114,28 @@ export function cellToText(column, value) {
 /**
  * 붙여넣기 계획(순수). 값 검증은 하지 않고 크기만 센다.
  * @typedef {object} PastePlan
- * @property {number} rows 붙여넣을 행 수
+ * @property {number} rows 붙여넣을 행 수(앞에서부터. 끝의 빈 줄 `trailingEmpty`를 뺀 뒤)
  * @property {number} cols 실제로 쓰는 열 수(그리드 끝에서 잘린 뒤)
  * @property {number} droppedColumns 그리드 오른쪽 경계를 넘어 버리는 열 수
  * @property {number} existingRows 기존 행에 덮어쓰는 수
  * @property {number} newRows 새로 만드는 행 수(값이 든 행)
- * @property {number} gapRows 빈 행에서 시작한 붙여넣기(D-16)가 마지막 실제 행과 시작 행 사이에 더 만드는 빈 행 수
+ * @property {number} gapRows 빈 행에서 시작한 붙여넣기(D-16)가 마지막 실제 행과 시작 행 사이에 더 만드는 빈 행 수. 만들 행이 없으면 0
+ * @property {number} trailingEmpty 마지막 실제 행 아래(빈 행 자리)에 떨어져 버린 끝부분의 빈 줄 수(D-16). `rows`에 들지 않는다
  * @property {number} cells `rows × cols`(잘린 뒤)
  */
+
+/**
+ * 붙여넣는 줄이 그리드에 쓰는 칸(앞의 `cols`칸)이 모두 빈 문자열인가. 경계 밖으로 버려지는 칸은 보지 않는다.
+ * @param {string[] | undefined} line
+ * @param {number} cols
+ * @returns {boolean}
+ */
+function isBlankLine(line, cols) {
+  for (let c = 0; c < cols; c += 1) {
+    if ((line?.[c] ?? '') !== '') return false;
+  }
+  return true;
+}
 
 /**
  * @param {{ data: string[][], anchor: { row: number, col: number }, rowCount: number, colCount: number }} input
@@ -138,15 +152,22 @@ export function planPaste(input) {
       detail: { cells: totalCells, limit: PASTE_MAX_CELLS },
     });
   }
-  const existingRows = Math.max(0, Math.min(rows, input.rowCount - input.anchor.row));
+  // 마지막 실제 행 아래(빈 행 자리, D-16)에 떨어지는 끝부분의 빈 줄은 버린다. 값 없는 행을 만들 뿐이다.
+  // 기존 행 위의 빈 줄(값 지우기)과 값이 든 줄 사이의 빈 줄(자리 지키기)은 남는다.
+  const onExisting = Math.max(0, input.rowCount - input.anchor.row);
+  let kept = rows;
+  while (kept > onExisting && isBlankLine(input.data[kept - 1], cols)) kept -= 1;
+  const existingRows = Math.max(0, Math.min(kept, onExisting));
+  const newRows = kept - existingRows;
   return {
-    gapRows: Math.max(0, input.anchor.row - input.rowCount),
-    rows,
+    gapRows: newRows > 0 ? Math.max(0, input.anchor.row - input.rowCount) : 0,
+    trailingEmpty: rows - kept,
+    rows: kept,
     cols,
     droppedColumns: Math.max(0, width - available),
     existingRows,
-    newRows: rows - existingRows,
-    cells: rows * cols,
+    newRows,
+    cells: kept * cols,
   };
 }
 

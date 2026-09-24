@@ -447,6 +447,70 @@ test('빈 행이 꺼지는 전환: 빈 행의 장문 편집기는 정렬을 켜�
   ]);
 });
 
+test('모두 선택(Ctrl+A)은 실제 행만 고른다: 복사에 빈 행이 섞이지 않고, 빈 행 자리 끝의 빈 줄은 붙여넣어도 행을 만들지 않는다', async ({
+  page,
+}) => {
+  await createTableWith(page, '목록', [
+    { name: '글', type: 'text' },
+    { name: '수', type: 'integer' },
+  ]);
+  await cell(page, 0, 0).click();
+  await page.keyboard.type('x1');
+  await page.keyboard.press('Enter');
+  await expect(rowCount(page)).toHaveText('행 1개');
+  await page.keyboard.type('x2');
+  await page.keyboard.press('Enter');
+  await expect(rowCount(page)).toHaveText('행 2개');
+
+  // Ctrl+A → 복사 → 붙여넣기: 빈 행 30줄이 복사되어 실제 행 30개가 생기던 결함(리뷰 N1).
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+c');
+  await expect(page.locator('.jdr-toast--info', { hasText: '2행 × 2열을 복사' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('x1\t\nx2\t');
+  await page.keyboard.press('Control+v');
+  await expect(
+    page.locator('.jdr-toast--info', { hasText: '2행 × 2열을 붙여넣었습니다' }),
+  ).toBeVisible();
+  await expect(rowCount(page)).toHaveText('행 2개');
+
+  // 빈 행에 걸친 선택의 복사는 빈 행을 빈 칸으로 낸다(D-16). 그것을 빈 행에 붙여넣으면 값이 든 줄만 행이 되고
+  // 끝의 빈 줄은 버린다.
+  await cell(page, 0, 0).click();
+  await cell(page, 3, 1).click({ modifiers: ['Shift'] });
+  await page.keyboard.press('Control+c');
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('x1\t\nx2\t\n\t\n\t');
+  await cell(page, 2, 0).click();
+  await page.keyboard.press('Control+v');
+  await expect(rowCount(page)).toHaveText('행 4개');
+  expect(await rowsOf(page, ['글', '수'])).toEqual([
+    [1, 'x1', null],
+    [2, 'x2', null],
+    [3, 'x1', null],
+    [4, 'x2', null],
+  ]);
+  // 값이 든 줄 사이의 빈 줄은 자리를 지키므로 행이 된다.
+  await page.evaluate(() => navigator.clipboard.writeText('a\n\nb\n\n'));
+  await cell(page, 4, 0).click();
+  await page.keyboard.press('Control+v');
+  await expect(rowCount(page)).toHaveText('행 7개');
+  expect((await rowsOf(page, ['글'])).slice(4)).toEqual([
+    [5, 'a'],
+    [6, null],
+    [7, 'b'],
+  ]);
+
+  // 행이 없는 테이블의 Ctrl+A는 첫 칸만 고른다(빈 행을 고르지 않는다).
+  await createTableWith(page, '빈 표', [{ name: '글', type: 'text' }]);
+  await expect(rowCount(page)).toHaveText('행 0개');
+  await cell(page, 3, 0).click();
+  await page.keyboard.press('Control+a');
+  await expect(page.locator('.jdr-grid__cell--active')).toHaveCount(1);
+  await expect(page.locator('.jdr-grid__row[data-row="0"] .jdr-grid__cell--active')).toHaveCount(1);
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(1);
+});
+
 test('"+ 열" 이름 편집기에 입력한 채 도구 모음의 되돌리기: 열이 사라지고 다시 실행하면 이름까지 돌아온다', async ({
   page,
 }) => {

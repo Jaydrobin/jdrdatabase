@@ -464,7 +464,8 @@ export function createEditingController(deps) {
       toasts.error(toAppError(err));
       return;
     }
-    if (plan.cols === 0) return;
+    // 붙여넣을 줄이 빈 행 자리의 빈 줄뿐이면 만들 것이 없다(D-16).
+    if (plan.cols === 0 || plan.rows === 0) return;
     const targets = columns.slice(anchor.col, anchor.col + plan.cols);
     // 빈 행에서 시작하면(D-16) 마지막 실제 행과 시작 행 사이의 빈 행도 빈 값으로 만든다.
     const irreversible = plan.gapRows + plan.rows > UNDO_SNAPSHOT_MAX_ROWS;
@@ -476,7 +477,8 @@ export function createEditingController(deps) {
     /** @type {import('../../db/values.js').StoredValue[][]} */
     const converted = [];
     try {
-      for (let r = 0; r < data.length; r += 1) {
+      // 끝의 빈 줄(`plan.trailingEmpty`)은 버렸으므로 `plan.rows`줄만 변환한다.
+      for (let r = 0; r < plan.rows; r += 1) {
         const line = data[r] ?? [];
         converted.push(
           targets.map((column, c) => convertPastedCell(column, line[c] ?? '', { row: r, col: c })),
