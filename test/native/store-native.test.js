@@ -651,6 +651,15 @@ test('desktop: 작업 사본 모두 버리기(D-18) — 열린 사본은 남기�
   const result = await third.store.discardAllWorkcopies();
   assert.equal(result.removed, before.length - 1);
   assert.deepEqual(
+    [...result.removedKeys].sort(),
+    before
+      .map((e) => e.key)
+      .filter((key) => key !== failKey)
+      .sort(),
+    '실제로 지운 사본의 키만 돌려준다(설정은 그 줄만 없앤다)',
+  );
+  assert.equal(result.listFailed, false);
+  assert.deepEqual(
     result.failed.map((f) => [f.entry.key, f.error.code]),
     [[failKey, 'E_FILE_LOCKED']],
   );
@@ -663,4 +672,38 @@ test('desktop: 작업 사본 모두 버리기(D-18) — 열린 사본은 남기�
   assert.deepEqual(await count(third.client, 'SELECT 1'), [[1]], '열린 DB는 그대로 쓸 수 있다');
   await engineCall('remove_workcopy', { key: failKey });
   third.client.close();
+});
+
+test('desktop: 작업 사본 목록을 읽지 못하면 모두 버리기는 아무것도 지우지 않고 listFailed로 알린다(D-18)', async () => {
+  // 저장한 적 없는 dirty 사본 하나.
+  const first = await setup();
+  await apply(first.store, first.client, CREATE_T);
+  await first.client.call('db.close', {});
+  first.client.close();
+
+  let failList = false;
+  const app = await setup({}, (fs) => ({
+    ...fs,
+    listWorkcopies: async () => {
+      if (failList) throw new AppError('E_NATIVE_IPC', 'injected list failure');
+      return fs.listWorkcopies ? fs.listWorkcopies() : [];
+    },
+  }));
+  const before = await app.store.listWorkcopies();
+  assert.ok(before.length >= 1);
+  failList = true;
+  const result = await app.store.discardAllWorkcopies();
+  assert.equal(result.listFailed, true);
+  assert.equal(result.removed, 0);
+  assert.deepEqual(result.removedKeys, []);
+  assert.deepEqual(result.failed, []);
+  assert.ok(app.notices.some((n) => n.kind === 'error' && n.value === 'E_NATIVE_IPC'));
+  failList = false;
+  assert.deepEqual(
+    (await app.store.listWorkcopies()).map((e) => e.key).sort(),
+    before.map((e) => e.key).sort(),
+    '사본은 그대로 남는다',
+  );
+  for (const entry of before) await engineCall('remove_workcopy', { key: entry.key });
+  app.client.close();
 });

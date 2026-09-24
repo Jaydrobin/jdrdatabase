@@ -171,7 +171,9 @@ export const MIN_COLUMN_WIDTH = 40;
  * 작업 사본 모두 버리기(D-18)의 결과. 실패한 항목은 사본이 그대로 남아 목록에 다시 나온다.
  * @typedef {object} DiscardAllResult
  * @property {number} removed
+ * @property {string[]} removedKeys 실제로 지운 사본의 키. 설정은 이 줄만 없앤다
  * @property {Array<{ entry: WorkcopyEntry, error: AppError }>} failed
+ * @property {boolean} listFailed 목록을 읽지 못해 아무것도 지우지 않았다(오류는 알렸다)
  */
 
 /**
@@ -727,6 +729,15 @@ export function createStore(deps) {
       size: formatBytes(bytes),
       limit: formatBytes(limit),
     });
+  }
+
+  /**
+   * 데스크톱 모드: 복구를 기다리는 dirty 작업 사본. 열린 사본은 복구를 기다리지 않으므로(이미 열려 있다) 뺀다.
+   * 목록을 읽지 못하면 던진다(호출자가 "없음"과 "읽지 못함"을 가른다).
+   * @returns {Promise<WorkcopyEntry[]>}
+   */
+  async function pendingWorkcopies() {
+    return (await nativeFs('listWorkcopies')()).filter((e) => e.dirty && e.key !== openWorkcopyKey);
   }
 
   /**
@@ -1892,10 +1903,7 @@ export function createStore(deps) {
     async listWorkcopies() {
       if (!nativeMode) return [];
       try {
-        // 열린 사본은 복구를 기다리지 않는다(이미 열려 있다). 여기서 빼야 목록에서 버려지지 않는다.
-        return (await nativeFs('listWorkcopies')()).filter(
-          (e) => e.dirty && e.key !== openWorkcopyKey,
-        );
+        return await pendingWorkcopies();
       } catch (err) {
         notify.error(toStoreError(err));
         return [];
@@ -1939,13 +1947,24 @@ export function createStore(deps) {
 
     async discardAllWorkcopies() {
       /** @type {DiscardAllResult} */
-      const outcome = { removed: 0, failed: [] };
+      const outcome = { removed: 0, removedKeys: [], failed: [], listFailed: false };
       if (!nativeMode) return outcome;
-      // 목록은 열린 사본을 뺀 것이다(`listWorkcopies`). 지금 열린 DB는 대상이 아니다(D-18).
-      for (const entry of await store.listWorkcopies()) {
+      /** @type {WorkcopyEntry[]} */
+      let entries;
+      try {
+        // 목록은 열린 사본을 뺀 것이다. 지금 열린 DB는 대상이 아니다(D-18).
+        entries = await pendingWorkcopies();
+      } catch (err) {
+        // 목록을 읽지 못했으면 아무것도 지우지 않았다. 빈 목록으로 삼키면 설정이 모두 지운 것처럼 줄을 없앤다.
+        notify.error(toStoreError(err));
+        outcome.listFailed = true;
+        return outcome;
+      }
+      for (const entry of entries) {
         try {
           await nativeFs('removeWorkcopy')(entry.key);
           outcome.removed += 1;
+          outcome.removedKeys.push(entry.key);
         } catch (err) {
           // 파일 잠금 등. 그 사본만 남기고 나머지를 계속한다. 원본 파일은 이 경로에서 건드리지 않는다.
           outcome.failed.push({ entry, error: toStoreError(err) });

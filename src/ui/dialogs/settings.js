@@ -320,13 +320,16 @@ export async function openSettingsDialog(deps) {
         okLabel: t('settings.workcopyDiscardAllOk'),
         onConfirm: async () => {
           const result = await store.discardAllWorkcopies();
+          // 실제로 지운 줄만 없앤다. 목록을 읽지 못했으면(`listFailed`, 오류는 스토어가 알렸다) 아무것도 지우지 않았다.
+          const removed = new Set(result.removedKeys);
           const failed = new Map(result.failed.map((f) => [f.entry.key, f.error]));
           for (const [key, row] of [...rows]) {
-            const error = failed.get(key);
-            if (!error) {
+            if (removed.has(key)) {
               removeRow(row);
               continue;
             }
+            const error = failed.get(key);
+            if (!error) continue;
             // 실패한 사본은 목록에 남기고 그 줄에 원인을 적는다. 원본 파일은 이 경로에서 건드리지 않는다.
             const note =
               row.querySelector('[data-role="workcopy-error"]') ?? document.createElement('span');
