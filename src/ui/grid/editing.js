@@ -650,7 +650,9 @@ export function createEditingController(deps) {
     },
     onGhostDisabled: () => {
       const cell = inline.cell();
-      const ghostInline = cell !== null && cell.row >= grid.rowCount();
+      // 이미 확정 중인 편집기(정렬 버튼의 pointerdown이 시작한 포커스 이탈 확정)는 행을 만들며 끝난다. 닫거나
+      // "입력하던 값은 저장되지 않았다"고 알리면 사실과 다르다(D-16).
+      const ghostInline = cell !== null && cell.row >= grid.rowCount() && !inline.isCommitting();
       const ghostLongtext = longtext.target()?.rowId === null;
       if (!ghostInline && !ghostLongtext) return;
       // 빈 행 자리가 더 이상 행을 가리키지 않는다. 값은 버리고 알린다(Step 12 예외 처리).

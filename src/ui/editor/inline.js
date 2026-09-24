@@ -45,6 +45,7 @@ import { t } from '../../i18n/index.js';
  * @property {(reason?: CommitReason) => Promise<boolean>} commit 검증 → onCommit. 실패는 표시하고 false
  * @property {() => void} cancel
  * @property {() => boolean} isOpen
+ * @property {() => boolean} isCommitting 확정(`onCommit`)을 기다리는 중인가. 포커스 이탈 확정이 진행 중이면 그 값은 곧 저장된다
  * @property {() => EditCell | null} cell 지금 편집 중인 셀
  * @property {(message: string) => void} showError
  * @property {() => void} dispose
@@ -235,6 +236,7 @@ export function createInlineEditor() {
     },
 
     isOpen: () => current !== null,
+    isCommitting: () => committing,
     cell: () => current,
 
     showError(message) {

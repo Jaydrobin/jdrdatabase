@@ -559,3 +559,43 @@ test('빈 행의 장문 편집기가 열린 사이 그 자리에 행이 생기�
   await expect.poll(async () => (await rowsOf(page, ['본문']))[0]).toEqual([1, null]);
   await expect(rowCount(page)).toHaveText('행 3개');
 });
+
+test('빈 행 편집 중 정렬 버튼을 누르면 포커스 이탈 확정이 행을 만들고, "저장되지 않았다"고 알리지 않는다', async ({
+  page,
+}) => {
+  await createTableWith(page, '정렬', [
+    { name: '글', type: 'text' },
+    { name: '수', type: 'integer' },
+  ]);
+  // 토스트는 몇 초 뒤 사라지므로 나타난 문구를 모두 모아 둔다(사라질 때까지 기다리는 검사로는 잡지 못한다).
+  await page.evaluate(() => {
+    const w = /** @type {{ __toastLog?: string[] }} */ (/** @type {unknown} */ (window));
+    const log = /** @type {string[]} */ ([]);
+    w.__toastLog = log;
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const node of r.addedNodes) {
+          if (node instanceof HTMLElement && node.matches('.jdr-toast')) {
+            log.push(node.textContent ?? '');
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  await cell(page, 2, 0).click();
+  await page.keyboard.type('hello');
+  await headerCell(page, '글').locator('[data-hbtn="sort"]').click();
+  await expect(rowCount(page)).toHaveText('행 3개');
+  expect(await rowsOf(page, ['글'])).toEqual([
+    [1, null],
+    [2, null],
+    [3, 'hello'],
+  ]);
+  // 확정은 저장되었다. 빈 행의 입력을 버렸다는 안내가 나오면 사용자가 다시 입력해 행이 겹친다(리뷰 N4).
+  await expect(page.locator('.jdr-editor')).toBeHidden();
+  const toasts = await page.evaluate(
+    () =>
+      /** @type {{ __toastLog?: string[] }} */ (/** @type {unknown} */ (window)).__toastLog ?? [],
+  );
+  expect(toasts.filter((text) => text.includes('빈 행의 입력을 닫았습니다'))).toEqual([]);
+});
