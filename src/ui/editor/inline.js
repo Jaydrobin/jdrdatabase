@@ -6,11 +6,14 @@
  *   IME가 소비하므로 건드리지 않는다(CLAUDE.md 5.5).
  * - 확정값은 `values.validate`를 거치며, 실패하면 편집기를 닫지 않고 오류를 표시한다.
  * - 포커스가 밖으로 나가면(다른 곳 클릭) 확정을 시도하고, 실패하면 원래 값으로 되돌리고 알린다.
+ * - F1은 막지 않고 문서의 도움말 단축키로 보낸다. 도움말(모달)이 가져간 포커스는 확정하지 않으므로 도움말을
+ *   닫으면 편집이 이어진다(D-19).
  * - 편집기 요소는 그리드 스크롤 영역(캔버스) 안에 절대 위치로 놓여 스크롤을 따라간다.
  * - 이 파일은 커맨드를 만들지 않는다. 확정값을 `onCommit`으로 넘기고 결과(성공 여부)를 받는다.
  */
 import { validate } from '../../db/values.js';
 import { t } from '../../i18n/index.js';
+import { isDialogOpen } from '../dialogs/dialog.js';
 
 /** @typedef {import('../../db/tables.js').ColumnInfo} ColumnInfo */
 /** @typedef {import('../../db/values.js').StoredValue} StoredValue */
@@ -148,6 +151,8 @@ export function createInlineEditor() {
   /** @param {Event} raw */
   function onKeydown(raw) {
     const ev = /** @type {KeyboardEvent} */ (raw);
+    // F1(도움말)은 문서 단축키로 보낸다. 막으면 도움말이 열리지 않고 브라우저의 F1이 돈다(D-19).
+    if (ev.key === 'F1') return;
     // 그리드의 키 처리기(화살표 이동 등)가 편집 중의 키를 받지 않게 한다.
     ev.stopPropagation();
     if (ev.isComposing || ev.key === 'Process') return;
@@ -165,7 +170,9 @@ export function createInlineEditor() {
 
   function onBlur() {
     // 다른 곳 클릭: 확정을 시도하고, 실패하면 원래 값으로 되돌린다(Step 5 예외 처리).
-    if (!current || committing) return;
+    // 모달(편집 중의 F1 도움말)이 가져간 포커스는 다른 곳 클릭이 아니다. 편집을 그대로 두면 모달이
+    // 닫힐 때 포커스가 편집기로 돌아와 이어진다(D-19).
+    if (!current || committing || isDialogOpen()) return;
     void editor.commit('blur').then((ok) => {
       if (!ok && current) {
         const revert = options?.onRevert;

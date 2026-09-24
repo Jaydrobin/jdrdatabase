@@ -100,9 +100,14 @@ export function isTextInputTarget(target) {
 export function mountShortcuts(handlers, options = {}) {
   /** @param {KeyboardEvent} ev */
   const onKeydown = (ev) => {
-    if (options.guard && !options.guard()) return;
     const action = resolveShortcut(ev, 'document');
     if (!action) return;
+    if (options.guard && !options.guard()) {
+      // 모달이 떠 있으면 행동은 하지 않는다. 다만 F1은 그때도 브라우저의 것(Chrome의 도움말 탭)이
+      // 되지 않게 막는다. 앱의 도움말 키가 때에 따라 앱을 떠나게 하면 안 된다(D-19).
+      if (action === 'help') ev.preventDefault();
+      return;
+    }
     // 입력 요소 안의 Ctrl+Z는 그 요소의 되돌리기다. 저장은 어디서든 앱의 것이다.
     if ((action === 'undo' || action === 'redo') && isTextInputTarget(ev.target)) return;
     const handler = handlers[action];

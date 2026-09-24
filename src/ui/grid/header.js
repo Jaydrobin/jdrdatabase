@@ -14,6 +14,7 @@ import { setSortDirection } from '../../db/query.js';
 import { t } from '../../i18n/index.js';
 import { formatInteger } from '../../util/format.js';
 import { changeColumnTypeFlow, deleteColumnFlow } from '../dialogs/column.js';
+import { isDialogOpen } from '../dialogs/dialog.js';
 import { nameValidator } from '../dialogs/table.js';
 import * as menu from '../menu.js';
 
@@ -195,7 +196,8 @@ export function createHeader(deps) {
     }
   };
   const onInputBlur = () => {
-    if (moving || committing || !renaming) return;
+    // 모달(이름 입력 중의 F1 도움말)이 가져간 포커스는 확정하지 않는다. 닫히면 입력칸으로 돌아온다(D-19).
+    if (moving || committing || !renaming || isDialogOpen()) return;
     void commitRename('blur');
   };
   const onInputEvent = () => {

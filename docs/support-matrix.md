@@ -38,7 +38,7 @@ Firefox·Safari(WebKit) 열은 세션 H에서도 채우지 못했다. Playwright
 | FSA 핸들의 `createWritable().write()` 실패 → `E_FILE_WRITE`, 원본·dirty·저널 유지, 다음 저장이 모든 변경을 담음 | ✓ (세션 H, E2E `fault.spec.js`: 가짜 `showSaveFilePicker`·핸들 주입. 실제 FSA 핸들의 실패는 미확인) | 미확인 | 미확인 | 미확인 |
 | axe(WCAG 2.1 A·AA) critical·serious 0건: 빈 앱, 그리드, 대화상자 7종, 장문·인라인 편집기, 가져오기 결과 | ✓ (세션 H, E2E `a11y.spec.js`, `@axe-core/playwright` 4.13.0) | 해당 없음(정적 검사) | 해당 없음 | 해당 없음 |
 | 툴팁(D-19): 비활성(`disabled`) 버튼 위의 포인터 이벤트 | ✓ 이벤트가 온다(세션 P: Chromium 141은 꺼진 버튼에도 `pointerover`·`pointerenter`·`mouseover`를 대상 버튼으로 낸다. 그래서 꺼진 버튼에도 툴팁이 보인다. E2E `help.spec.js`의 "뷰 삭제"). 키보드로는 꺼진 버튼에 포커스가 가지 않으므로 툴팁을 볼 수 없다(도움말 "테이블·열·빈 행" 주제가 꺼진 까닭을 설명) | 미확인 | 미확인 | 미확인 |
-| 도움말 단축키 F1: 문서의 `keydown`으로 오고 `preventDefault()`로 앱이 가져감 | ✓ 도움말이 열린다(세션 P, E2E `help.spec.js`). 헤드리스라 브라우저 자체의 F1 동작(Chrome 도움말 탭)이 함께 일어나는지는 볼 수 없다 | 미확인 | 미확인 | 미확인 |
+| 도움말 단축키 F1: 문서의 `keydown`으로 오고 `preventDefault()`로 앱이 가져감 | ✓ 도움말이 열린다(세션 P, E2E `help.spec.js`). 모든 처리기가 돈 뒤의 `defaultPrevented`가 대화상자 없음·도움말이 떠 있음·설정이 떠 있음·인라인 셀 편집 중·머리글 이름 편집 중의 다섯 경우 모두 `true`다(세션 P 리뷰 수정, E2E "F1: 대화상자가 떠 있어도…"). 수정 전에는 모달이 떠 있거나 셀 편집 중이면 `false`였다. 헤드리스라 `preventDefault()`가 실제 Chrome의 도움말 탭을 막는지는 볼 수 없다(미확인) | 미확인 | 미확인 | 미확인 |
 | 시크릿(off-the-record) 프로필의 IndexedDB 수명(D-18) | ✓ (세션 P, Playwright `browser.newContext()`는 off-the-record 컨텍스트다): 같은 컨텍스트의 다른 탭에서는 IDB 값이 보이고, 컨텍스트를 닫은 뒤 새 컨텍스트에서는 스토어가 없다. 즉 시크릿 창을 모두 닫으면 저널·직전 저장본이 함께 사라진다. 실제 Chrome 시크릿 창에서 손으로 확인하지는 않았다 | 미확인 | 미확인 | 미확인 |
 | CDP `SystemInfo.getProcessInfo` + `/proc/<pid>/status`로 렌더러 RSS, `HeapProfiler.collectGarbage` + `Performance.getMetrics`로 JS 힙 측정 | ✓ (세션 H, `test/perf/app.perf.spec.js`·`memory.perf.spec.js`. Linux 전용) | 해당 없음(측정 도구) | 해당 없음 | 해당 없음 |
 

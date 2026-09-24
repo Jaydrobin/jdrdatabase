@@ -268,3 +268,98 @@ test('도움말: 버튼으로 열기 → 모든 주제(↑↓·Home·End) → �
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
+
+/**
+ * F1 keydown마다 모든 처리기가 돈 뒤의 `defaultPrevented`를 모은다. 편집기가 전파를 막아도 보이도록
+ * window 캡처에서 이벤트를 잡고 다음 태스크에서 읽는다.
+ * @param {import('@playwright/test').Page} page
+ */
+async function watchF1(page) {
+  await page.evaluate(() => {
+    const w = /** @type {{ __f1: boolean[] }} */ (/** @type {unknown} */ (window));
+    w.__f1 = [];
+    window.addEventListener(
+      'keydown',
+      (ev) => {
+        if (ev.key === 'F1') setTimeout(() => w.__f1.push(ev.defaultPrevented), 0);
+      },
+      true,
+    );
+  });
+  return async () => {
+    await page.waitForTimeout(50);
+    return page.evaluate(() => {
+      const w = /** @type {{ __f1: boolean[] }} */ (/** @type {unknown} */ (window));
+      const seen = w.__f1;
+      w.__f1 = [];
+      return seen;
+    });
+  };
+}
+
+test('F1: 대화상자가 떠 있어도 브라우저 기본 동작을 막고, 셀 편집 중에는 도움말을 연 뒤 편집을 잇는다', async ({
+  page,
+}) => {
+  await createTableWith(page, '표', [{ name: '이름', type: 'text' }]);
+  const takeF1 = await watchF1(page);
+  const dialog = page.locator('.jdr-dialog');
+  const title = dialog.locator('.jdr-dialog__title');
+
+  // 대화상자가 없으면 도움말을 연다.
+  await page.locator('.jdr-grid__scroller').focus();
+  await page.keyboard.press('F1');
+  await expect(title).toHaveText('도움말');
+  expect(await takeF1()).toEqual([true]);
+  // 도움말이 떠 있는 동안의 F1: 두 번째 도움말은 열지 않지만 브라우저의 도움말 탭도 열지 않는다.
+  await page.keyboard.press('F1');
+  await expect(dialog).toHaveCount(1);
+  expect(await takeF1()).toEqual([true]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  // 다른 대화상자(설정)가 떠 있으면 도움말을 열지 않고 기본 동작만 막는다.
+  await page.click('[data-action="settings"]');
+  await expect(title).toHaveText('설정');
+  await page.keyboard.press('F1');
+  await expect(title).toHaveText('설정');
+  await expect(dialog).toHaveCount(1);
+  expect(await takeF1()).toEqual([true]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+
+  // 셀 편집 중: 도움말이 열리고, 닫으면 편집기로 돌아와 입력하던 값이 그대로다. Enter로 확정된다.
+  const cell = page.locator('.jdr-grid__row[data-row="0"] .jdr-grid__cell[data-col="0"]');
+  await cell.click();
+  await page.mouse.move(700, 700);
+  await page.keyboard.type('abc');
+  const input = page.locator('.jdr-editor input');
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('abc');
+  await page.keyboard.press('F1');
+  await expect(title).toHaveText('도움말');
+  expect(await takeF1()).toEqual([true]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('abc');
+  await page.keyboard.type('d');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.jdr-editor')).toBeHidden();
+  await expect(cell).toHaveText('abcd');
+
+  // 머리글 이름 편집기에서도 같다(편집은 도움말을 닫으면 이어진다).
+  await page.click('[data-action="column-add"]');
+  const rename = page.locator('.jdr-grid__hrename');
+  await expect(rename).toBeFocused();
+  await rename.fill('새이름');
+  await page.keyboard.press('F1');
+  await expect(title).toHaveText('도움말');
+  expect(await takeF1()).toEqual([true]);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(rename).toBeFocused();
+  await expect(rename).toHaveValue('새이름');
+  await page.keyboard.press('Enter');
+  await expect(rename).toHaveCount(0);
+  await expect(page.locator('.jdr-grid__hname', { hasText: /^새이름$/ })).toHaveCount(1);
+});
