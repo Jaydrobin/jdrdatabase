@@ -21,6 +21,9 @@ import { formatBackupTime } from './settings.js';
 /** @typedef {import('../../util/errors.js').AppError} AppError */
 /** @typedef {import('../toast.js').Toasts} Toasts */
 
+/** 취소 버튼의 값. */
+const CANCEL = 'cancel';
+
 /** 정리할 수 없는 테이블(`blocked`)의 이유 문구(Step 13 예외 처리). */
 const BLOCKED_KEYS = /** @type {const} */ ({
   foreign_key: 'cleanup.blocked.foreign_key',
@@ -274,10 +277,10 @@ export async function openCleanupDialog(deps) {
       if (plan) renderPlan(plan);
     },
     buttons: [
-      { label: t('dialog.cancel'), value: 'cancel' },
+      { label: t('dialog.cancel'), value: CANCEL },
       { label: t('cleanup.run'), value: 'ok', primary: true, danger: true },
     ],
-    cancelValue: 'cancel',
+    cancelValue: CANCEL,
     validate: () => runCleanup(),
     beforeCancel: () => {
       if (!controller) return true;
@@ -288,6 +291,9 @@ export async function openCleanupDialog(deps) {
       return false;
     },
     wide: true,
+    // 첫 체크 상자에 포커스가 가면 Enter 한 번으로 되돌릴 수 없는 정리가 돈다. 설정의 확인 줄과 같이 취소에 둔다.
+    initialFocus: () =>
+      list.closest('.jdr-dialog')?.querySelector(`button[data-value="${CANCEL}"]`) ?? null,
   });
   const result = outcome.result;
   if (value !== 'ok' || !result) return null;

@@ -368,3 +368,14 @@ test('실패 뒤 계획을 다시 읽어도 사용자가 푼 체크는 그대로
   const after = (await state(page))?.tables.find((t) => t.id === first.tableId);
   expect(after?.columns.find((col) => col.id === first.c)?.deletedAt).not.toBeNull();
 });
+
+test('정리 대화상자는 취소 버튼에 포커스를 두고 열려, Enter 한 번으로 정리가 돌지 않는다', async ({
+  page,
+}) => {
+  const { tableId, b } = await tableWithDeleted(page, '포커스 표');
+  const dialog = await openCleanup(page);
+  await expect(dialog.getByRole('button', { name: '취소' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+  expect(await physicalColumns(page, tableId)).toContain(b);
+});
