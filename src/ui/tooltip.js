@@ -16,6 +16,8 @@
  * - 보일 때 대상에 `aria-describedby`를 달고, 숨길 때 뗀다. 숨긴 툴팁은 문구를 비운다.
  * - 대상이 DOM에서 사라지면(그리드 다시 마운트, 대화상자 닫힘) 다음 이벤트를 기다리지 않고 숨긴다.
  *   보이는 동안만 `MutationObserver`를 건다(가상 그리드는 스크롤마다 노드를 바꾼다).
+ * - 모달 대화상자(`aria-modal="true"`)가 열렸는데 대상이 그 밖에 있으면 숨긴다. 포인터를 버튼에 둔 채
+ *   단축키로 대화상자를 열면 포인터가 움직이지 않아 배경 버튼의 툴팁이 대화상자 위에 남기 때문이다.
  */
 import { hasMessage, t } from '../i18n/index.js';
 
@@ -153,9 +155,19 @@ function place(target, el, rect = target.getBoundingClientRect()) {
   };
 }
 
+/**
+ * 모달 대화상자가 떠 있고 요소가 그 밖에 있는가.
+ * @param {HTMLElement} el
+ * @returns {boolean}
+ */
+function outsideModal(el) {
+  const modal = mounted?.root.querySelector('[aria-modal="true"]') ?? null;
+  return modal !== null && !modal.contains(el);
+}
+
 /** @param {HTMLElement} target */
 function show(target) {
-  if (!mounted || !target.isConnected) {
+  if (!mounted || !target.isConnected || outsideModal(target)) {
     hide();
     return;
   }
@@ -301,7 +313,7 @@ function onScroll(ev) {
 }
 
 function onMutation() {
-  if (current && !current.isConnected) hide();
+  if (current && (!current.isConnected || outsideModal(current))) hide();
 }
 
 /**

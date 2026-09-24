@@ -434,3 +434,16 @@ test('툴팁: Tab 포커스가 일으킨 스크롤 뒤에도 키보드 툴팁이
   await expect(tooltip).toBeHidden();
   await expect(last).not.toHaveAttribute('aria-describedby', /./);
 });
+
+test('툴팁: 포인터를 둔 채 단축키로 모달을 열면 배경 버튼의 툴팁을 닫는다', async ({ page }) => {
+  const tooltip = page.locator(TOOLTIP);
+  const settings = page.locator('[data-action="settings"]');
+  await pointTo(page, settings);
+  await expect(tooltip).toBeVisible();
+  await page.keyboard.press('F1');
+  await expect(page.locator('.jdr-dialog__title')).toHaveText('도움말');
+  await expect(tooltip).toBeHidden();
+  await expect(settings).not.toHaveAttribute('aria-describedby', /./);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+});
