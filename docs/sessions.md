@@ -1893,7 +1893,7 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 
 ### v2 점검 (세션 N·O·P 산출물 코드 점검) — 2026-09-24
 
-커밋: `5d4150c` docs(design) D-16 → `adfb5fb`·`e9c3f8f`·`5a7eb38`·`17cd91e`·`731f69b` fix(Step 12) → `e0325fb` docs(design) Step 13 → `69b1fb6`·`bbf503e`·`92f6a34`·`79a6ba3`·`634d52b` fix(Step 13) → `7714bf3` docs(design) D-19 → `f22c253`·`d4a5cc2`·`db86d3d`·`16252a7`·`f77c0f2` fix(Step 14) → `4ab15ff` refactor(shortcuts) → `3d92b3d` fix(help) → `515bcbe` test(help) → 이 커밋 docs(session).
+커밋: `5d4150c` docs(design) D-16 → `adfb5fb`·`e9c3f8f`·`5a7eb38`·`17cd91e`·`731f69b` fix(Step 12) → `e0325fb` docs(design) Step 13 → `69b1fb6`·`bbf503e`·`92f6a34`·`79a6ba3`·`634d52b` fix(Step 13) → `7714bf3` docs(design) D-19 → `f22c253`·`d4a5cc2`·`db86d3d`·`16252a7`·`f77c0f2` fix(Step 14) → `4ab15ff` refactor(shortcuts) → `3d92b3d` fix(help) → `515bcbe` test(help) → `ef00e38` docs(session) → `414f526` docs(session) CI 결과 → `d3e7b8b` docs(design) → `1cc08f1` fix(help) → 이 커밋 docs(session).
 
 시작 상태: 로컬 작업 브랜치가 원격보다 뒤(`cd4cbe4`)여서 원격 `0265c56`(세션 P의 마지막 커밋)으로 fast-forward 했습니다. 원격 실행 환경이 정해 준 브랜치도 `claude/busy-mayer-hv2g8x`라 따로 묻지 않았습니다. `npm ci` 뒤 `npm run check`(406개), `build`, `verify`, `test:e2e`(86개)가 모두 초록이었고, `0265c56`의 `check-build-e2e`도 초록이었습니다(선행 조건). `main`은 이 브랜치의 분기점(`69b20b8`) 그대로라 충돌이 없습니다.
 
@@ -1926,6 +1926,11 @@ CI에서 실패한 인스턴스가 남긴 증거입니다.
 17. **툴팁 규칙 검사에 우회로가 있었습니다**(`515bcbe`). 19개 화면 상태(빈 앱, 테이블, 대화상자 15종, 열 메뉴, 장문 편집기)의 실제 DOM에서 `data-hint` 없는 `[data-action]`, `[title]`, 툴팁 달린 텍스트 입력칸이 0건이고 모든 키가 두 언어 파일에 있는지 보는 E2E를 더했습니다. 정적 검사는 떨어진 대입, `setAttribute('data-action')`, 리터럴이 아닌 인자, `Object.assign` 등의 `title` 쓰기를 잡습니다. 이 항목은 현재 코드에 위반이 없어, 결함을 일부러 넣어 두 검사가 실패함을 확인했습니다.
 
 (점검 보고의 18번째 항목은 위 10번에 합친 "정리 중 다른 대화상자가 정리 대화상자를 밀어냄"입니다.)
+
+**도움말 보완(점검 뒤 사용자 요청, `d3e7b8b`·`1cc08f1`)**
+
+- 도움말 "열 숨기기·삭제·정리" 주제(`help.columns.body`)가 정리할 수 없는 테이블을 설명하지 않았습니다. 정리 대화상자는 6번의 이유 문구를 보이지만 정리를 열어 보기 전에는 알 수 없었습니다. 다른 SQLite 도구로 외래 키·인덱스·트리거·뷰나 열 제약을 더한 테이블은 그 구조나 다른 테이블의 행이 바뀔 수 있어 정리할 수 없고 대화상자에 이유가 보인다는 문장을 두 언어로 넣었고, DESIGN.md Step 14의 `columns` 주제 범위에도 적었습니다.
+- 검증: `npm run check` 단위 423개, `npm run build` → `npm run verify` 통과(`dist/jdrdatabase.html` **3,962,383 bytes**, 위 3,961,903 bytes에서 +480 bytes), `npm run test:e2e` 102개 통과. 문장이 산출물에 들어간 것을 확인했습니다. 문구의 어조·정확성은 다른 도움말 문구와 같이 리뷰어 검토 대상입니다(아래 이월 목록의 "도움말 문구 내용 검토", **미확인**).
 
 **고치지 않고 남긴 것 (판단과 근거)**
 
