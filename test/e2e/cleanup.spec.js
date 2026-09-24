@@ -343,3 +343,28 @@ test('정리할 수 없는 테이블(다른 도구의 뷰): 체크 상자가 꺼
   const after = (await state(page))?.tables.find((t) => t.id === tableId);
   expect(after?.columns.find((col) => col.id === b)?.deletedAt).not.toBeNull();
 });
+
+test('실패 뒤 계획을 다시 읽어도 사용자가 푼 체크는 그대로다(되돌릴 수 없는 정리에 다시 끼지 않는다)', async ({
+  page,
+}) => {
+  const first = await tableWithDeleted(page, '첫 표');
+  const second = await tableWithDeleted(page, '둘째 표');
+  const dialog = await openCleanup(page);
+  await dialog.locator(`input[data-column="${first.c}"]`).uncheck();
+  // 대화상자를 연 뒤 다른 도구가 둘째 표에 뷰를 만든다 → 실행이 쓰기 전에 거부되고 계획을 다시 읽는다.
+  await query(page, `CREATE VIEW late_v AS SELECT "${second.a}" FROM "${second.tableId}"`);
+  await dialog.getByRole('button', { name: '정리', exact: true }).click();
+  await expect(dialog.locator('.jdr-dialog__error')).toContainText('정리 전 상태 그대로');
+  await expect(dialog.locator('[data-role="cleanup-blocked"]')).toContainText('뷰(late_v)');
+  await expect(dialog.locator(`input[data-column="${first.b}"]`)).toBeChecked();
+  await expect(dialog.locator(`input[data-column="${first.c}"]`)).not.toBeChecked();
+  expect(await physicalColumns(page, first.tableId)).toContain(first.b);
+
+  await dialog.getByRole('button', { name: '정리', exact: true }).click();
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+  const names = await physicalColumns(page, first.tableId);
+  expect(names).not.toContain(first.b);
+  expect(names).toContain(first.c);
+  const after = (await state(page))?.tables.find((t) => t.id === first.tableId);
+  expect(after?.columns.find((col) => col.id === first.c)?.deletedAt).not.toBeNull();
+});

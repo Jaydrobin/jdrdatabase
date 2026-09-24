@@ -107,8 +107,28 @@ export async function openCleanupDialog(deps) {
   /** @type {Array<{ box: HTMLInputElement, tableId: string, columnId: string }>} */
   let checks = [];
 
-  /** @param {CleanupPlan} next */
-  function renderPlan(next) {
+  /**
+   * @param {string} tableId
+   * @param {string} columnId
+   */
+  const checkKey = (tableId, columnId) => `${tableId}\u0000${columnId}`;
+
+  /**
+   * 지금 체크를 푼 열. 목록을 다시 그릴 때 넘겨, 복원하려고 남겨 둔 열이 다시 체크되지 않게 한다(다시 체크되면
+   * 다음 실행에서 되돌릴 수 없이 지워진다).
+   * @returns {Set<string>}
+   */
+  function uncheckedNow() {
+    return new Set(
+      checks.filter((c) => !c.box.checked).map((c) => checkKey(c.tableId, c.columnId)),
+    );
+  }
+
+  /**
+   * @param {CleanupPlan} next
+   * @param {Set<string>} [unchecked] 체크를 푼 채로 둘 열(`checkKey`)
+   */
+  function renderPlan(next, unchecked = new Set()) {
     plan = next;
     list.replaceChildren();
     checks = [];
@@ -138,7 +158,7 @@ export async function openCleanupDialog(deps) {
         label.className = 'jdr-import__check';
         const box = document.createElement('input');
         box.type = 'checkbox';
-        box.checked = !blocked;
+        box.checked = !blocked && !unchecked.has(checkKey(table.tableId, column.id));
         box.disabled = blocked !== null;
         box.dataset.column = column.id;
         const text = document.createElement('span');
@@ -219,8 +239,9 @@ export async function openCleanupDialog(deps) {
         appErr.detail !== null
       ) {
         // 요청한 열이 그사이 복원되었거나 없어졌다(저널 재생, 다른 경로의 복원). 계획을 다시 읽어 보인다.
+        const unchecked = uncheckedNow();
         const next = await store.planCleanup();
-        if (next) renderPlan(next);
+        if (next) renderPlan(next, unchecked);
       }
       return cleanupErrorText(appErr);
     } finally {
