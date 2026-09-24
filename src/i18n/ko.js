@@ -467,10 +467,14 @@ export const ko = Object.freeze({
     '삭제한 열이 그사이 복원되었거나 없어졌습니다. 목록을 다시 읽었습니다. 정리 전 상태 그대로입니다.',
   'cleanup.done':
     '삭제한 열 {count}개를 지웠습니다({before} → {after}). 저장해야 파일이 작아집니다.',
+  'cleanup.doneNative':
+    '삭제한 열 {count}개를 지웠습니다. 저장하면 파일에서도 사라지고 빈 공간도 없어집니다.',
   'cleanup.doneCompacted':
     '파일의 빈 공간을 줄였습니다({before} → {after}). 저장해야 파일이 작아집니다.',
   'cleanup.vacuumFailed':
     '삭제한 열은 지웠지만 빈 공간은 줄이지 못했습니다: {message}. 저장은 할 수 있습니다.',
+  'cleanup.vacuumOnlyFailed':
+    '빈 공간을 줄이지 못했습니다: {message}. 데이터베이스는 그대로이며 저장할 수 있습니다.',
   'export.title': '"{table}" 내보내기',
   'export.formatLabel': '형식',
   'export.format.csv': 'CSV',

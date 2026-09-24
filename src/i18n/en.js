@@ -470,10 +470,14 @@ export const en = Object.freeze({
     'Some deleted columns were restored or removed in the meantime. The list was reloaded. Nothing was changed.',
   'cleanup.done':
     'Removed {count} deleted columns ({before} → {after}). The file gets smaller when you save.',
+  'cleanup.doneNative':
+    'Removed {count} deleted columns. They leave the file, and its free space is reclaimed, when you save.',
   'cleanup.doneCompacted':
     'Reclaimed free space in the file ({before} → {after}). The file gets smaller when you save.',
   'cleanup.vacuumFailed':
     'Removed the deleted columns but could not reclaim free space: {message}. You can still save.',
+  'cleanup.vacuumOnlyFailed':
+    'Could not reclaim free space: {message}. The database is unchanged and you can still save.',
   'export.title': 'Export "{table}"',
   'export.formatLabel': 'Format',
   'export.format.csv': 'CSV',

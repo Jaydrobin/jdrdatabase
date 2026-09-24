@@ -379,3 +379,27 @@ test('정리 대화상자는 취소 버튼에 포커스를 두고 열려, Enter 
   await expect(page.locator('.jdr-dialog')).toHaveCount(0);
   expect(await physicalColumns(page, tableId)).toContain(b);
 });
+
+test('실행 중 다른 대화상자가 정리 대화상자를 밀어내도 완료 알림이 뜬다', async ({ page }) => {
+  const { tableId, b, c } = await tableWithDeleted(page, '밀림 표');
+  await openCleanup(page);
+  // 실행 버튼을 누른 같은 태스크에서 다른 대화상자를 연다. 정리는 Worker 왕복 중이므로 끝나기 전에 밀려난다.
+  await page.evaluate(() => {
+    const run = /** @type {HTMLButtonElement} */ (
+      document.querySelector('.jdr-dialog .jdr-dialog__button--primary')
+    );
+    run.click();
+    const hook =
+      /** @type {{ __jdrTest: { openDialog: (t: string, c: string) => Promise<string> } }} */ (
+        /** @type {unknown} */ (window)
+      ).__jdrTest;
+    void hook.openDialog('다른 대화상자', 'other-cancel');
+  });
+  await expect(page.locator('.jdr-dialog .jdr-dialog__title')).toHaveText('다른 대화상자');
+  await expect(page.locator('.jdr-toast--info').last()).toContainText('삭제한 열 2개를 지웠습니다');
+  const names = await physicalColumns(page, tableId);
+  expect(names).not.toContain(b);
+  expect(names).not.toContain(c);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+});

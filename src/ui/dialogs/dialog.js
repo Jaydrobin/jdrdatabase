@@ -30,6 +30,7 @@ import { t } from '../../i18n/index.js';
  * 본문 콜백이 받는 손잡이.
  * @typedef {object} DialogActions
  * @property {(value: string) => void} submit 그 값의 버튼을 누른 것과 같다(확인 버튼이면 `validate`를 거친다). 본문을 만드는 동안이 아니라 사용자 동작에서 부른다
+ * @property {(value: string, enabled: boolean) => void} setEnabled 그 값의 버튼을 켜거나 끈다. 꺼진 버튼은 Enter로도 제출되지 않고, 비동기 `validate`가 끝나도 꺼진 채다. 본문을 만드는 동안 불러도 된다
  */
 
 /** @type {HTMLElement | null} */
@@ -97,8 +98,22 @@ export function openDialog(options) {
         body.append(p);
       }
     }
+    // 버튼 행은 본문 뒤에 붙지만 먼저 만든다. 본문 콜백의 `setEnabled`가 버튼을 찾는다.
+    const row = document.createElement('div');
+    row.className = 'jdr-dialog__buttons';
+    /** @type {Set<string>} 본문이 끈 버튼의 값(`setEnabled`) */
+    const disabledValues = new Set();
+    /** 비동기 검사가 진행 중이다. 그동안 확인·Enter는 무시하고 취소만 `beforeCancel`로 넘긴다. */
+    let pending = false;
     // `submit`은 아래의 함수 선언이다. 본문의 컨트롤은 사용자 동작에서만 부르므로 그때는 버튼 행이 이미 있다.
-    options.body?.(body, { submit: (value) => submit(value) });
+    options.body?.(body, {
+      submit: (value) => submit(value),
+      setEnabled: (value, enabled) => {
+        if (enabled) disabledValues.delete(value);
+        else disabledValues.add(value);
+        applyEnabled();
+      },
+    });
     dialog.append(body);
 
     const error = document.createElement('p');
@@ -107,8 +122,6 @@ export function openDialog(options) {
     error.hidden = true;
     dialog.append(error);
 
-    const row = document.createElement('div');
-    row.className = 'jdr-dialog__buttons';
     /** @type {HTMLButtonElement | null} */
     let primaryButton = null;
     for (const spec of options.buttons) {
@@ -127,17 +140,21 @@ export function openDialog(options) {
     }
     dialog.append(row);
     backdrop.append(dialog);
+    applyEnabled();
 
-    /** 비동기 검사가 진행 중이다. 그동안 확인·Enter는 무시하고 취소만 `beforeCancel`로 넘긴다. */
-    let pending = false;
+    /** 버튼의 켜짐: 진행 중이면 취소 말고 모두 끄고, 본문이 끈 버튼은 언제나 끈다. 버튼 행이 생기기 전에는 할 일이 없다. */
+    function applyEnabled() {
+      for (const b of row.querySelectorAll('button')) {
+        const value = b.dataset.value ?? '';
+        // 취소 버튼은 열어 둔다(진행 중인 작업을 멈추는 손잡이다).
+        b.disabled = disabledValues.has(value) || (pending && value !== options.cancelValue);
+      }
+    }
 
     /** @param {boolean} on */
     function setBusy(on) {
       pending = on;
-      for (const b of row.querySelectorAll('button')) {
-        // 취소 버튼은 열어 둔다(진행 중인 작업을 멈추는 손잡이다).
-        if (b.dataset.value !== options.cancelValue) b.disabled = on;
-      }
+      applyEnabled();
     }
 
     /**
@@ -170,7 +187,7 @@ export function openDialog(options) {
         cancel();
         return;
       }
-      if (pending) return;
+      if (pending || disabledValues.has(value)) return;
       const isPrimary = options.buttons.find((b) => b.value === value)?.primary;
       if (isPrimary && options.validate) {
         const outcome = options.validate();

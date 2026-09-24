@@ -43,6 +43,56 @@ export function blockedText(blocked) {
 }
 
 /**
+ * 결과 알림 하나.
+ * @typedef {object} CleanupNotice
+ * @property {'info' | 'warn'} kind
+ * @property {import('../../i18n/index.js').MessageKey} key
+ * @property {Record<string, string>} params
+ */
+
+/**
+ * 정리 결과의 알림(Step 13). 지운 열이 있으면 완료 알림(저장이 빈 공간을 없애는 엔진은 크기 없이: 재작성은 작업
+ * 사본을 키우고 저장이 줄인다), 빈 공간만 줄였으면 그 알림, `VACUUM` 실패는 지운 열이 있었는지에 따라 문구가 다르다.
+ * @param {CleanupResult} result
+ * @param {boolean} compactsOnSave
+ * @returns {CleanupNotice[]}
+ */
+export function cleanupNotices(result, compactsOnSave) {
+  /** @type {CleanupNotice[]} */
+  const out = [];
+  const sizes = { before: formatBytes(result.bytesBefore), after: formatBytes(result.bytesAfter) };
+  const count = formatInteger(result.removedColumns);
+  if (result.removedColumns > 0) {
+    out.push(
+      compactsOnSave
+        ? { kind: 'info', key: 'cleanup.doneNative', params: { count } }
+        : { kind: 'info', key: 'cleanup.done', params: { count, ...sizes } },
+    );
+  } else if (result.vacuumed) {
+    out.push({ kind: 'info', key: 'cleanup.doneCompacted', params: sizes });
+  }
+  if (result.vacuumError) {
+    out.push({
+      kind: 'warn',
+      key: result.removedColumns > 0 ? 'cleanup.vacuumFailed' : 'cleanup.vacuumOnlyFailed',
+      params: { message: cleanupErrorMessage(result.vacuumError) },
+    });
+  }
+  return out;
+}
+
+/**
+ * 실행할 일이 있는가. 체크된 열이 없어도 저장이 빈 공간을 없애지 않는 엔진은 빈 공간 줄이기를 한다(D-17).
+ * 없으면 대화상자가 실행 버튼을 끈다.
+ * @param {{ compactsOnSave: boolean }} plan
+ * @param {number} checked 체크된 열 수
+ * @returns {boolean}
+ */
+export function hasWork(plan, checked) {
+  return checked > 0 || !plan.compactsOnSave;
+}
+
+/**
  * 오류 코드의 문구(뒤에 코드). 정리 문구의 `{message}` 자리에 들어간다.
  * @param {{ code: string, message: string }} err
  * @returns {string}
@@ -109,6 +159,18 @@ export async function openCleanupDialog(deps) {
   progressBox.append(progressBar, progressText);
   /** @type {Array<{ box: HTMLInputElement, tableId: string, columnId: string }>} */
   let checks = [];
+  /**
+   * 실행 버튼을 켜거나 끈다. 본문 콜백이 대화상자의 손잡이로 바꿔 둔다.
+   * @type {(enabled: boolean) => void}
+   */
+  let setRunEnabled = () => {};
+
+  /** 체크가 바뀌면 할 일이 남았는지 다시 본다(D-17: native에서 모두 풀면 실행 버튼이 꺼진다). */
+  function updateRunEnabled() {
+    if (!plan) return;
+    setRunEnabled(hasWork(plan, checks.filter((c) => c.box.checked).length));
+  }
+  list.addEventListener('change', updateRunEnabled);
 
   /**
    * @param {string} tableId
@@ -188,6 +250,7 @@ export async function openCleanupDialog(deps) {
     // 재작성과 VACUUM은 DB 크기만큼 메모리를 더 쓴다(R10). 실패해도 전체 롤백이라 실행은 허용한다.
     memory.hidden = !(next.dbBytes * 2 > caps.maxFileBytes);
     memory.textContent = t('cleanup.memoryWarn', { need: formatBytes(next.dbBytes * 2) });
+    updateRunEnabled();
   }
 
   /** @param {{ phase: string, done: number, total: number }} p */
@@ -222,8 +285,8 @@ export async function openCleanupDialog(deps) {
     const columns = checks
       .filter((c) => c.box.checked)
       .map((c) => ({ tableId: c.tableId, columnId: c.columnId }));
-    // 저장이 빈 공간을 없애는 엔진에서 고른 열이 없으면 할 일이 없다(D-17).
-    if (columns.length === 0 && plan?.compactsOnSave) return t('settings.cleanupNothing');
+    // 저장이 빈 공간을 없애는 엔진에서 고른 열이 없으면 할 일이 없다(D-17). 버튼이 꺼져 있어 오지 않는다.
+    if (plan && !hasWork(plan, columns.length)) return t('settings.cleanupNothing');
     controller = new AbortController();
     phase = '';
     for (const c of checks) c.box.disabled = true;
@@ -233,6 +296,14 @@ export async function openCleanupDialog(deps) {
         onProgress: (p) => showProgress(p),
       });
       outcome.result = result;
+      // 알림은 여기서 띄운다. 실행 중에 다른 대화상자가 이 대화상자를 밀어내면(취소로 끝남) 닫힌 뒤의 코드는
+      // 결과를 보지 못하지만, 정리는 끝까지 돌아 저널·히스토리에 반영된다.
+      if (result) {
+        for (const notice of cleanupNotices(result, caps.compactsOnSave)) {
+          if (notice.kind === 'warn') toasts.warn(notice.key, notice.params);
+          else toasts.info(notice.key, notice.params);
+        }
+      }
       return null;
     } catch (err) {
       const appErr = toAppError(err);
@@ -257,7 +328,8 @@ export async function openCleanupDialog(deps) {
 
   const value = await openDialog({
     title: t('cleanup.title'),
-    body: (body) => {
+    body: (body, actions) => {
+      setRunEnabled = (enabled) => actions.setEnabled('ok', enabled);
       const intro = document.createElement('p');
       intro.className = 'jdr-dialog__message';
       intro.textContent = t('cleanup.intro');
@@ -295,16 +367,8 @@ export async function openCleanupDialog(deps) {
     initialFocus: () =>
       list.closest('.jdr-dialog')?.querySelector(`button[data-value="${CANCEL}"]`) ?? null,
   });
+  list.removeEventListener('change', updateRunEnabled);
   const result = outcome.result;
   if (value !== 'ok' || !result) return null;
-  const sizes = { before: formatBytes(result.bytesBefore), after: formatBytes(result.bytesAfter) };
-  if (result.removedColumns > 0) {
-    toasts.info('cleanup.done', { count: formatInteger(result.removedColumns), ...sizes });
-  } else if (result.vacuumed) {
-    toasts.info('cleanup.doneCompacted', sizes);
-  }
-  if (result.vacuumError) {
-    toasts.warn('cleanup.vacuumFailed', { message: cleanupErrorMessage(result.vacuumError) });
-  }
   return result;
 }
