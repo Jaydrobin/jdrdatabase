@@ -528,3 +528,34 @@ test('"+ 열" 이름 편집기에 입력한 채 도구 모음의 되돌리기: �
   await expect(headerCell(page, 'memo')).toHaveCount(1);
   await expect(page.locator('[data-action="redo"]')).toBeDisabled();
 });
+
+test('빈 행의 장문 편집기가 열린 사이 그 자리에 행이 생기면, 확정은 그 행의 셀 편집으로 저장된다', async ({
+  page,
+}) => {
+  await createTableWith(page, '메모', [
+    { name: '제목', type: 'text' },
+    { name: '본문', type: 'longtext' },
+  ]);
+  await cell(page, 0, 1).dblclick();
+  const panel = page.locator('.jdr-longtext');
+  await expect(panel).toBeVisible();
+  await panel.locator('textarea').fill('긴 글 내용');
+  // 편집기를 연 채로 세 번째 빈 행에 입력해 첫 줄까지 행을 만든다.
+  await cell(page, 2, 0).click();
+  await page.keyboard.type('x');
+  await page.keyboard.press('Enter');
+  await expect(rowCount(page)).toHaveText('행 3개');
+  // 확정: 패널이 멈추지 않고 1행의 본문에 저장된다(리뷰 N3).
+  await panel.locator('[data-action="longtext-save"]').click();
+  await expect(panel).toBeHidden();
+  await expect(rowCount(page)).toHaveText('행 3개');
+  expect(await rowsOf(page, ['제목', '본문'])).toEqual([
+    [1, null, '긴 글 내용'],
+    [2, null, null],
+    [3, 'x', null],
+  ]);
+  // 되돌리기 한 번은 그 셀 편집만 되돌린다.
+  await page.click('[data-action="undo"]');
+  await expect.poll(async () => (await rowsOf(page, ['본문']))[0]).toEqual([1, null]);
+  await expect(rowCount(page)).toHaveText('행 3개');
+});

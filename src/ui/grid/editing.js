@@ -239,6 +239,7 @@ export function createEditingController(deps) {
    * 빈 행 `row`의 셀에 값을 확정한다(D-16): 그 줄까지 행을 만들고 마지막 행에 값을 넣는 커맨드 하나.
    * 행 수와 새 id는 확정 시점에 `query.stats`로 읽는다(빈 행이 켜진 뷰는 필터가 없어 테이블 행 수와 같다).
    * 실패하면 트랜잭션이 롤백되어 행이 하나도 생기지 않는다(오류 알림은 히스토리가 한다).
+   * 확정 시점에 그 자리에 이미 실제 행이 있으면(`row < count`) 그 행의 셀 편집으로 저장한다.
    * @param {TableInfo} table
    * @param {number} row
    * @param {ColumnInfo} column
@@ -250,10 +251,21 @@ export function createEditingController(deps) {
       const { count, maxId } = await client.call('query.stats', { tableId: table.id });
       const k = row - count + 1;
       if (k < 1) {
-        // 확정하는 사이 그 자리에 실제 행이 생겼다(다른 경로의 커맨드). 입력값은 버리고 다시 읽는다.
-        toasts.info('edit.reverted');
-        store.refreshData();
-        return false;
+        // 편집기를 열어 둔 사이 다른 입력(다른 빈 행의 확정 등)으로 그 자리까지 행이 생겼다(D-16). 빈 행이 켜진
+        // 뷰는 id 순서라 그 자리의 행은 확정 시점에 읽어 정한다. 입력값을 버리거나 편집기를 확정할 수 없는 채로
+        // 두지 않고 그 행의 셀 편집으로 저장한다.
+        const [existing] = await readRows(table.id, row, 1, [column.id]);
+        if (!existing) {
+          toasts.info('edit.rowGone');
+          store.refreshData();
+          return false;
+        }
+        return await applyCellEdit({
+          tableId: table.id,
+          rowId: existing.id,
+          column,
+          newValue: value,
+        });
       }
       const inserts = ghostRowInserts({
         firstId: (maxId ?? 0) + 1,
