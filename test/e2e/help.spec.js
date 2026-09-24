@@ -397,3 +397,40 @@ test('툴팁: 누른 뒤 다시 그려진 대상(머리글 정렬, 사이드바 
     await expect(tooltip).toBeVisible();
   }
 });
+
+test('툴팁: Tab 포커스가 일으킨 스크롤 뒤에도 키보드 툴팁이 대상 옆에 남고, 대상이 영역 밖으로 나가면 닫힌다', async ({
+  page,
+}) => {
+  const tooltip = page.locator(TOOLTIP);
+  // "+ 테이블"은 기본 열 30개를 만든다. 사이드바 열 목록이 넘쳐 아래쪽 버튼은 스크롤해야 보인다.
+  await page.click('[data-action="table-create"]');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.jdr-dialog')).toHaveCount(0);
+  await page.mouse.move(700, 700);
+  const sidebar = page.locator('.jdr-sidebar');
+  await expect(sidebar).toHaveJSProperty('scrollTop', 0);
+  const last = page.locator('.jdr-sidebar [data-action="column-visibility"]').last();
+  // 키보드로 포커스를 옮긴 상태에서(:focus-visible) 마지막 열의 버튼으로 간다. focus()는 대상을 화면 안으로 굴린다.
+  await page.locator('[data-action="table-create"]').focus();
+  await page.keyboard.press('Tab');
+  await last.focus();
+  expect(await sidebar.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await page.waitForTimeout(200);
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveText(/숨기거나 다시 보입니다/);
+  await expect(last).toHaveAttribute('aria-describedby', 'jdr-tooltip');
+  // 위치는 스크롤 뒤의 대상 바로 아래(또는 위)다.
+  const target = await last.boundingBox();
+  const tip = await tooltip.boundingBox();
+  if (!target || !tip) throw new Error('no box');
+  const below = Math.abs(tip.y - (target.y + target.height + 6)) <= 2;
+  const above = Math.abs(tip.y + tip.height - (target.y - 6)) <= 2;
+  expect(below || above).toBe(true);
+
+  // 사이드바를 맨 위로 굴려 대상이 보이는 영역 밖으로 나가면 닫는다.
+  await sidebar.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect(tooltip).toBeHidden();
+  await expect(last).not.toHaveAttribute('aria-describedby', /./);
+});

@@ -5,7 +5,9 @@
  * - 대상은 `data-hint` 속성(i18n 키)을 가진 요소다. HTML `title`은 쓰지 않는다(키보드·터치에서 보이지 않고
  *   WCAG 1.4.13을 만족하지 못한다).
  * - 마우스는 올린 뒤 500 ms, 키보드 포커스(`:focus-visible`)는 즉시 보인다. 터치에는 보이지 않는다.
- * - Esc·포커스 이탈·포인터 이탈·누름·스크롤로 닫는다. Esc는 전파를 막지 않는다(대화상자·편집기의 Esc도 돈다).
+ * - Esc·포커스 이탈·포인터 이탈·누름으로 닫는다. Esc는 전파를 막지 않는다(대화상자·편집기의 Esc도 돈다).
+ * - 스크롤: 마우스로 띄운 툴팁은 위치가 어긋나므로 닫는다. 키보드로 띄운 툴팁은 위치를 다시 잡고, 대상이 화면이나
+ *   스크롤된 영역 밖으로 나갔을 때만 닫는다. Tab 포커스가 대상을 화면 안으로 굴리는 스크롤이 띄우자마자 닫지 않게.
  * - 누르면 닫고, 포인터가 누른 자리(그때 대상의 사각형)를 떠날 때까지 다시 띄우지 않는다. 요소가 아니라 자리로
  *   기억한다: 누른 결과로 대상이 다시 그려지면(머리글 정렬, 사이드바 목록) 포인터 아래의 새 노드가 `pointerover`를
  *   다시 받기 때문이다.
@@ -128,9 +130,9 @@ function hide() {
  * 툴팁을 대상 아래(넘치면 위)에 놓는다. 측정은 대상 한 번, 툴팁 한 번이다.
  * @param {HTMLElement} target
  * @param {HTMLElement} el
+ * @param {DOMRect} [rect] 이미 잰 대상의 사각형
  */
-function place(target, el) {
-  const rect = target.getBoundingClientRect();
+function place(target, el, rect = target.getBoundingClientRect()) {
   el.style.transform = 'translate(0px, 0px)';
   const width = el.offsetWidth;
   const height = el.offsetHeight;
@@ -259,8 +261,43 @@ function onKeydown(ev) {
   hide();
 }
 
-function onScroll() {
-  hide();
+/**
+ * 대상이 보이는 영역 안에 있는가: 화면(뷰포트)과, 스크롤된 요소가 대상을 담으면 그 요소의 사각형.
+ * @param {DOMRect} rect 대상의 사각형
+ * @param {EventTarget | null} scroller 스크롤 이벤트의 대상
+ * @returns {boolean}
+ */
+function inView(rect, scroller) {
+  const viewW = document.documentElement.clientWidth;
+  const viewH = document.documentElement.clientHeight;
+  if (rect.bottom <= 0 || rect.top >= viewH || rect.right <= 0 || rect.left >= viewW) return false;
+  if (scroller instanceof Element && current && scroller.contains(current)) {
+    const box = scroller.getBoundingClientRect();
+    if (
+      rect.bottom <= box.top ||
+      rect.top >= box.bottom ||
+      rect.right <= box.left ||
+      rect.left >= box.right
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** @param {Event} ev */
+function onScroll(ev) {
+  if (!mounted || !current || !visible || byPointer) {
+    hide();
+    return;
+  }
+  // 키보드로 띄운 툴팁: 대상을 따라간다. 스크롤 이벤트는 프레임마다 한 번이므로 측정도 그만큼이다.
+  const rect = current.getBoundingClientRect();
+  if (!inView(rect, ev.target)) {
+    hide();
+    return;
+  }
+  place(current, mounted.el, rect);
 }
 
 function onMutation() {
